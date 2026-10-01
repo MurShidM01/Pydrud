@@ -1,0 +1,596 @@
+package {{ package }};
+
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.util.Log;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.*;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import org.json.JSONException;
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * ViewFactory — converts Pydrud JSON widget trees into native Android Views.
+ *
+ * Maintains a viewMap so incremental patches can update/remove views by key,
+ * and a parentMap to track each view's parent key for correct attachment
+ * during incremental create operations.
+ */
+public class ViewFactory {
+
+    private static final String TAG = "PydrudViewFactory";
+
+    private final {{ app_name }}Activity activity;
+    private final Map<String, View> viewMap = new HashMap<>();
+    private final Map<String, String> parentMap = new HashMap<>();
+    private EventDispatcher eventDispatcher;
+
+    public ViewFactory({{ app_name }}Activity activity) {
+        this.activity = activity;
+    }
+
+    public void setEventDispatcher(EventDispatcher d) { this.eventDispatcher = d; }
+
+    // ── Public API ────────────────────────────────────────────────────────
+
+    public void buildTree(JSONObject tree, ViewGroup root) {
+        viewMap.clear();
+        parentMap.clear();
+        View v = createView(tree);
+        if (v != null) {
+            root.addView(v);
+            viewMap.put("_root", root);
+        }
+    }
+
+    public void applyPatch(JSONObject patch) throws JSONException {
+        String op = patch.getString("op");
+        String key = patch.getString("key");
+        String parentKey = patch.optString("parent_key", "");
+        switch (op) {
+            case "create": {
+                JSONObject t = patch.getJSONObject("tree");
+                View v = createView(t);
+                if (v != null) {
+                    viewMap.put(key, v);
+                    parentMap.put(key, parentKey);
+                    if (!parentKey.isEmpty()) {
+                        View parent = viewMap.get(parentKey);
+                        if (parent != null && parent instanceof ViewGroup) {
+                            ((ViewGroup) parent).addView(v);
+                        }
+                    }
+                }
+                break;
+            }
+            case "update": {
+                View v = viewMap.get(key);
+                if (v != null) {
+                    if (patch.has("props")) updateProps(v, patch.getJSONObject("props"));
+                    if (patch.has("style")) applyStyle(v, patch.getJSONObject("style"));
+                }
+                break;
+            }
+            case "delete": {
+                View v = viewMap.remove(key);
+                parentMap.remove(key);
+                if (v != null && v.getParent() instanceof ViewGroup) {
+                    ((ViewGroup) v.getParent()).removeView(v);
+                }
+                break;
+            }
+            case "replace": {
+                View old = viewMap.remove(key);
+                parentMap.remove(key);
+                if (old != null && old.getParent() instanceof ViewGroup) {
+                    ViewGroup p = (ViewGroup) old.getParent();
+                    int idx = p.indexOfChild(old);
+                    p.removeView(old);
+                    View n = createView(patch.getJSONObject("tree"));
+                    if (n != null) {
+                        viewMap.put(key, n);
+                        parentMap.put(key, parentKey);
+                        p.addView(n, idx);
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    // ── View creation ────────────────────────────────────────────────────
+
+    private View createView(JSONObject json) {
+        try {
+            String type = json.getString("type");
+            String key = json.optString("key", "");
+            View view;
+            switch (type) {
+                case "Container":
+                case "Center":
+                    view = createFrameLayout(json); break;
+                case "Column":
+                    view = createColumn(json); break;
+                case "Row":
+                    view = createRow(json); break;
+                case "Spacer": {
+                    view = new Space(activity);
+                    view.setLayoutParams(new LinearLayout.LayoutParams(0, 0, 1f));
+                    break;
+                }
+                case "Text":
+                    view = createTextView(json); break;
+                case "Button":
+                    view = createButton(json); break;
+                case "TextField":
+                    view = createTextField(json); break;
+                case "Image":
+                    view = createImageView(json); break;
+                case "Icon":
+                    view = createIconView(json); break;
+                case "Checkbox":
+                    view = createCheckbox(json); break;
+                case "Switch":
+                    view = createSwitchView(json); break;
+                case "Divider":
+                    view = createDivider(json); break;
+                default:
+                    Log.w(TAG, "Unknown type: " + type);
+                    return null;
+            }
+            if (view != null) {
+                if (!key.isEmpty()) { viewMap.put(key, view); view.setTag(key); }
+                if (json.has("style")) applyStyle(view, json.getJSONObject("style"));
+                if (json.has("expand") && !json.isNull("expand")) {
+                    int ex = json.getInt("expand");
+                    ViewGroup.LayoutParams lp = view.getLayoutParams();
+                    if (lp instanceof LinearLayout.LayoutParams) {
+                        ((LinearLayout.LayoutParams) lp).weight = ex;
+                    }
+                }
+            }
+            return view;
+        } catch (JSONException e) {
+            Log.e(TAG, "createView error", e);
+            return null;
+        }
+    }
+
+    private FrameLayout createFrameLayout(JSONObject json) throws JSONException {
+        FrameLayout fl = new FrameLayout(activity);
+        String type = json.optString("type", "");
+        boolean isCenter = "Center".equals(type);
+        fl.setLayoutParams(new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            isCenter ? LinearLayout.LayoutParams.MATCH_PARENT : LinearLayout.LayoutParams.WRAP_CONTENT,
+            0f));
+
+        JSONObject s = json.optJSONObject("style");
+        int grav = (s != null && s.has("alignment"))
+            ? gravity(s.optString("alignment", "center")) : Gravity.NO_GRAVITY;
+
+        if (json.has("children")) {
+            JSONArray arr = json.getJSONArray("children");
+            for (int i = 0; i < arr.length(); i++) {
+                View c = createView(arr.getJSONObject(i));
+                if (c != null) {
+                    if (grav != Gravity.NO_GRAVITY) {
+                        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            grav);
+                        fl.addView(c, clp);
+                    } else {
+                        fl.addView(c);
+                    }
+                }
+            }
+        }
+        return fl;
+    }
+
+    private View createColumn(JSONObject json) throws JSONException {
+        LinearLayout ll = new LinearLayout(activity);
+        ll.setOrientation(LinearLayout.VERTICAL);
+        ll.setLayoutParams(new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT, 0f));
+
+        JSONObject s = json.optJSONObject("style");
+        boolean scroll = s != null && s.optBoolean("scroll", false);
+
+        int spacing = dp(s != null ? s.optInt("spacing", 0) : 0);
+        if (json.has("children")) {
+            JSONArray arr = json.getJSONArray("children");
+            for (int i = 0; i < arr.length(); i++) {
+                View c = createView(arr.getJSONObject(i));
+                if (c != null) {
+                    ll.addView(c);
+                    if (spacing > 0 && i < arr.length() - 1) {
+                        ll.addView(new Space(activity), new LinearLayout.LayoutParams(0, dp(spacing)));
+                    }
+                }
+            }
+        }
+
+        if (scroll) {
+            android.widget.ScrollView sv = new android.widget.ScrollView(activity);
+            sv.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0f));
+            sv.addView(ll);
+            return sv;
+        }
+        return ll;
+    }
+
+    private LinearLayout createRow(JSONObject json) throws JSONException {
+        LinearLayout ll = new LinearLayout(activity);
+        ll.setOrientation(LinearLayout.HORIZONTAL);
+        ll.setLayoutParams(new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT, 0f));
+        int spacing = dp(json.optJSONObject("style") != null ? json.getJSONObject("style").optInt("spacing", 0) : 0);
+        if (json.has("children")) {
+            JSONArray arr = json.getJSONArray("children");
+            for (int i = 0; i < arr.length(); i++) {
+                View c = createView(arr.getJSONObject(i));
+                if (c != null) {
+                    ll.addView(c);
+                    if (spacing > 0 && i < arr.length() - 1) {
+                        ll.addView(new Space(activity), new LinearLayout.LayoutParams(dp(spacing), 0));
+                    }
+                }
+            }
+        }
+        return ll;
+    }
+
+    private TextView createTextView(JSONObject json) throws JSONException {
+        TextView tv = new TextView(activity);
+        JSONObject p = json.optJSONObject("props");
+        if (p != null) tv.setText(p.optString("value", ""));
+        tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16);
+        tv.setTextColor(Color.parseColor("#FF1F2937"));
+        return tv;
+    }
+
+    private Button createButton(JSONObject json) throws JSONException {
+        String text = "";
+        JSONObject p = json.optJSONObject("props");
+        if (p != null) text = p.optString("text", "");
+        Button btn = new Button(activity, null, android.R.attr.borderlessButtonStyle);
+        btn.setText(text);
+        btn.setAllCaps(false);
+        btn.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15);
+        btn.setTextColor(Color.parseColor("#FFFFFFFF"));
+        JSONObject s = json.optJSONObject("style");
+        if (s != null && s.has("bg")) {
+            try { btn.setBackgroundColor(Color.parseColor(s.getString("bg"))); } catch (Exception ignored) {}
+        }
+        btn.setPadding(dp(16), dp(10), dp(16), dp(10));
+        final String key = json.optString("key", "");
+        if (json.optBoolean("has_events", false)) {
+            if (eventDispatcher != null) eventDispatcher.subscribe(key, "click");
+            btn.setOnClickListener(v -> {
+                if (eventDispatcher != null) eventDispatcher.dispatch("click", key);
+            });
+        }
+        return btn;
+    }
+
+    private EditText createTextField(JSONObject json) throws JSONException {
+        EditText et = new EditText(activity);
+        JSONObject p = json.optJSONObject("props");
+        if (p != null) {
+            et.setText(p.optString("value", ""));
+            et.setHint(p.optString("hint", ""));
+        }
+        final String key = json.optString("key", "");
+        if (json.optBoolean("has_events", false)) {
+            if (eventDispatcher != null) eventDispatcher.subscribe(key, "change", "submit");
+            et.addTextChangedListener(new android.text.TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+                @Override public void afterTextChanged(android.text.Editable s) {
+                    if (eventDispatcher != null) {
+                        try {
+                            JSONObject d = new JSONObject();
+                            d.put("value", s.toString());
+                            eventDispatcher.dispatch("change", key, d);
+                        } catch (JSONException ignored) {}
+                    }
+                }
+            });
+            et.setOnEditorActionListener((v, actionId, event) -> {
+                if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE) {
+                    if (eventDispatcher != null) {
+                        try {
+                            JSONObject d = new JSONObject();
+                            d.put("value", et.getText().toString());
+                            eventDispatcher.dispatch("submit", key, d);
+                        } catch (JSONException ignored) {}
+                    }
+                    return true;
+                }
+                return false;
+            });
+        }
+        return et;
+    }
+
+    private ImageView createImageView(JSONObject json) throws JSONException {
+        ImageView iv = new ImageView(activity);
+        String src = "";
+        JSONObject ip = json.optJSONObject("props");
+        if (ip != null) src = ip.optString("src", "");
+        final String imageSrc = src;
+        if (imageSrc.startsWith("http")) {
+            new Thread(() -> {
+                try {
+                    java.net.URL url = new java.net.URL(imageSrc);
+                    java.net.HttpURLConnection c = (java.net.HttpURLConnection) url.openConnection();
+                    c.setDoInput(true); c.connect();
+                    java.io.InputStream is = c.getInputStream();
+                    android.graphics.Bitmap bm = android.graphics.BitmapFactory.decodeStream(is);
+                    activity.runOnUiThread(() -> iv.setImageBitmap(bm));
+                } catch (Exception e) { Log.e(TAG, "Image error", e); }
+            }).start();
+        } else {
+            try {
+                java.io.InputStream is = activity.getAssets().open(imageSrc);
+                iv.setImageBitmap(android.graphics.BitmapFactory.decodeStream(is));
+            } catch (Exception e) { Log.d(TAG, "Asset not found: " + imageSrc); }
+        }
+        return iv;
+    }
+
+    private ImageView createIconView(JSONObject json) throws JSONException {
+        String name = "star";
+        JSONObject p = json.optJSONObject("props");
+        if (p != null) name = p.optString("name", "star");
+        ImageView iv = new ImageView(activity);
+        int res = getIconRes(name);
+        if (res != 0) iv.setImageResource(res);
+        int size = dp(24);
+        iv.setLayoutParams(new ViewGroup.LayoutParams(size, size));
+        return iv;
+    }
+
+    private android.widget.CheckBox createCheckbox(JSONObject json) throws JSONException {
+        android.widget.CheckBox cb = new android.widget.CheckBox(activity);
+        JSONObject p = json.optJSONObject("props");
+        if (p != null) {
+            cb.setText(p.optString("label", ""));
+            cb.setChecked(p.optBoolean("checked", false));
+        }
+        final String key = json.optString("key", "");
+        if (json.optBoolean("has_events", false)) {
+            if (eventDispatcher != null) eventDispatcher.subscribe(key, "change");
+            cb.setOnCheckedChangeListener((btn, isChecked) -> {
+                if (eventDispatcher != null) {
+                    try {
+                        JSONObject d = new JSONObject();
+                        d.put("value", isChecked);
+                        eventDispatcher.dispatch("change", key, d);
+                    } catch (JSONException ignored) {}
+                }
+            });
+        }
+        return cb;
+    }
+
+    private Switch createSwitchView(JSONObject json) throws JSONException {
+        Switch sw = new Switch(activity);
+        JSONObject p = json.optJSONObject("props");
+        if (p != null) {
+            sw.setText(p.optString("label", ""));
+            sw.setChecked(p.optBoolean("active", false));
+        }
+        final String key = json.optString("key", "");
+        if (json.optBoolean("has_events", false)) {
+            if (eventDispatcher != null) eventDispatcher.subscribe(key, "change");
+            sw.setOnCheckedChangeListener((btn, isChecked) -> {
+                if (eventDispatcher != null) {
+                    try {
+                        JSONObject d = new JSONObject();
+                        d.put("value", isChecked);
+                        eventDispatcher.dispatch("change", key, d);
+                    } catch (JSONException ignored) {}
+                }
+            });
+        }
+        return sw;
+    }
+
+    private View createDivider(JSONObject json) throws JSONException {
+        View v = new View(activity);
+        int color = Color.parseColor("#FFCCCCCC");
+        JSONObject s = json.optJSONObject("style");
+        if (s != null && s.has("color")) color = Color.parseColor(s.optString("color", "#FFCCCCCC"));
+        int thickness = dp(s != null ? s.optInt("thickness", 1) : 1);
+        v.setBackgroundColor(color);
+        v.setLayoutParams(new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, thickness));
+        return v;
+    }
+
+    // ── Style ───────────────────────────────────────────────────────────────
+
+    private void applyStyle(View view, JSONObject s) {
+        try {
+            // Background
+            if (s.has("bg")) {
+                try { view.setBackgroundColor(Color.parseColor(s.getString("bg"))); }
+                catch (Exception ignored) {}
+            }
+            // Border radius
+            if (s.has("borderRadius") && (view instanceof FrameLayout || view instanceof LinearLayout)) {
+                int r = dp(s.getInt("borderRadius"));
+                GradientDrawable gd = new GradientDrawable();
+                gd.setCornerRadius(r);
+                if (s.has("bg")) {
+                    try { gd.setColor(Color.parseColor(s.getString("bg"))); } catch (Exception ignored) {}
+                }
+                view.setBackground(gd);
+            }
+            // Padding
+            if (s.has("padding")) {
+                JSONObject p = s.getJSONObject("padding");
+                if (p.has("all")) { int a = dp(p.getInt("all")); view.setPadding(a, a, a, a); }
+                else if (p.has("horizontal") && p.has("vertical")) {
+                    int h = dp(p.getInt("horizontal")), v = dp(p.getInt("vertical"));
+                    view.setPadding(h, v, h, v);
+                } else {
+                    view.setPadding(dp(p.optInt("left",0)), dp(p.optInt("top",0)),
+                                    dp(p.optInt("right",0)), dp(p.optInt("bottom",0)));
+                }
+            }
+            // Margin
+            if (s.has("margin")) {
+                JSONObject m = s.getJSONObject("margin");
+                ViewGroup.MarginLayoutParams mlp = marginParams(view);
+                if (mlp != null) {
+                    if (m.has("all")) { int a = dp(m.getInt("all")); mlp.setMargins(a, a, a, a); }
+                    else { mlp.setMargins(dp(m.optInt("left",0)), dp(m.optInt("top",0)),
+                                          dp(m.optInt("right",0)), dp(m.optInt("bottom",0))); }
+                }
+            }
+            // Width / height
+            boolean hasW = s.has("width"), hasH = s.has("height");
+            if (hasW || hasH) {
+                ViewGroup.LayoutParams lp = view.getLayoutParams();
+                if (lp == null) lp = new ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                if (hasW) {
+                    String w = s.optString("width", "wrap");
+                    lp.width = "match".equals(w) ? ViewGroup.LayoutParams.MATCH_PARENT : dp(s.getInt("width"));
+                }
+                if (hasH) {
+                    String h = s.optString("height", "wrap");
+                    lp.height = "match".equals(h) ? ViewGroup.LayoutParams.MATCH_PARENT : dp(s.getInt("height"));
+                }
+                view.setLayoutParams(lp);
+            }
+            // Alignment (gravity)
+            if (s.has("alignment")) {
+                int g = gravity(s.getString("alignment"));
+                if (view instanceof TextView) ((TextView) view).setGravity(g);
+                else if (view instanceof LinearLayout) ((LinearLayout) view).setGravity(g);
+                else if (view instanceof FrameLayout) {
+                    FrameLayout fl = (FrameLayout) view;
+                    for (int i = 0; i < fl.getChildCount(); i++) {
+                        View child = fl.getChildAt(i);
+                        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) child.getLayoutParams();
+                        lp.gravity = g;
+                        child.setLayoutParams(lp);
+                    }
+                }
+            }
+            // Font
+            if (s.has("font") && view instanceof TextView) {
+                JSONObject f = s.getJSONObject("font");
+                TextView tv = (TextView) view;
+                if (f.has("size")) tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, (float)f.optDouble("size",14));
+                if (f.has("color")) { try { tv.setTextColor(Color.parseColor(f.getString("color"))); } catch (Exception ignored) {} }
+                if (f.has("weight")) {
+                    tv.setTypeface(tv.getTypeface(), f.optInt("weight",400) >= 700 ? Typeface.BOLD : Typeface.NORMAL);
+                }
+                if (f.optBoolean("italic", false)) tv.setTypeface(tv.getTypeface(), Typeface.ITALIC);
+            }
+            // Text alignment
+            if (s.has("textAlign") && view instanceof TextView) {
+                switch (s.optString("textAlign","left")) {
+                    case "left":   ((TextView)view).setTextAlignment(View.TEXT_ALIGNMENT_TEXT_START); break;
+                    case "center": ((TextView)view).setTextAlignment(View.TEXT_ALIGNMENT_CENTER); break;
+                    case "right":  ((TextView)view).setTextAlignment(View.TEXT_ALIGNMENT_TEXT_END); break;
+                }
+            }
+            // Opacity
+            if (s.has("opacity")) view.setAlpha((float)s.optDouble("opacity",1.0));
+            // Elevation
+            if (s.has("elevation")) view.setElevation(dp(s.getInt("elevation")));
+            // Visibility
+            if (s.has("visible") && !s.optBoolean("visible",true)) view.setVisibility(View.GONE);
+            // Tooltip (API 26+)
+            if (s.has("tooltip") && android.os.Build.VERSION.SDK_INT >= 26) {
+                view.setTooltipText(s.getString("tooltip"));
+            }
+        } catch (JSONException e) {
+            Log.w(TAG, "Style error", e);
+        }
+    }
+
+    // ── Props update ─────────────────────────────────────────────────────────
+
+    private void updateProps(View view, JSONObject p) {
+        if (view instanceof TextView) {
+            TextView tv = (TextView) view;
+            if (p.has("value")) tv.setText(p.optString("value", ""));
+            if (p.has("text"))  tv.setText(p.optString("text", ""));
+        }
+        if (view instanceof android.widget.CheckBox) {
+            android.widget.CheckBox cb = (android.widget.CheckBox) view;
+            if (p.has("checked")) cb.setChecked(p.optBoolean("checked", false));
+            if (p.has("label"))   cb.setText(p.optString("label", ""));
+        }
+        if (view instanceof Switch) {
+            Switch sw = (Switch) view;
+            if (p.has("active")) sw.setChecked(p.optBoolean("active", false));
+            if (p.has("label"))  sw.setText(p.optString("label", ""));
+        }
+        if (view instanceof EditText) {
+            if (p.has("value")) ((EditText) view).setText(p.optString("value", ""));
+        }
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    private int dp(int px) { return (int)(px * activity.getResources().getDisplayMetrics().density); }
+
+    private ViewGroup.MarginLayoutParams marginParams(View v) {
+        ViewGroup.LayoutParams lp = v.getLayoutParams();
+        return lp instanceof ViewGroup.MarginLayoutParams ? (ViewGroup.MarginLayoutParams) lp : null;
+    }
+
+    private int gravity(String align) {
+        switch (align) {
+            case "topLeft":      return Gravity.TOP | Gravity.START;
+            case "topCenter":    return Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+            case "topRight":     return Gravity.TOP | Gravity.END;
+            case "centerLeft":   return Gravity.CENTER_VERTICAL | Gravity.START;
+            case "center":       return Gravity.CENTER;
+            case "centerRight":  return Gravity.CENTER_VERTICAL | Gravity.END;
+            case "bottomLeft":   return Gravity.BOTTOM | Gravity.START;
+            case "bottomCenter": return Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+            case "bottomRight":  return Gravity.BOTTOM | Gravity.END;
+            default:             return Gravity.NO_GRAVITY;
+        }
+    }
+
+    private int getIconRes(String name) {
+        switch (name) { // API 24+ drawables
+            case "star":    return android.R.drawable.star_on;
+            case "home":    return android.R.drawable.ic_menu_myplaces;
+            case "search":  return android.R.drawable.ic_menu_search;
+            case "settings":return android.R.drawable.ic_menu_preferences;
+            case "info":    return android.R.drawable.ic_menu_info_details;
+            case "edit":    return android.R.drawable.ic_menu_edit;
+            case "delete":  return android.R.drawable.ic_menu_delete;
+            case "add":     return android.R.drawable.ic_menu_add;
+            case "share":   return android.R.drawable.ic_menu_share;
+            case "email":   return android.R.drawable.ic_menu_send;
+            case "call":    return android.R.drawable.ic_menu_call;
+            case "menu":    return android.R.drawable.ic_menu_more;
+            case "close":   return android.R.drawable.ic_menu_close_clear_cancel;
+            case "back":    return android.R.drawable.ic_menu_revert;
+            case "forward": return android.R.drawable.ic_menu_directions;
+            default:        return android.R.drawable.ic_menu_help;
+        }
+    }
+
+    public void clear() { viewMap.clear(); parentMap.clear(); }
+}

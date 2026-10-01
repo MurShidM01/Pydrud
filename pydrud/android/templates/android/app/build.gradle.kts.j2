@@ -1,0 +1,59 @@
+plugins {
+    id("com.android.application")
+    id("com.chaquo.python")
+}
+
+android {
+    namespace = "{{ package }}"
+    compileSdk = {{ compile_sdk }}
+    ndkVersion = System.getenv("PYDRUD_NDK_VERSION") ?: "28.2.13676358"
+
+    defaultConfig {
+        applicationId = "{{ package }}"
+        minSdk = {{ min_sdk }}
+        targetSdk = {{ target_sdk }}
+        versionCode = 1
+        versionName = "1.0.1"
+
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+}
+
+// Chaquopy — embed Python in the APK.
+chaquopy {
+    defaultConfig {
+        buildPython(System.getenv("PYDRUD_PYTHON") ?: "{{ python_executable }}")
+        version = "3.11"
+    }
+    sourceSets {
+        getByName("main") {
+            srcDir("../../src")
+        }
+    }
+}
+
+dependencies {
+    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("com.google.android.material:material:1.12.0")
+}
+
+// Redirect Android assets dir to the project-level assets folder.
+android.sourceSets["main"].assets.srcDirs("../../assets")

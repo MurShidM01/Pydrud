@@ -1,0 +1,93 @@
+package {{ package }};
+
+import android.os.Bundle;
+import android.util.Log;
+import android.widget.FrameLayout;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.view.WindowCompat;
+import com.chaquo.python.Python;
+import com.chaquo.python.PyObject;
+import com.chaquo.python.android.AndroidPlatform;
+
+public class {{ app_name }}Activity extends AppCompatActivity {
+
+    private static final String TAG = "PydrudActivity";
+
+    protected FrameLayout rootView;
+    protected ViewFactory viewFactory;
+    protected EventDispatcher eventDispatcher;
+    protected BridgeService bridge;
+    private volatile boolean pythonStarted = false;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+
+        rootView = new FrameLayout(this);
+        rootView.setLayoutParams(new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        ));
+        setContentView(rootView);
+
+        rootView.setOnApplyWindowInsetsListener((v, insets) -> {
+            int top = insets.getSystemWindowInsetTop();
+            v.setPadding(0, top, 0, 0);
+            return insets.consumeSystemWindowInsets();
+        });
+
+        eventDispatcher = new EventDispatcher();
+        viewFactory = new ViewFactory(this);
+        viewFactory.setEventDispatcher(eventDispatcher);
+
+        bridge = new BridgeService(this, rootView, viewFactory, eventDispatcher);
+        eventDispatcher.setBridge(bridge);
+
+        new Thread(() -> {
+            try {
+                if (!Python.isStarted()) {
+                    Python.start(new AndroidPlatform(this));
+                }
+                pythonStarted = true;
+                Log.i(TAG, "Python interpreter started");
+
+                bridge.start();
+
+                try { Thread.sleep(300); } catch (InterruptedException ignored) {}
+
+                Log.i(TAG, "Invoking Python app.main.start_app()");
+                PyObject module = Python.getInstance().getModule("app.main");
+                module.callAttr("start_app");
+
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to start Python app", e);
+            }
+        }).start();
+    }
+
+    @Override
+    public void onBackPressed() {
+        // Send back event to Python Router for navigation stack.
+        // If Python doesn't respond with finish_activity within 1.5s,
+        // fall back to default back behavior.
+        if (bridge != null) {
+            bridge.sendEvent("back", "");
+            rootView.postDelayed(() -> {
+                if (!isFinishing()) {
+                    {{ app_name }}Activity.super.onBackPressed();
+                }
+            }, 1500);
+        } else {
+            super.onBackPressed();
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (bridge != null) bridge.stop();
+        if (viewFactory != null) viewFactory.clear();
+    }
+}

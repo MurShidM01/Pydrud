@@ -1,0 +1,328 @@
+"""
+{{ project_name }} — Pydrud Android App
+========================================
+
+Edit the ``main()`` function below to build your own UI.
+
+Pydrud lets you write native Android UIs with Python.
+Widgets are declared in a tree and rendered as real Android Views.
+
+Quick reference:
+  Layout:  Container, Column, Row, Center, Spacer, Divider
+  Basic:   Text, Button, TextField, Image, Icon, Checkbox, Switch
+  Styling: EdgeInsets, Alignment, FontStyle
+  State:   State(value), ReactiveDict
+  Screen:  Responsive.text(16)  →  auto-scales to device width
+"""
+
+from pydrud import (
+    App,
+    # Layout
+    Container,
+    Column,
+    Row,
+    Center,
+    Spacer,
+    # Widgets
+    Text,
+    Button,
+    Image,
+    Icon,
+    TextField,
+    Checkbox,
+    Switch,
+    # Styling
+    EdgeInsets,
+    Alignment,
+    # State
+    State,
+    # Responsive scaling
+    Responsive,
+)
+
+# ── Colors ────────────────────────────────────────────────────────────────
+
+PRIMARY  = "#FF6366F1"  # Indigo accent
+BG_PAGE  = "#FFF9FAFB"  # Near-white page background
+CARD_BG  = "#FFFFFFFF"  # White card background
+TITLE    = "#FF1F2937"  # Near-black heading
+BODY     = "#FF6B7280"  # Gray body text
+CAPTION  = "#FF9CA3AF"  # Light gray caption
+
+
+# ── UI Definition ──────────────────────────────────────────────────────────
+
+def main(page):
+    """Build the widget tree. Runs on startup and on every page.update()."""
+    page.title = "{{ project_name }}"
+    page.bgcolor = BG_PAGE
+
+    page.add(
+
+        # Scrollable column — content adapts to any screen height.
+        Column(
+            scroll=True,
+            children=[
+
+                # ── Hero Section ──────────────────────────────────────
+                _spacer(Responsive.spacing(48)),
+
+                Center(
+                    child=Container(
+                        bg="#FFEEF2FF",
+                        width=Responsive.w(80),
+                        height=Responsive.h(80),
+                        border_radius=Responsive.radius(40),
+                        alignment=Alignment.center,
+                        child=Text("⚡", size=Responsive.text(32)),
+                    ),
+                ),
+
+                _spacer(Responsive.spacing(20)),
+
+                Center(
+                    child=Text(
+                        "Pydrud",
+                        size=Responsive.text(40),
+                        weight=800,
+                        color=TITLE,
+                    ),
+                ),
+
+                _spacer(Responsive.spacing(8)),
+
+                Center(
+                    child=Text(
+                        "Build native Android apps with Python",
+                        size=Responsive.text(16),
+                        color=BODY,
+                    ),
+                ),
+
+                _spacer(Responsive.spacing(16)),
+
+                Center(
+                    child=Container(
+                        bg="#FFEEF2FF",
+                        padding=EdgeInsets.symmetric(
+                            horizontal=Responsive.padding(16),
+                            vertical=Responsive.padding(6),
+                        ),
+                        border_radius=Responsive.radius(20),
+                        child=Text(
+                            "Edit src/app/main.py to start",
+                            size=Responsive.text(13),
+                            color=PRIMARY,
+                        ),
+                    ),
+                ),
+
+                _spacer(Responsive.spacing(40)),
+
+                # ── Quick-Start Cards ─────────────────────────────────
+                Center(
+                    child=Text(
+                        "Quick Start",
+                        size=Responsive.text(12),
+                        color=CAPTION,
+                        weight=600,
+                    ),
+                ),
+
+                _spacer(Responsive.spacing(12)),
+
+                _card(
+                    icon="⊞",
+                    bg_icon="#FFEEF2FF",
+                    color_icon=PRIMARY,
+                    title="Layout Widgets",
+                    desc="Container, Column, Row, Center, Spacer — "
+                         "compose your UI by nesting widgets.",
+                ),
+
+                _spacer(Responsive.spacing(12)),
+
+                _card(
+                    icon="✎",
+                    bg_icon="#FFF0FDF4",
+                    color_icon="#FF22C55E",
+                    title="Text & Input",
+                    desc="Text, Button, TextField, Image, Icon, "
+                         "Checkbox, Switch — native Android widgets.",
+                ),
+
+                _spacer(Responsive.spacing(12)),
+
+                _card(
+                    icon="⚙",
+                    bg_icon="#FFFFF7ED",
+                    color_icon="#FFF97316",
+                    title="State Management",
+                    desc="State<T>, ReactiveDict — reactive state "
+                         "that triggers UI updates on change.",
+                ),
+
+                _spacer(Responsive.spacing(40)),
+
+                # ── Feature List ───────────────────────────────────────
+                Center(
+                    child=Text(
+                        "Features",
+                        size=Responsive.text(12),
+                        color=CAPTION,
+                        weight=600,
+                    ),
+                ),
+
+                _spacer(Responsive.spacing(12)),
+
+                _feature_row(
+                    emoji="🎨",
+                    title="Declarative UI",
+                    desc="Compose UIs with plain Python — no XML, "
+                         "no Kotlin, no build step.",
+                ),
+
+                _feature_row(
+                    emoji="📱",
+                    title="Native Rendering",
+                    desc="Widget trees become real Android Views via "
+                         "the Chaquopy + TCP bridge.",
+                ),
+
+                _feature_row(
+                    emoji="📏",
+                    title="Responsive Scaling",
+                    desc="Use ``Responsive.text()`` and friends to "
+                         "auto-scale UI to any screen size.",
+                ),
+
+                _feature_row(
+                    emoji="⚡",
+                    title="Hot-Reload Ready",
+                    desc="State changes trigger automatic partial and "
+                         "full re-renders.",
+                ),
+
+                _spacer(Responsive.spacing(40)),
+
+                # ── Footer ────────────────────────────────────────────
+                Center(
+                    child=Text(
+                        "Edit src/app/main.py to customise",
+                        size=Responsive.text(12),
+                        color=CAPTION,
+                    ),
+                ),
+
+                _spacer(Responsive.spacing(24)),
+
+            ],
+        ),
+    )
+
+
+# ── Helper Widgets ─────────────────────────────────────────────────────────
+
+def _card(icon: str, bg_icon: str, color_icon: str,
+          title: str, desc: str) -> Container:
+    """A rounded card with a coloured icon and description."""
+    return Center(
+        child=Container(
+            bg=CARD_BG,
+            margin=EdgeInsets.symmetric(horizontal=Responsive.padding(24)),
+            padding=EdgeInsets.all(Responsive.padding(16)),
+            border_radius=Responsive.radius(12),
+            child=Row(
+                children=[
+
+                    # Icon container (left)
+                    Container(
+                        bg=bg_icon,
+                        width=Responsive.w(48),
+                        height=Responsive.h(48),
+                        border_radius=Responsive.radius(12),
+                        alignment=Alignment.center,
+                        child=Text(icon, size=Responsive.text(22), color=color_icon),
+                    ),
+
+                    # Fixed gap that scales with screen width
+                    Container(
+                        width=Responsive.spacing(16),
+                        height=Responsive.spacing(16),
+                    ),
+
+                    # Title + description (right)
+                    Column(
+                        expand=1,
+                        children=[
+                            Text(
+                                title,
+                                size=Responsive.text(15),
+                                weight=600,
+                                color=TITLE,
+                            ),
+                            Text(
+                                desc,
+                                size=Responsive.text(13),
+                                color=BODY,
+                            ),
+                        ],
+                    ),
+
+                ],
+            ),
+        ),
+    )
+
+
+def _feature_row(emoji: str, title: str, desc: str) -> Container:
+    """A single feature row with emoji, title, and description."""
+    return Container(
+        padding=EdgeInsets.symmetric(
+            horizontal=Responsive.padding(24),
+            vertical=Responsive.padding(8),
+        ),
+        child=Row(
+            children=[
+
+                Text(emoji, size=Responsive.text(20)),
+
+                Container(
+                    width=Responsive.spacing(12),
+                    height=Responsive.spacing(12),
+                ),
+
+                Column(
+                    expand=1,
+                    children=[
+                        Text(
+                            title,
+                            size=Responsive.text(15),
+                            weight=600,
+                            color=TITLE,
+                        ),
+                        Text(
+                            desc,
+                            size=Responsive.text(13),
+                            color=BODY,
+                        ),
+                    ],
+                ),
+
+            ],
+        ),
+    )
+
+
+def _spacer(height: int) -> Container:
+    """A fixed-height spacer."""
+    return Container(height=height)
+
+
+# ── Entry Point (do not edit) ──────────────────────────────────────────────
+
+def start_app():
+    """Called by MainActivity via Chaquopy."""
+    app = App(target=main)
+    app.run()

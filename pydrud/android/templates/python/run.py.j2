@@ -1,0 +1,16 @@
+#!/usr/bin/env python3
+"""Development runner for {{ project_name }}."""
+
+import sys
+import os
+
+# Add src to path.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+
+from app.main import main
+from pydrud import App
+
+
+if __name__ == "__main__":
+    app = App(target=main)
+    app.run()
