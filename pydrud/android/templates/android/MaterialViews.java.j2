@@ -144,16 +144,25 @@ public class MaterialViews {
         row.setGravity(Gravity.CENTER_VERTICAL);
         boolean dense = p.optBoolean("dense", false);
         int vertical = dp(dense ? 8 : 12);
-        row.setPadding(dp(16), vertical, dp(16), vertical);
-        row.setMinimumHeight(dp(dense ? 48 : 64));
-        if (p.optBoolean("selected", false)) {
-            row.setBackgroundColor(Color.parseColor("#1F6366F1"));
-        }
+        int gutter = dp(PydrudTheme.cardPadding);
+        row.setPaddingRelative(gutter, vertical, gutter, vertical);
+        row.setMinimumHeight(PydrudTheme.adaptive(
+            dense ? PydrudTheme.listTileHeight - 8 : PydrudTheme.listTileHeight + 8));
+
+        float radius = dp(PydrudTheme.radiusCard * 0.75f);
+        boolean selected = p.optBoolean("selected", false);
+        android.graphics.drawable.Drawable base = PydrudTheme.shape(
+            selected ? PydrudTheme.alpha(PydrudTheme.primary, 0.12f)
+                     : android.graphics.Color.TRANSPARENT, radius);
+        row.setBackground(PydrudTheme.ripple(
+            base, PydrudTheme.alpha(PydrudTheme.primary, PydrudTheme.rippleOpacity),
+            radius));
 
         String leading = p.optString("leadingIcon", "");
         if (!leading.isEmpty()) {
             ImageView icon = new ImageView(activity);
-            icon.setImageResource(factory.iconResource(leading));
+            icon.setImageDrawable(factory.icon(leading,
+                parseColor(p.optString("leadingColor", ""), PydrudTheme.primary), dp(24)));
             LinearLayout.LayoutParams lp =
                 new LinearLayout.LayoutParams(dp(24), dp(24));
             lp.rightMargin = dp(16);
@@ -164,7 +173,7 @@ public class MaterialViews {
         labels.setOrientation(LinearLayout.VERTICAL);
         TextView title = new TextView(activity);
         title.setText(p.optString("title", ""));
-        title.setTextSize(16);
+        PydrudTheme.applyTextDefaults(title, 15.5f, 500, PydrudTheme.onSurface);
         title.setMaxLines(1);
         title.setEllipsize(TextUtils.TruncateAt.END);
         labels.addView(title);
@@ -173,11 +182,14 @@ public class MaterialViews {
         if (!subtitle.isEmpty()) {
             TextView sub = new TextView(activity);
             sub.setText(subtitle);
-            sub.setTextSize(13);
-            sub.setTextColor(Color.parseColor("#FF6B7280"));
+            PydrudTheme.applyTextDefaults(sub, 13f, 400, PydrudTheme.onSurfaceVariant);
             sub.setMaxLines(p.optBoolean("threeLine", false) ? 2 : 1);
             sub.setEllipsize(TextUtils.TruncateAt.END);
-            labels.addView(sub);
+            LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+            subLp.topMargin = dp(3);
+            labels.addView(sub, subLp);
         }
         LinearLayout.LayoutParams labelLp = new LinearLayout.LayoutParams(
             0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
@@ -186,7 +198,8 @@ public class MaterialViews {
         String trailing = p.optString("trailingIcon", "");
         if (!trailing.isEmpty()) {
             ImageView icon = new ImageView(activity);
-            icon.setImageResource(factory.iconResource(trailing));
+            icon.setImageDrawable(factory.icon(trailing,
+                parseColor(p.optString("trailingColor", ""), PydrudTheme.onSurfaceVariant), dp(22)));
             LinearLayout.LayoutParams lp =
                 new LinearLayout.LayoutParams(dp(24), dp(24));
             lp.leftMargin = dp(16);
@@ -218,8 +231,9 @@ public class MaterialViews {
             0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
         ImageView chevron = new ImageView(activity);
-        chevron.setImageResource(factory.iconResource(
-            expanded ? "expand_less" : "expand_more"));
+        chevron.setImageDrawable(factory.icon(
+            expanded ? "expand_less" : "expand_more",
+            PydrudTheme.onSurfaceVariant, dp(22)));
         header.addView(chevron, new LinearLayout.LayoutParams(dp(24), dp(24)));
 
         header.setOnClickListener(new View.OnClickListener() {
@@ -245,11 +259,30 @@ public class MaterialViews {
         chip.setCheckable("filter".equals(p.optString("variant", "assist")));
         chip.setChecked(p.optBoolean("selected", false));
         chip.setCloseIconVisible(p.optBoolean("deletable", false));
-        String color = p.optString("color", "");
-        if (!color.isEmpty()) {
-            chip.setChipBackgroundColor(
-                android.content.res.ColorStateList.valueOf(parseColor(color)));
-        }
+
+        // Match the Pydrud palette instead of the stock grey pill.
+        int accent = parseColor(p.optString("color", ""), PydrudTheme.primary);
+        boolean checked = p.optBoolean("selected", false);
+        chip.setChipBackgroundColor(new android.content.res.ColorStateList(
+            new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}},
+            new int[]{PydrudTheme.alpha(accent, PydrudTheme.dark ? 0.32f : 0.16f),
+                      PydrudTheme.surfaceVariant}));
+        chip.setChipStrokeColor(new android.content.res.ColorStateList(
+            new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}},
+            new int[]{PydrudTheme.alpha(accent, 0.55f), PydrudTheme.outline}));
+        chip.setChipStrokeWidth(dp(PydrudTheme.borderWidth));
+        chip.setTextColor(new android.content.res.ColorStateList(
+            new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}},
+            new int[]{PydrudTheme.dark ? PydrudTheme.lighten(accent, 0.35f)
+                                       : PydrudTheme.darken(accent, 0.25f),
+                      PydrudTheme.onSurface}));
+        chip.setRippleColor(android.content.res.ColorStateList.valueOf(
+            PydrudTheme.alpha(accent, 0.14f)));
+        chip.setTypeface(PydrudTheme.typeface(checked ? 600 : 500, false));
+        chip.setChipMinHeight(PydrudTheme.adaptive(36));
+        chip.setChipCornerRadius(dp(12));
+        chip.setCloseIconTint(
+            android.content.res.ColorStateList.valueOf(PydrudTheme.onSurfaceVariant));
         chip.setOnCheckedChangeListener(
             new android.widget.CompoundButton.OnCheckedChangeListener() {
                 @Override public void onCheckedChanged(
@@ -277,13 +310,13 @@ public class MaterialViews {
         TextView bubble = new TextView(activity);
         bubble.setText(p.optString("label", ""));
         bubble.setTextSize(10);
-        bubble.setTextColor(parseColor(p.optString("textColor", "#FFFFFFFF")));
+        bubble.setTextColor(parseColor(p.optString("textColor", ""), PydrudTheme.onError));
         bubble.setGravity(Gravity.CENTER);
         bubble.setPadding(dp(5), dp(1), dp(5), dp(1));
         GradientDrawable shape = new GradientDrawable();
         shape.setShape(GradientDrawable.RECTANGLE);
         shape.setCornerRadius(dp(10));
-        shape.setColor(parseColor(p.optString("color", "#FFEF4444")));
+        shape.setColor(parseColor(p.optString("color", ""), PydrudTheme.error));
         bubble.setBackground(shape);
         bubble.setTag("__badge__");
 
@@ -296,11 +329,11 @@ public class MaterialViews {
     }
 
     private View createAvatar(final String key, JSONObject p) {
-        int size = dp((int) p.optDouble("size", 40));
+        int size = dp((float) p.optDouble("size", PydrudTheme.avatarSize));
         FrameLayout host = new FrameLayout(activity);
         GradientDrawable circle = new GradientDrawable();
         circle.setShape(GradientDrawable.OVAL);
-        circle.setColor(parseColor(p.optString("bg", "#FF6366F1")));
+        circle.setColor(parseColor(p.optString("bg", ""), PydrudTheme.primary));
         host.setBackground(circle);
         host.setLayoutParams(new ViewGroup.LayoutParams(size, size));
 
@@ -313,15 +346,15 @@ public class MaterialViews {
             host.addView(image, new FrameLayout.LayoutParams(size, size));
         } else if (!icon.isEmpty()) {
             ImageView image = new ImageView(activity);
-            image.setImageResource(factory.iconResource(icon));
-            image.setColorFilter(parseColor(p.optString("color", "#FFFFFFFF")));
+            image.setImageDrawable(factory.icon(icon,
+                parseColor(p.optString("color", ""), PydrudTheme.onPrimary), size / 2));
             FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                 size / 2, size / 2, Gravity.CENTER);
             host.addView(image, lp);
         } else {
             TextView initials = new TextView(activity);
             initials.setText(p.optString("initials", ""));
-            initials.setTextColor(parseColor(p.optString("color", "#FFFFFFFF")));
+            initials.setTextColor(parseColor(p.optString("color", ""), PydrudTheme.onPrimary));
             initials.setTextSize(size / 3f / activity.getResources()
                 .getDisplayMetrics().density * 2f);
             initials.setGravity(Gravity.CENTER);
@@ -337,14 +370,13 @@ public class MaterialViews {
         banner.setOrientation(LinearLayout.HORIZONTAL);
         banner.setGravity(Gravity.CENTER_VERTICAL);
         banner.setPadding(dp(16), dp(12), dp(16), dp(12));
-        int color = parseColor(p.optString("color", "#FF3B82F6"));
+        int color = parseColor(p.optString("color", ""), PydrudTheme.primary);
         banner.setBackgroundColor(withAlpha(color, 0x1F));
 
         String icon = p.optString("icon", "");
         if (!icon.isEmpty()) {
             ImageView view = new ImageView(activity);
-            view.setImageResource(factory.iconResource(icon));
-            view.setColorFilter(color);
+            view.setImageDrawable(factory.icon(icon, color, dp(20)));
             LinearLayout.LayoutParams lp =
                 new LinearLayout.LayoutParams(dp(20), dp(20));
             lp.rightMargin = dp(12);
@@ -373,8 +405,7 @@ public class MaterialViews {
         }
         if (p.optBoolean("dismissible", true)) {
             ImageView close = new ImageView(activity);
-            close.setImageResource(factory.iconResource("close"));
-            close.setColorFilter(color);
+            close.setImageDrawable(factory.icon("close", color, dp(18)));
             LinearLayout.LayoutParams lp =
                 new LinearLayout.LayoutParams(dp(18), dp(18));
             lp.leftMargin = dp(12);
@@ -392,24 +423,28 @@ public class MaterialViews {
         LinearLayout box = new LinearLayout(activity);
         box.setOrientation(LinearLayout.HORIZONTAL);
         box.setGravity(Gravity.CENTER_VERTICAL);
-        box.setPadding(dp(12), dp(4), dp(12), dp(4));
-        GradientDrawable shape = new GradientDrawable();
-        shape.setCornerRadius(dp(28));
-        shape.setColor(Color.parseColor("#FFF3F4F6"));
-        box.setBackground(shape);
+        box.setPadding(dp(16), dp(6), dp(12), dp(6));
+        box.setMinimumHeight(PydrudTheme.adaptive(PydrudTheme.inputHeight));
+        box.setBackground(PydrudTheme.shape(PydrudTheme.surfaceVariant, dp(26),
+            dp(1), PydrudTheme.alpha(PydrudTheme.outline, 0.9f)));
 
         ImageView search = new ImageView(activity);
-        search.setImageResource(factory.iconResource("search"));
+        search.setImageDrawable(factory.icon("search",
+            PydrudTheme.onSurfaceVariant, dp(20)));
         LinearLayout.LayoutParams iconLp =
             new LinearLayout.LayoutParams(dp(20), dp(20));
         iconLp.rightMargin = dp(8);
         box.addView(search, iconLp);
 
-        final android.widget.EditText input = new android.widget.EditText(activity);
+        final android.widget.EditText input =
+            new androidx.appcompat.widget.AppCompatEditText(activity);
         input.setHint(p.optString("hint", "Search"));
         input.setText(p.optString("value", ""));
         input.setBackground(null);
         input.setSingleLine(true);
+        input.setPadding(0, 0, 0, 0);
+        PydrudTheme.applyTextDefaults(input, 15f, 400, PydrudTheme.onSurface);
+        input.setHintTextColor(PydrudTheme.alpha(PydrudTheme.onSurfaceVariant, 0.8f));
         input.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);
         box.addView(input, new LinearLayout.LayoutParams(
             0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -439,7 +474,8 @@ public class MaterialViews {
             });
 
         ImageView clear = new ImageView(activity);
-        clear.setImageResource(factory.iconResource("close"));
+        clear.setImageDrawable(factory.icon("close",
+            PydrudTheme.onSurfaceVariant, dp(18)));
         clear.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 input.setText("");
@@ -455,23 +491,50 @@ public class MaterialViews {
         return box;
     }
 
+    /**
+     * A row of real star glyphs. The stock {@link RatingBar} draws tiny,
+     * pixellated framework stars that look nothing like the rest of the app.
+     */
     private View createRating(final String key, JSONObject p) {
-        RatingBar bar = new RatingBar(activity, null,
-            android.R.attr.ratingBarStyleSmall);
-        bar.setNumStars(p.optInt("count", 5));
-        bar.setStepSize(p.optBoolean("half", true) ? 0.5f : 1f);
-        bar.setRating((float) p.optDouble("value", 0));
-        bar.setIsIndicator(p.optBoolean("readonly", false));
-        bar.setOnRatingBarChangeListener(new RatingBar.OnRatingBarChangeListener() {
-            @Override public void onRatingChanged(RatingBar b, float rating,
-                                                  boolean fromUser) {
-                if (!fromUser || events == null) return;
-                JSONObject data = new JSONObject();
-                try { data.put("value", rating); } catch (Exception ignored) {}
-                events.dispatch("change", key, data);
+        LinearLayout row = new LinearLayout(activity);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+
+        final int count = Math.max(1, p.optInt("count", 5));
+        final double value = p.optDouble("value", 0);
+        final boolean readonly = p.optBoolean("readonly", false);
+        final int starSize = PydrudTheme.adaptive((float) p.optDouble("size", 28));
+        final int active = parseColor(p.optString("color", ""), 0xFFF59E0B);
+        final int idle = PydrudTheme.alpha(PydrudTheme.onSurfaceVariant, 0.35f);
+
+        for (int i = 0; i < count; i++) {
+            final int index = i;
+            ImageView star = new ImageView(activity);
+            boolean filled = value >= i + 1;
+            boolean half = !filled && value > i && value >= i + 0.5;
+            star.setImageDrawable(factory.icon(
+                filled ? "star" : half ? "star" : "star_border",
+                filled ? active : half ? PydrudTheme.alpha(active, 0.55f) : idle,
+                starSize));
+            LinearLayout.LayoutParams lp =
+                new LinearLayout.LayoutParams(starSize, starSize);
+            lp.setMarginEnd(dp(4));
+            if (!readonly) {
+                star.setClickable(true);
+                PydrudTheme.addCircleRipple(star, PydrudTheme.alpha(active, 0.22f));
+                PydrudTheme.pressFeedback(star, 0.82f, 0f, 0f);
+                star.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) {
+                        if (events == null) return;
+                        JSONObject data = new JSONObject();
+                        try { data.put("value", index + 1); } catch (Exception ignored) {}
+                        events.dispatch("change", key, data);
+                    }
+                });
             }
-        });
-        return bar;
+            row.addView(star, lp);
+        }
+        return row;
     }
 
     private View createCircularProgress(JSONObject p) {
@@ -492,27 +555,53 @@ public class MaterialViews {
         return bar;
     }
 
+    /** Shimmering placeholder blocks — a real sweep, not a blinking box. */
     private View createSkeleton(JSONObject p) {
         LinearLayout column = new LinearLayout(activity);
         column.setOrientation(LinearLayout.VERTICAL);
         int lines = Math.max(1, p.optInt("lines", 1));
+        int base = PydrudTheme.dark
+            ? PydrudTheme.blend(PydrudTheme.surface, 0xFFFFFFFF, 0.08f)
+            : PydrudTheme.surfaceVariant;
+        int highlight = PydrudTheme.dark
+            ? PydrudTheme.blend(base, 0xFFFFFFFF, 0.12f)
+            : PydrudTheme.blend(base, 0xFFFFFFFF, 0.65f);
+
         for (int i = 0; i < lines; i++) {
-            View bar = new View(activity);
-            GradientDrawable shape = new GradientDrawable();
-            shape.setCornerRadius(dp((int) p.optDouble("radius", 8)));
-            shape.setColor(Color.parseColor("#FFE5E7EB"));
+            final View bar = new View(activity);
+            final GradientDrawable shape = new GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[]{base, highlight, base});
+            shape.setCornerRadius(dp((float) p.optDouble("radius", 10)));
             bar.setBackground(shape);
+
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                dp((int) p.optDouble("height", 16)));
-            lp.bottomMargin = dp(8);
+                PydrudTheme.adaptive((float) p.optDouble("height", 16)));
+            lp.bottomMargin = dp(10);
+            // The last line is short, the way real content wraps.
+            if (lines > 1 && i == lines - 1) lp.width = 0;
+            if (lines > 1 && i == lines - 1) lp.weight = 0.6f;
             column.addView(bar, lp);
-            android.animation.ObjectAnimator shimmer =
-                android.animation.ObjectAnimator.ofFloat(bar, "alpha", 1f, 0.4f);
-            shimmer.setDuration(800);
-            shimmer.setRepeatMode(android.animation.ObjectAnimator.REVERSE);
-            shimmer.setRepeatCount(android.animation.ObjectAnimator.INFINITE);
-            shimmer.start();
+
+            android.animation.ValueAnimator sweep =
+                android.animation.ValueAnimator.ofFloat(-1f, 2f);
+            sweep.setDuration(1150);
+            sweep.setStartDelay(i * 90L);
+            sweep.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+            sweep.setInterpolator(new android.view.animation.LinearInterpolator());
+            sweep.addUpdateListener(
+                new android.animation.ValueAnimator.AnimatorUpdateListener() {
+                    @Override public void onAnimationUpdate(
+                            android.animation.ValueAnimator animation) {
+                        float t = (Float) animation.getAnimatedValue();
+                        bar.setTranslationX(0f);
+                        shape.setGradientCenter(Math.max(0.01f, Math.min(0.99f,
+                            (t + 1f) / 3f)), 0.5f);
+                        bar.invalidate();
+                    }
+                });
+            sweep.start();
         }
         return column;
     }
@@ -526,8 +615,16 @@ public class MaterialViews {
         TabLayout tabs = new TabLayout(activity);
         tabs.setTabMode(p.optBoolean("scrollable", false)
             ? TabLayout.MODE_SCROLLABLE : TabLayout.MODE_FIXED);
-        String indicator = p.optString("indicatorColor", "");
-        if (!indicator.isEmpty()) tabs.setSelectedTabIndicatorColor(parseColor(indicator));
+        int indicatorColor = parseColor(p.optString("indicatorColor", ""),
+                                        PydrudTheme.primary);
+        tabs.setSelectedTabIndicatorColor(indicatorColor);
+        tabs.setSelectedTabIndicatorHeight(dp(3));
+        tabs.setTabTextColors(PydrudTheme.onSurfaceVariant, indicatorColor);
+        tabs.setBackgroundColor(parseColor(p.optString("bg", ""),
+                                           PydrudTheme.surface));
+        tabs.setTabRippleColor(android.content.res.ColorStateList.valueOf(
+            PydrudTheme.alpha(indicatorColor, 0.10f)));
+        tabs.setTabIndicatorFullWidth(false);
 
         JSONArray items = p.optJSONArray("tabs");
         int count = items == null ? 0 : items.length();
@@ -537,7 +634,9 @@ public class MaterialViews {
             if (item != null) {
                 tab.setText(item.optString("label", ""));
                 String icon = item.optString("icon", "");
-                if (!icon.isEmpty()) tab.setIcon(factory.iconResource(icon));
+                if (!icon.isEmpty()) {
+                    tab.setIcon(factory.icon(icon, PydrudTheme.onSurfaceVariant, dp(22)));
+                }
             }
             tabs.addTab(tab);
         }
@@ -572,7 +671,10 @@ public class MaterialViews {
             android.view.MenuItem menuItem =
                 nav.getMenu().add(0, i, i, item.optString("label", ""));
             String icon = item.optString("icon", "");
-            if (!icon.isEmpty()) menuItem.setIcon(factory.iconResource(icon));
+            if (!icon.isEmpty()) {
+                menuItem.setIcon(factory.icon(icon, PydrudTheme.onSurfaceVariant,
+                                              dp(PydrudTheme.iconSize)));
+            }
             menuItem.setEnabled(item.optBoolean("enabled", true));
             String badge = item.optString("badge", "");
             if (!badge.isEmpty()) {
@@ -612,7 +714,7 @@ public class MaterialViews {
         LinearLayout rail = new LinearLayout(activity);
         rail.setOrientation(LinearLayout.VERTICAL);
         rail.setPadding(dp(4), dp(8), dp(4), dp(8));
-        rail.setBackgroundColor(Color.parseColor("#FFF9FAFB"));
+        rail.setBackgroundColor(PydrudTheme.background);
 
         JSONArray items = p.optJSONArray("items");
         final int selected = p.optInt("selected", 0);
@@ -627,8 +729,9 @@ public class MaterialViews {
             cell.setPadding(dp(12), dp(12), dp(12), dp(12));
 
             ImageView icon = new ImageView(activity);
-            icon.setImageResource(factory.iconResource(item.optString("icon", "")));
-            if (i == selected) icon.setColorFilter(Color.parseColor("#FF6366F1"));
+            icon.setImageDrawable(factory.icon(item.optString("icon", ""),
+                i == selected ? PydrudTheme.primary : PydrudTheme.onSurfaceVariant,
+                dp(24)));
             cell.addView(icon, new LinearLayout.LayoutParams(dp(24), dp(24)));
 
             if (p.optBoolean("extended", false)) {
@@ -662,17 +765,27 @@ public class MaterialViews {
             TextView segment = new TextView(activity);
             segment.setText(options.optString(i, ""));
             segment.setGravity(Gravity.CENTER);
-            segment.setPadding(dp(16), dp(10), dp(16), dp(10));
+            segment.setPadding(dp(16), dp(11), dp(16), dp(11));
+            segment.setMinHeight(PydrudTheme.adaptive(44));
             boolean isSelected = multi
                 ? containsIndex(p.optJSONArray("selected"), i)
                 : p.optInt("selected", 0) == i;
+            int accent = parseColor(p.optString("color", ""), PydrudTheme.primary);
             GradientDrawable shape = new GradientDrawable();
-            shape.setColor(isSelected ? Color.parseColor("#FF6366F1")
-                                      : Color.parseColor("#FFF3F4F6"));
+            shape.setColor(isSelected
+                ? PydrudTheme.alpha(accent, PydrudTheme.dark ? 0.30f : 0.16f)
+                : PydrudTheme.surfaceVariant);
+            shape.setStroke(dp(1), isSelected
+                ? PydrudTheme.alpha(accent, 0.5f) : PydrudTheme.outline);
             shape.setCornerRadii(cornerRadii(i, count));
-            segment.setBackground(shape);
-            segment.setTextColor(isSelected ? Color.WHITE
-                                            : Color.parseColor("#FF1F2937"));
+            segment.setBackground(PydrudTheme.ripple(
+                shape, PydrudTheme.alpha(accent, 0.14f), dp(20)));
+            PydrudTheme.applyTextDefaults(segment, 14f, isSelected ? 600 : 500,
+                isSelected
+                    ? (PydrudTheme.dark ? PydrudTheme.lighten(accent, 0.4f)
+                                        : PydrudTheme.darken(accent, 0.25f))
+                    : PydrudTheme.onSurfaceVariant);
+            segment.setGravity(Gravity.CENTER);
             segment.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) {
                     if (events == null) return;
@@ -705,15 +818,15 @@ public class MaterialViews {
             bubble.setTextColor(Color.WHITE);
             GradientDrawable circle = new GradientDrawable();
             circle.setShape(GradientDrawable.OVAL);
-            circle.setColor(i <= current ? Color.parseColor("#FF6366F1")
-                                         : Color.parseColor("#FFD1D5DB"));
+            circle.setColor(i <= current ? PydrudTheme.primary
+                                         : PydrudTheme.outlineStrong);
             bubble.setBackground(circle);
             host.addView(bubble, new LinearLayout.LayoutParams(dp(28), dp(28)));
 
             if (i < count - 1) {
                 View line = new View(activity);
-                line.setBackgroundColor(i < current ? Color.parseColor("#FF6366F1")
-                                                    : Color.parseColor("#FFD1D5DB"));
+                line.setBackgroundColor(i < current ? PydrudTheme.primary
+                                                    : PydrudTheme.outlineStrong);
                 LinearLayout.LayoutParams lp = horizontal
                     ? new LinearLayout.LayoutParams(0, dp(2), 1f)
                     : new LinearLayout.LayoutParams(dp(2), dp(24));
@@ -814,7 +927,7 @@ public class MaterialViews {
         if ("Drawer".equals(type)) {
             LinearLayout drawer = new LinearLayout(activity);
             drawer.setOrientation(LinearLayout.VERTICAL);
-            drawer.setBackgroundColor(parseColor(p.optString("bg", "#FFFFFFFF")));
+            drawer.setBackgroundColor(parseColor(p.optString("bg", ""), PydrudTheme.surface));
             drawer.setVisibility(View.GONE);   // opened via the drawer command
             return drawer;
         }
@@ -826,7 +939,7 @@ public class MaterialViews {
                 TextView text = new TextView(activity);
                 text.setText(label);
                 text.setTextSize(13);
-                text.setTextColor(Color.parseColor("#FF6B7280"));
+                text.setTextColor(PydrudTheme.onSurfaceVariant);
                 text.setPadding(0, 0, 0, dp(4));
                 column.addView(text);
             }
@@ -846,8 +959,8 @@ public class MaterialViews {
         text.setTextSize(12);
         text.setPadding(0, dp(4), 0, 0);
         text.setTextColor(error.isEmpty()
-            ? Color.parseColor("#FF6B7280")
-            : parseColor(props.optString("errorColor", "#FFEF4444")));
+            ? PydrudTheme.onSurfaceVariant
+            : parseColor(props.optString("errorColor", ""), PydrudTheme.error));
         ((LinearLayout) view).addView(text);
     }
 
@@ -882,13 +995,20 @@ public class MaterialViews {
         try {
             return Color.parseColor(value);
         } catch (Exception e) {
-            return Color.parseColor("#FF6366F1");
+            return PydrudTheme.primary;
         }
     }
 
     private int dp(int value) {
-        return Math.round(value * activity.getResources()
-            .getDisplayMetrics().density);
+        return PydrudTheme.dp(value);
+    }
+
+    private int dp(float value) {
+        return PydrudTheme.dp(value);
+    }
+
+    private int parseColor(String value, int fallback) {
+        return PydrudTheme.parse(value, fallback);
     }
 
     /**
@@ -916,7 +1036,7 @@ public class MaterialViews {
             float w = getWidth();
             float h = getHeight();
             float pad = h * 0.08f;
-            int color = Color.parseColor(firstColor());
+            int color = firstColor();
 
             paint.setStrokeWidth(Math.max(2f, h * 0.02f));
             paint.setColor(color);
@@ -926,7 +1046,7 @@ public class MaterialViews {
                 return;
             }
             if (props.optBoolean("showGrid", true)) {
-                paint.setColor(Color.parseColor("#FFE5E7EB"));
+                paint.setColor(PydrudTheme.outline);
                 paint.setStyle(android.graphics.Paint.Style.STROKE);
                 for (int i = 0; i <= 4; i++) {
                     float y = pad + (h - 2 * pad) * i / 4f;
@@ -942,9 +1062,10 @@ public class MaterialViews {
                     float value = (float) values.optDouble(i, 0);
                     float barHeight = (h - 2 * pad) * (value / max);
                     float cx = (i + 0.5f) * (w / count);
+                    float radius = Math.min(barWidth / 2f, dp(6));
                     canvas.drawRoundRect(cx - barWidth / 2, h - pad - barHeight,
                                          cx + barWidth / 2, h - pad,
-                                         6f, 6f, paint);
+                                         radius, radius, paint);
                 }
                 return;
             }
@@ -985,21 +1106,24 @@ public class MaterialViews {
             for (int i = 0; i < values.length(); i++) {
                 float sweep = 360f * (float) values.optDouble(i, 0) / total;
                 String c = colors != null
-                    ? colors.optString(i % Math.max(1, colors.length()), "#FF6366F1")
-                    : "#FF6366F1";
-                try { paint.setColor(Color.parseColor(c)); }
-                catch (Exception e) { paint.setColor(Color.GRAY); }
+                    ? colors.optString(i % Math.max(1, colors.length()), "")
+                    : "";
+                // Unlabelled slices walk the theme palette instead of
+                // repeating one colour.
+                paint.setColor(c.isEmpty()
+                    ? PydrudTheme.seriesColor(i)
+                    : parseColor(c, PydrudTheme.seriesColor(i)));
                 canvas.drawArc(box, start, sweep, true, paint);
                 start += sweep;
             }
         }
 
-        private String firstColor() {
+        private int firstColor() {
             JSONArray colors = props.optJSONArray("colors");
             if (colors != null && colors.length() > 0) {
-                return colors.optString(0, "#FF6366F1");
+                return parseColor(colors.optString(0, ""), PydrudTheme.primary);
             }
-            return "#FF6366F1";
+            return PydrudTheme.primary;
         }
     }
 }

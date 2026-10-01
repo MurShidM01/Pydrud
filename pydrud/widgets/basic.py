@@ -60,19 +60,38 @@ class Text(Widget):
 
 
 class Button(Widget):
-    """A clickable button (rendered as a Material Button on Android)."""
+    """A clickable button, rendered as a native Material button.
+
+    Five variants, all with the platform ripple, press-scale and
+    disabled states::
+
+        Button("Save")                          # filled   (default)
+        Button("Save", variant="tonal")         # soft tinted fill
+        Button("Save", variant="outlined")      # hairline outline
+        Button("Save", variant="text")          # label only
+        Button("Save", variant="elevated")      # filled + shadow
+
+    ``size`` is ``"sm" | "md" | "lg"`` (36 / 48 / 56 dp tall — ``md``
+    already meets the 48 dp touch-target guideline), ``pill=True`` makes
+    the corners fully round and ``full_width=True`` stretches the button
+    to its parent.
+    """
 
     _widget_type = "Button"
+
+    VARIANTS = ("filled", "tonal", "outlined", "text", "elevated")
 
     def __init__(
         self,
         text: str = "",
         *,
         icon: Optional[str] = None,
-        variant: str = "filled",   # "filled", "outlined", "text"
+        variant: str = "filled",
         color: Optional[str] = None,
         bg_color: Optional[str] = None,
         size: Optional[str] = None,  # "sm", "md", "lg"
+        pill: bool = False,
+        full_width: bool = False,
         disabled: bool = False,
         key: Optional[str] = None,
         style: Optional[dict] = None,
@@ -81,6 +100,11 @@ class Button(Widget):
         **kwargs,
     ):
         super().__init__(key=key, style=style, expand=expand, visible=visible, **kwargs)
+        if variant not in self.VARIANTS:
+            raise ValueError(
+                f"Unknown button variant {variant!r}; expected one of "
+                + ", ".join(self.VARIANTS)
+            )
         self._text = text
         self.style["variant"] = variant
         if icon:
@@ -91,6 +115,10 @@ class Button(Widget):
             self.style["bg"] = bg_color
         if size:
             self.style["buttonSize"] = size
+        if pill:
+            self.style["pill"] = True
+        if full_width:
+            self.style.setdefault("width", "match")
         if disabled:
             self.style["disabled"] = True
 
@@ -107,7 +135,16 @@ class Button(Widget):
 
 
 class TextField(Widget):
-    """Single- or multi-line text input."""
+    """Single- or multi-line text input.
+
+    Two looks, both with a focus-reactive fill and border::
+
+        TextField(hint="Search")                       # filled (default)
+        TextField(hint="Email", variant="outlined")    # outlined
+
+    ``icon`` shows a leading glyph and ``accent`` overrides the focus
+    colour; everything else follows :class:`pydrud.Theme`.
+    """
 
     _widget_type = "TextField"
 
@@ -122,6 +159,9 @@ class TextField(Widget):
         password: bool = False,
         read_only: bool = False,
         keyboard: Optional[str] = None,  # "text", "number", "email", "phone", "url"
+        variant: str = "filled",         # "filled" | "outlined"
+        icon: Optional[str] = None,
+        accent: Optional[str] = None,
         key: Optional[str] = None,
         style: Optional[dict] = None,
         expand: Optional[int] = None,
@@ -132,6 +172,12 @@ class TextField(Widget):
         self._value = value
         self._hint = hint
         self._label = label
+        if variant and variant != "filled":
+            self.style["variant"] = variant
+        if icon:
+            self.style["icon"] = icon
+        if accent:
+            self.style["accent"] = accent
         if multiline:
             self.style["multiline"] = True
         if max_lines is not None:

@@ -41,15 +41,127 @@ pydrud run                            # Build, install, launch
 | Reactive State | `State<T>` auto-triggers UI re-renders on value change |
 | Full Styling | Colors, padding, margin, borders, fonts, elevation, alignment |
 | Native Rendering | Every widget becomes a real Android View — not a WebView or canvas |
-| CLI Toolchain | `init` / `build` / `run` / `watch` / `analyze` / `doctor` / `clean` / `pip` / `icons` / `keygen` / `permissions` / `docs` / `inspect` |
+| CLI Toolchain | `init` / `run` / `sync` / `build` / `watch` / `analyze` / `doctor` / `clean` / `pip` / `icons` / `keygen` / `permissions` / `docs` / `inspect` |
+| No XML, no Java | Even `themes.xml` is generated from the Python palette — `pydrud init --accent "#FF0EA5E9"` |
 | Data Layer | SQLite `Database`, `Model` ORM with migrations, and a TTL `Cache` |
 | PyPI on Android | 119 verified packages installable with `pydrud pip add` |
 | Background & Hardware | WorkManager jobs, foreground services, push, camera, sensors, biometrics, BLE, NFC, audio |
-| Responsive | `Responsive.text()` auto-scales UI to any screen size |
+| Design system | `Theme` + `Tokens` — colours, radii, sizes, depth, motion and type live in Python and drive the native renderer |
+| Responsive | Clamped scaling plus Material 3 breakpoints, so a tablet gets a tablet layout, not a zoomed-in phone |
 | Native Services | Dialogs, storage, permissions, files, share, notifications, GPS, haptics, device info |
 | Async by Default | Thread pool + timers + a non-blocking HTTP client, so the UI never freezes |
 | Testable | `pydrud.testing.AppTester` runs your whole app in CI without a device or emulator |
 | TCP Bridge | Clean NDJSON protocol over port 8595 |
+
+---
+
+## New in v1.4.0 — the design release
+
+v1.4 rebuilt everything you can see. Pydrud now has a real design system
+shared by the Python widgets and the native renderer: one palette, one
+4dp spacing scale, one set of motion curves — so the default app looks
+designed instead of assembled.
+
+### The whole UI is controlled from Python
+
+Corner radii, control heights, bar heights, depth, motion, the type ramp
+and the typeface are **Python values**. They are sent to the device with
+the palette, so the Java renderer never makes a design decision of its
+own — it draws what Python tells it to:
+
+```python
+from pydrud import Theme
+
+Theme.configure(
+    radius_card=24, radius_button=20,      # shape
+    app_bar_height=64, nav_height=72,      # size
+    elevation_card=2, press_scale=0.96,    # depth and feedback
+    font_family="serif", font_scale=1.1,   # type
+)
+
+page.configure(radius_card=4)              # restyle a running app
+Theme.configure_reset()                    # back to the defaults
+```
+
+Same for the project's native theme: `pydrud init --accent "#FF0EA5E9"`
+generates `themes.xml`, `values-night/themes.xml` and the starter app
+from that one colour, and `pydrud.toml` keeps it under `[theme] seed`
+for `pydrud sync`. No XML or Java editing anywhere in the loop.
+
+See `Tokens` for the full list (`python -c "from pydrud import Tokens;
+print(Tokens.names())"`), and `tools/preview_ui.py` to see a change
+before you build:
+
+```bash
+python tools/preview_ui.py --accent "#FF0EA5E9" --token radius_card=28
+```
+
+### Design tokens
+
+```python
+from pydrud import Spacing, Radius, Elevation, Motion, Colors, Theme
+
+Column(spacing=Spacing.MD, children=[...])      # 4dp grid: XS…HUGE
+Card(border_radius=Radius.LG)                   # consistent corners
+Container(style={"elevation": Elevation.CARD})  # named depths
+Colors.on(Colors.PRIMARY)                       # readable foreground
+Colors.mix(Colors.PRIMARY, Colors.SECONDARY)    # blend two colours
+```
+
+### Live theming
+
+One brand colour drives the whole app — including the native widgets,
+ripples, text selection handles and system bars.
+
+```python
+Theme.seed(Colors.TEAL)        # rebuild the palette from a brand colour
+Theme.dark()                   # same brand, dark surfaces
+page.set_theme_mode("dark")    # repaint Python *and* native widgets
+page.set_theme("#FFEF4444")    # swap the accent while the app is running
+```
+
+The palette is sent to the device before the first frame, so there is no
+flash of unstyled UI, and generated projects ship a `values-night` theme
+for native dialogs.
+
+### Layouts that adapt
+
+```python
+Responsive.breakpoint()                             # compact | medium | expanded
+Responsive.value(compact=1, medium=2, expanded=3)   # per-size-class values
+Responsive.value(phone=16, tablet=32)               # the same, by device
+Responsive.columns(min_width=180)                   # grid columns that fit
+Responsive.content_width(560)                       # readable page width
+```
+
+Size scaling is clamped to 0.9–1.2x: a tablet is twice as wide as a
+phone, but doubling every font and button just produces a zoomed-in
+phone app. Layout changes come from breakpoints instead.
+
+Scaffolds are edge to edge — the app bar and bottom navigation absorb the
+system-bar insets themselves, so their surfaces continue behind the
+status and gesture bars.
+
+### Widgets that look the part
+
+```python
+Button("Save")                       # filled, tonal, outlined, text, elevated
+Button("Save", variant="tonal", pill=True, full_width=True)
+TextField(hint="Email", variant="outlined", icon=Icons.EMAIL)
+Card(child=..., on_click=open_item)  # flat + outlined by default
+AppBar(title="Home")                 # themed 56dp bar with a hairline
+Divider(indent=56)                   # inset rule, theme coloured
+```
+
+Icons are real vectors now: 172 paths (plus aliases) drawn at any size
+and colour, with 123 named constants on `Icons`.
+
+### Upgrading an existing project
+
+```bash
+pydrud sync     # rewrite the generated Java + theme resources, keep your code
+pydrud run
+```
 
 ---
 
@@ -646,15 +758,24 @@ page.set_theme_mode("system")          # light / dark / system
 page.end_refresh()                     # stop a RefreshIndicator spinner
 ```
 
-### Theming with Material You (v1.2)
+### Theming with Material You (v1.2, extended in v1.4)
 
 ```python
-from pydrud import ColorScheme, Theme, Typography
+from pydrud import ColorScheme, Colors, Theme, Typography
 
-Theme.use(ColorScheme.from_seed(Colors.INDIGO, dark=True))
+Theme.seed(Colors.INDIGO)               # rebuild everything from one colour
+Theme.dark()                            # same brand, dark surfaces
+Theme.use(ColorScheme.from_seed(Colors.INDIGO, dark=True))   # explicit scheme
 Theme.scheme.primary_container          # 13 M3 roles
+Theme.outline, Theme.text_secondary     # the roles widgets use most
 Typography.scale(1.2)                   # accessibility-scaled type ramp
+
+page.set_theme(Colors.TEAL, dark=True)  # re-theme a running app
+app.apply_theme()                       # after changing Theme directly
 ```
+
+The palette is mirrored to the native renderer, so Android's own ripples,
+switches, text-selection handles, dialogs and system bars follow it too.
 
 ### Testing your app (v1.2)
 
@@ -701,13 +822,28 @@ Style().bg("#FFFFFF").padding(EdgeInsets.all(16)).border_radius(8).elevation(4).
 ```python
 from pydrud import Responsive
 
-Responsive.text(16)      # Font size -- scales proportionally
+Responsive.text(16)      # Font size
 Responsive.w(48)         # Width
 Responsive.h(48)         # Height
 Responsive.padding(24)   # Padding / margin
 Responsive.spacing(12)   # Gaps between widgets
 Responsive.radius(12)    # Border radius
 Responsive.icon(24)      # Icon size
+```
+
+Scaling is **clamped to 0.9–1.2x** of the 360dp baseline. Phones get
+slightly larger text on larger screens; tablets get a tablet *layout*
+rather than oversized controls. `Responsive.raw()` gives the old
+unclamped behaviour if you really want it.
+
+```python
+Responsive.breakpoint()                             # compact | medium | expanded
+Responsive.is_phone(), Responsive.is_tablet(), Responsive.is_landscape()
+Responsive.value(compact=1, medium=2, expanded=3)   # pick per size class
+Responsive.value(phone=16, tablet=32)               # phone/tablet aliases
+Responsive.columns(min_width=180, max_columns=4)    # how many cards fit
+Responsive.content_width(560)                       # cap long line lengths
+Responsive.clamp(16, 12, 20)                        # scale, then clamp to dp
 ```
 
 ### MediaQuery (v1.0.1)
@@ -721,10 +857,14 @@ height = mq["height"]        # Screen height in dp
 density = mq["density"]      # Pixel density
 scale = mq["scale_factor"]   # width / 360
 
-if MediaQuery.is_phone():    # width <= 428
+if MediaQuery.is_phone():    # width < 600
     # Compact layout
-elif MediaQuery.is_tablet(): # width > 600
+elif MediaQuery.is_tablet(): # width >= 600
     # Expanded layout
+
+MediaQuery.breakpoint()      # compact | medium | expanded
+MediaQuery.is_landscape()
+MediaQuery.safe_area()       # {"top": 48, "bottom": 24, ...}
 ```
 
 **How it works:**

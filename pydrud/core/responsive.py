@@ -25,6 +25,18 @@ Usage::
     r         = Responsive.radius(12)     # border radius
     icon_size = Responsive.icon(24)       # icon size
 
+Scaling is deliberately **clamped** to 0.9x – 1.2x.  A tablet is twice
+as wide as a small phone, but doubling every font and button turns the
+UI into a zoomed-in phone app.  Sizes grow gently, and layouts adapt
+through breakpoints instead::
+
+    cols = Responsive.value(compact=1, medium=2, expanded=3)
+    pad  = Responsive.value(phone=16, tablet=32)
+    n    = Responsive.columns(min_width=180)     # grid columns that fit
+    w    = Responsive.content_width(560)         # readable page width
+
+Use ``Responsive.raw()`` for the old unclamped behaviour.
+
 ``Responsive.init()`` is called automatically when the Android bridge
 sends screen dimensions in the ``ready`` event.  If no device is
 connected (e.g. in tests) the scale factor defaults to 1.0.
@@ -39,16 +51,29 @@ class Responsive:
     # Reference baseline (360 dp = typical phone width).
     _BASELINE_WIDTH = 360
 
+    # Scaling is *clamped*: a 10-inch tablet is 2.4x wider than a small
+    # phone, but its buttons and text must not be 2.4x bigger — that is
+    # what makes naive "responsive" UIs look like a zoomed-in phone app.
+    # Sizes grow gently; layout adapts through breakpoints instead.
+    _MIN_FACTOR = 0.9
+    _MAX_FACTOR = 1.2
+
+    # Material 3 window size classes (dp).
+    BREAKPOINT_MEDIUM = 600
+    BREAKPOINT_EXPANDED = 840
+
     # Current device metrics — populated by ``init()``.
     _screen_width: int = 360
     _screen_height: int = 640
     _density: float = 2.0
     _scale_factor: float = 1.0
+    _text_scale: float = 1.0
 
     # ── initialisation ──────────────────────────────────────────────────
 
     @classmethod
-    def init(cls, width_dp: int, height_dp: int, density: float) -> None:
+    def init(cls, width_dp: int, height_dp: int, density: float,
+             text_scale: float = 1.0) -> None:
         """Set the device screen dimensions and recompute the scale factor.
 
         Called automatically when Python receives the ``ready`` event
@@ -57,6 +82,7 @@ class Responsive:
         cls._screen_width = max(width_dp, 1)
         cls._screen_height = max(height_dp, 1)
         cls._density = density
+        cls._text_scale = text_scale or 1.0
         cls._scale_factor = cls._screen_width / cls._BASELINE_WIDTH
 
     @classmethod
@@ -66,6 +92,7 @@ class Responsive:
         cls._screen_height = 640
         cls._density = 2.0
         cls._scale_factor = 1.0
+        cls._text_scale = 1.0
 
     # ── public scaling methods ──────────────────────────────────────────
 
@@ -126,11 +153,96 @@ class Responsive:
         """Device pixel density."""
         return cls._density
 
+    @classmethod
+    def text_scale(cls) -> float:
+        """The user's system font-size preference (1.0 = default)."""
+        return cls._text_scale
+
+    @classmethod
+    def is_landscape(cls) -> bool:
+        """True when the screen is wider than it is tall."""
+        return cls._screen_width > cls._screen_height
+
+    @classmethod
+    def is_phone(cls) -> bool:
+        """True for compact widths (< 600 dp)."""
+        return cls._screen_width < cls.BREAKPOINT_MEDIUM
+
+    @classmethod
+    def is_tablet(cls) -> bool:
+        """True for medium and expanded widths (>= 600 dp)."""
+        return cls._screen_width >= cls.BREAKPOINT_MEDIUM
+
+    @classmethod
+    def breakpoint(cls) -> str:
+        """The Material 3 window size class: compact/medium/expanded."""
+        if cls._screen_width >= cls.BREAKPOINT_EXPANDED:
+            return "expanded"
+        if cls._screen_width >= cls.BREAKPOINT_MEDIUM:
+            return "medium"
+        return "compact"
+
+    # ── adaptive layout helpers ─────────────────────────────────────────
+
+    @classmethod
+    def value(cls, compact=None, medium=None, expanded=None, **aliases):
+        """Pick a value for the current window size class.
+
+        ::
+
+            columns = Responsive.value(compact=1, medium=2, expanded=3)
+            pad     = Responsive.value(phone=16, tablet=32)
+
+        Missing sizes fall back to the next smaller one, so passing just
+        ``compact`` (or just ``phone``) always works.
+        """
+        compact = compact if compact is not None else aliases.get("phone")
+        medium = medium if medium is not None else aliases.get("tablet")
+        expanded = expanded if expanded is not None else aliases.get("desktop")
+        if medium is None:
+            medium = compact
+        if expanded is None:
+            expanded = medium
+        return {"compact": compact, "medium": medium,
+                "expanded": expanded}[cls.breakpoint()]
+
+    @classmethod
+    def columns(cls, min_width: int = 160, *, max_columns: int = 6,
+                gutter: int = 16) -> int:
+        """How many grid columns fit at *min_width* dp each.
+
+        Mirrors the native ``style.columns = "auto"`` behaviour so Python
+        and Android agree on the layout.
+        """
+        usable = max(cls._screen_width - gutter, 1)
+        count = int(usable // max(min_width + gutter / 2, 1))
+        return max(1, min(max_columns, count))
+
+    @classmethod
+    def content_width(cls, max_width: int = 560) -> int:
+        """Page width capped for large screens (keeps line length sane)."""
+        return min(cls._screen_width, max_width)
+
+    @classmethod
+    def clamp(cls, value: float, minimum: float, maximum: float) -> int:
+        """Scale *value*, then clamp the result into a dp range."""
+        return int(round(max(minimum, min(maximum, value * cls._factor()))))
+
+    @classmethod
+    def raw(cls, value: float) -> int:
+        """Unclamped linear scaling (``value * screen_width / 360``)."""
+        return round(value * cls._scale_factor)
+
     # ── internal ────────────────────────────────────────────────────────
 
     @classmethod
+    def _factor(cls) -> float:
+        """The clamped scale factor actually used for sizing."""
+        return max(cls._MIN_FACTOR, min(cls._MAX_FACTOR, cls._scale_factor))
+
+    @classmethod
     def _scale(cls, value: float) -> int:
-        return round(value * cls._scale_factor)
+        return round(value * cls._factor())
 
 
 class MediaQuery:
@@ -208,10 +320,35 @@ class MediaQuery:
 
     @classmethod
     def is_phone(cls) -> bool:
-        """True if the device width is ≤ 428 dp (typical phone)."""
-        return cls._data["width"] <= 428
+        """True for compact widths (< 600 dp)."""
+        return cls._data["width"] < 600
 
     @classmethod
     def is_tablet(cls) -> bool:
-        """True if the device width is > 600 dp (typical tablet)."""
-        return cls._data["width"] > 600
+        """True for medium and expanded widths (>= 600 dp)."""
+        return cls._data["width"] >= 600
+
+    @classmethod
+    def is_landscape(cls) -> bool:
+        """True when the screen is wider than it is tall."""
+        return cls._data["width"] > cls._data["height"]
+
+    @classmethod
+    def breakpoint(cls) -> str:
+        """The Material 3 window size class: compact/medium/expanded."""
+        width = cls._data["width"]
+        if width >= 840:
+            return "expanded"
+        if width >= 600:
+            return "medium"
+        return "compact"
+
+    @classmethod
+    def safe_area(cls) -> dict:
+        """Insets (dp) that system bars and cutouts occupy."""
+        return {
+            "top": cls._data.get("padding_top", 0),
+            "bottom": cls._data.get("padding_bottom", 0),
+            "left": cls._data.get("padding_left", 0),
+            "right": cls._data.get("padding_right", 0),
+        }

@@ -327,6 +327,10 @@ class Haptics(_Service):
     def vibrate(self, duration_ms: int = 40) -> Result:
         return self._invoke("vibrate", duration=int(duration_ms))
 
+    def selection(self) -> Result:
+        """A crisp tick for selection changes (tabs, pickers, counters)."""
+        return self._invoke("vibrate", duration=8, style="selection")
+
     def pattern(self, timings: Sequence[int], *, repeat: int = -1) -> Result:
         return self._invoke("vibrate", pattern=[int(t) for t in timings],
                             repeat=int(repeat))

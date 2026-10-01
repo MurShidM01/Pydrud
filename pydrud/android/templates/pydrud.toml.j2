@@ -10,6 +10,12 @@ name = "{{ project_name }}"
 package = "{{ package }}"
 scheme = "{{ scheme }}"
 
+[theme]
+# The brand colour the design system is generated from. Change it and run
+# `pydrud sync` to regenerate the native theme resources, or call
+# Theme.seed(...) in your app to re-theme at runtime.
+seed = "{{ seed_color | default("#FF6366F1") }}"
+
 [python.packages]
 {% for requirement in pip_packages | default([]) -%}
 {{ requirement }} = ""

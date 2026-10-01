@@ -225,6 +225,7 @@ public class BridgeService {
                                             json.optBoolean("enabled", true)); break;
                 case "theme_mode":      activity.setThemeMode(
                                             json.optString("mode", "light")); break;
+                case "theme":           activity.applyTheme(json); break;
                 case "route_transition": activity.setRouteTransition(
                                             json.optString("transition", "fade"),
                                             json.optInt("duration", 220)); break;

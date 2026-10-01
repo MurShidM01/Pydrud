@@ -66,15 +66,19 @@ class ListTile(Widget):
 
         self.leading_icon: Optional[str] = None
         self.trailing_icon: Optional[str] = None
+        # Keys given by the caller are preserved — they are how events and
+        # patches find the widget again.
         if isinstance(leading, Widget):
-            leading.key = f"{self.key}_leading"
-            leading._auto_key = False
+            if leading._auto_key:
+                leading.key = f"{self.key}_leading"
+                leading._auto_key = False
             self.children.append(leading)
         elif leading:
             self.leading_icon = str(leading)
         if isinstance(trailing, Widget):
-            trailing.key = f"{self.key}_trailing"
-            trailing._auto_key = False
+            if trailing._auto_key:
+                trailing.key = f"{self.key}_trailing"
+                trailing._auto_key = False
             self.children.append(trailing)
         elif trailing:
             self.trailing_icon = str(trailing)

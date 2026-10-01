@@ -38,6 +38,8 @@ public class ViewFactory {
     private final Map<String, View> viewMap = new HashMap<>();
     private final Map<String, String> parentMap = new HashMap<>();
     private final Map<String, JSONObject> nodeMap = new HashMap<>();
+    /** Views that pad themselves to clear the status / navigation bars. */
+    private final Map<View, int[]> safeAreaViews = new java.util.WeakHashMap<>();
     private final WidgetRegistry registry = new WidgetRegistry();
     private final MaterialViews material;
     private final AdvancedViews advanced;
@@ -57,8 +59,18 @@ public class ViewFactory {
         gestures.setEventDispatcher(d);
     }
 
-    /** Resolve a Pydrud icon name to a drawable resource (public for MaterialViews). */
+    /** Resolve a Pydrud icon name to a drawable resource (legacy fallback). */
     public int iconResource(String name) { return getIconRes(name); }
+
+    /**
+     * A crisp, tinted vector icon at an exact pixel size.
+     *
+     * <p>Preferred over {@link #iconResource(String)} — the framework
+     * bitmaps it returns are low-resolution and visually dated.
+     */
+    public android.graphics.drawable.Drawable icon(String name, int color, int sizePx) {
+        return PydrudIcons.drawable(name, color, sizePx);
+    }
 
     /** Load an asset/remote image into an ImageView (public for MaterialViews). */
     public void loadImage(ImageView view, String src) {
@@ -185,6 +197,38 @@ public class ViewFactory {
         viewMap.clear();
         parentMap.clear();
         nodeMap.clear();
+        safeAreaViews.clear();
+    }
+
+    /**
+     * Re-apply window insets after the system reports them (they can
+     * arrive after the first frame, and change on rotation or when a
+     * foldable unfolds).
+     */
+    public void refreshInsets() {
+        for (Map.Entry<View, int[]> entry : safeAreaViews.entrySet()) {
+            applySafeAreaPadding(entry.getKey(), entry.getValue());
+        }
+    }
+
+    /** spec = {wantTop, wantBottom, basePaddingTop, basePaddingBottom}. */
+    private void applySafeAreaPadding(View view, int[] spec) {
+        if (view == null) return;
+        int top = spec[2] + (spec[0] == 1 ? PydrudTheme.insetTop : 0);
+        int bottom = spec[3] + (spec[1] == 1 ? PydrudTheme.insetBottom : 0);
+        view.setPadding(view.getPaddingLeft(), top, view.getPaddingRight(), bottom);
+    }
+
+    /** Opt a view into edge-to-edge padding via style.safeAreaTop/Bottom. */
+    private void applySafeArea(View view, JSONObject s) {
+        if (s == null) return;
+        boolean top = s.optBoolean("safeAreaTop", false);
+        boolean bottom = s.optBoolean("safeAreaBottom", false);
+        if (!top && !bottom) return;
+        int[] spec = {top ? 1 : 0, bottom ? 1 : 0,
+                      view.getPaddingTop(), view.getPaddingBottom()};
+        safeAreaViews.put(view, spec);
+        applySafeAreaPadding(view, spec);
     }
 
     // ── View creation ────────────────────────────────────────────────────
@@ -275,7 +319,9 @@ public class ViewFactory {
             JSONObject style = json.optJSONObject("style");
             applyDefaultSize(view, json);
             applyStyle(view, style);
+            applySafeArea(view, style);
             applySize(view, style);
+            if (props(json).optBoolean("_fab", false)) styleFab(view, style);
             bindEvents(view, json);
             gestures.bind(view, json);
             applyTransforms(view, style);
@@ -300,6 +346,8 @@ public class ViewFactory {
         if ("Center".equals(type)) alignment = "center";
         int grav = alignment.isEmpty() ? Gravity.NO_GRAVITY : gravity(alignment);
 
+        if ("Card".equals(type)) styleCard(fl, s);
+
         JSONArray arr = json.optJSONArray("children");
         if (arr != null) {
             for (int i = 0; i < arr.length(); i++) {
@@ -310,7 +358,52 @@ public class ViewFactory {
                 fl.addView(c, clp);
             }
         }
+        PydrudTheme.animateLayout(fl);
         return fl;
+    }
+
+    /** Floating action button: circular ripple, real shadow, press response. */
+    private void styleFab(View view, JSONObject s) {
+        int fill = parseColor(s != null ? s.optString("bg", "") : "", PydrudTheme.primary);
+        float elevation = s != null
+            ? (float) s.optDouble("elevation", PydrudTheme.elevationFab)
+            : PydrudTheme.elevationFab;
+        float radius = s != null && s.has("borderRadius")
+            ? dp(s.optInt("borderRadius", (int) PydrudTheme.radiusFab))
+            : dp(PydrudTheme.radiusFab);
+        boolean circle = s == null || !s.has("width") || !s.has("height")
+            || s.optDouble("width", 56) == s.optDouble("height", 56);
+
+        android.graphics.drawable.Drawable base = PydrudTheme.shape(fill, radius);
+        int ripple = PydrudTheme.rippleOn(fill);
+        view.setBackground(circle
+            ? PydrudTheme.circleRipple(base, ripple)
+            : PydrudTheme.ripple(base, ripple, radius));
+        view.setClipToOutline(true);
+        PydrudTheme.elevate(view, elevation);
+        PydrudTheme.pressFeedback(view, PydrudTheme.pressScale - 0.04f, 0f, 4f);
+    }
+
+    /** A card is a rounded surface with a soft shadow — not a grey rectangle. */
+    private void styleCard(View view, JSONObject s) {
+        float radius = s != null && s.has("borderRadius")
+            ? dp(s.optInt("borderRadius", (int) PydrudTheme.radiusCard))
+            : dp(PydrudTheme.radiusCard);
+        int fill = parseColor(s != null ? s.optString("bg", "") : "", PydrudTheme.surface);
+        float elevation = s != null
+            ? (float) s.optDouble("elevation", PydrudTheme.elevationCard)
+            : PydrudTheme.elevationCard;
+
+        if (PydrudTheme.dark) {
+            // Shadows disappear on dark backgrounds; Material lifts the
+            // surface with a tint instead.
+            fill = PydrudTheme.blend(fill, 0xFFFFFFFF, Math.min(0.08f, elevation * 0.018f));
+        }
+        view.setBackground(PydrudTheme.shape(fill, radius,
+            PydrudTheme.dark ? dp(1) : 0,
+            PydrudTheme.dark ? PydrudTheme.outline : Color.TRANSPARENT));
+        view.setClipToOutline(true);
+        PydrudTheme.elevate(view, elevation);
     }
 
     /** Create a LinearLayout (Column, Row, ListView), optionally scrollable. */
@@ -346,11 +439,16 @@ public class ViewFactory {
             }
         }
 
+        PydrudTheme.animateLayout(ll);
+
         if (!scroll) return ll;
 
         if (orientation == LinearLayout.VERTICAL) {
             ScrollView sv = new ScrollView(activity);
             sv.setFillViewport(true);
+            sv.setVerticalScrollBarEnabled(false);
+            sv.setClipToPadding(false);
+            sv.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
             sv.addView(ll, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT));
@@ -358,17 +456,24 @@ public class ViewFactory {
         }
         HorizontalScrollView hsv = new HorizontalScrollView(activity);
         hsv.setFillViewport(true);
+        hsv.setHorizontalScrollBarEnabled(false);
+        hsv.setClipToPadding(false);
+        hsv.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
         hsv.addView(ll, new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT,
             FrameLayout.LayoutParams.MATCH_PARENT));
         return hsv;
     }
 
-    /** Create a simple fixed-column grid using nested LinearLayouts. */
+    /**
+     * A responsive grid. ``columns`` may be a number, or ``"auto"`` together
+     * with ``minItemWidth`` so the column count follows the screen — the
+     * behaviour people expect from a modern layout.
+     */
     private View createGrid(JSONObject json) throws JSONException {
         JSONObject s = json.optJSONObject("style");
-        int columns = Math.max(1, s != null ? s.optInt("columns", 2) : 2);
-        int spacing = dp(s != null ? s.optInt("spacing", 8) : 8);
+        int spacing = PydrudTheme.adaptive(s != null ? (float) s.optDouble("spacing", 8) : 8f);
+        int columns = gridColumns(s);
 
         LinearLayout grid = new LinearLayout(activity);
         grid.setOrientation(LinearLayout.VERTICAL);
@@ -402,72 +507,171 @@ public class ViewFactory {
                 row.addView(new Space(activity), clp);
             }
         }
+        PydrudTheme.animateLayout(grid);
         return grid;
+    }
+
+    /** Resolve the column count, honouring "auto" and tablet breakpoints. */
+    private int gridColumns(JSONObject s) {
+        if (s == null) return 2;
+        Object raw = s.opt("columns");
+        int screen = PydrudTheme.screenWidthDp();
+
+        boolean auto = raw == null
+            || (raw instanceof String && "auto".equals(raw))
+            || (raw instanceof Number && ((Number) raw).intValue() <= 0);
+        if (auto) {
+            int minItem = (int) s.optDouble("minItemWidth", 160);
+            if (minItem <= 0) minItem = 160;
+            return Math.max(1, Math.min(6, screen / minItem));
+        }
+        int columns = Math.max(1, s.optInt("columns", 2));
+        if (s.has("tabletColumns") && screen >= 600) {
+            columns = Math.max(1, s.optInt("tabletColumns", columns));
+        } else if (screen >= 840) {
+            columns = Math.min(6, columns + 2);   // large tablet / foldable
+        } else if (screen >= 600) {
+            columns = Math.min(6, columns + 1);
+        }
+        return columns;
     }
 
     private TextView createTextView(JSONObject json) {
         TextView tv = new TextView(activity);
         JSONObject p = json.optJSONObject("props");
         if (p != null) tv.setText(p.optString("value", ""));
-        tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16);
-        tv.setTextColor(Color.parseColor("#FF1F2937"));
+
+        // Readable defaults first; `style.font` refines them in applyStyle().
         JSONObject s = json.optJSONObject("style");
+        JSONObject f = s != null ? s.optJSONObject("font") : null;
+        float size = f != null ? (float) f.optDouble("size", 16) : 16f;
+        int weight = f != null ? f.optInt("weight", 400) : 400;
+        PydrudTheme.applyTextDefaults(tv, size, weight, PydrudTheme.onSurface);
+
         if (s != null) {
             if (s.has("maxLines")) {
                 tv.setMaxLines(Math.max(1, s.optInt("maxLines", 1)));
-                tv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                tv.setEllipsize(ellipsize(s.optString("overflow", "ellipsis")));
             }
             if (s.optBoolean("selectable", false)) tv.setTextIsSelectable(true);
         }
         return tv;
     }
 
+    private android.text.TextUtils.TruncateAt ellipsize(String overflow) {
+        switch (overflow) {
+            case "clip":   return null;
+            case "start":  return android.text.TextUtils.TruncateAt.START;
+            case "middle": return android.text.TextUtils.TruncateAt.MIDDLE;
+            case "marquee": return android.text.TextUtils.TruncateAt.MARQUEE;
+            default:       return android.text.TextUtils.TruncateAt.END;
+        }
+    }
+
+    /**
+     * A Material-3 style button: ripple, state layers, real elevation and a
+     * 48dp minimum tap target. Five variants — filled, tonal, elevated,
+     * outlined and text — all sharing one shape language.
+     */
     private Button createButton(JSONObject json) {
         JSONObject p = json.optJSONObject("props");
         String text = p != null ? p.optString("text", "") : "";
         JSONObject s = json.optJSONObject("style");
         String variant = s != null ? s.optString("variant", "filled") : "filled";
+        boolean enabled = !(s != null && s.optBoolean("disabled", false));
 
-        Button btn = new Button(activity, null, android.R.attr.borderlessButtonStyle);
+        Button btn = new androidx.appcompat.widget.AppCompatButton(
+            activity, null, android.R.attr.borderlessButtonStyle);
         btn.setText(text);
         btn.setAllCaps(false);
-        btn.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15);
         btn.setMinWidth(0);
         btn.setMinimumWidth(0);
-        btn.setPadding(dp(16), dp(10), dp(16), dp(10));
+        btn.setStateListAnimator(null);   // we install our own below
 
-        int radius = s != null && s.has("borderRadius") ? dp(s.optInt("borderRadius", 8)) : dp(8);
-        int bg = parseColor(s != null ? s.optString("bg", "") : "", Color.parseColor("#FF6366F1"));
+        // Size scale: sm / md / lg.
+        String sizeName = s != null ? s.optString("buttonSize", "md") : "md";
+        float textSp = "sm".equals(sizeName) ? PydrudTheme.textLabel - 0.5f
+            : "lg".equals(sizeName) ? PydrudTheme.textSubtitle : PydrudTheme.textBody;
+        int padH = PydrudTheme.adaptive("sm".equals(sizeName) ? 14 : "lg".equals(sizeName) ? 26 : 20);
+        int padV = PydrudTheme.adaptive("sm".equals(sizeName) ? 8  : "lg".equals(sizeName) ? 15 : 12);
+        int minH = PydrudTheme.adaptive("sm".equals(sizeName) ? PydrudTheme.buttonHeightSm
+            : "lg".equals(sizeName) ? PydrudTheme.buttonHeightLg : PydrudTheme.buttonHeightMd);
 
-        GradientDrawable shape = new GradientDrawable();
-        shape.setCornerRadius(radius);
+        btn.setPadding(padH, padV, padH, padV);
+        btn.setMinHeight(minH);
+        btn.setMinimumHeight(minH);
+        btn.setGravity(Gravity.CENTER);
+
+        int accent = parseColor(s != null ? s.optString("bg", "") : "", PydrudTheme.primary);
+        float radius = s != null && s.has("borderRadius")
+            ? dp(s.optInt("borderRadius", (int) PydrudTheme.radiusButton))
+            : dp(PydrudTheme.radiusButton);
+        if (s != null && s.optBoolean("pill", false)) radius = minH / 2f;
+
+        int label;
         if ("outlined".equals(variant)) {
-            shape.setColor(Color.TRANSPARENT);
-            shape.setStroke(dp(1), bg);
-            btn.setTextColor(bg);
+            label = enabled ? accent : PydrudTheme.disabledFg;
+            btn.setBackground(PydrudTheme.outlineBackground(
+                enabled ? PydrudTheme.alpha(accent, 0.45f) : PydrudTheme.outline,
+                radius, dp(PydrudTheme.borderWidth * 1.4f),
+                PydrudTheme.alpha(accent, PydrudTheme.rippleOpacity)));
         } else if ("text".equals(variant)) {
-            shape.setColor(Color.TRANSPARENT);
-            btn.setTextColor(bg);
+            label = enabled ? accent : PydrudTheme.disabledFg;
+            btn.setBackground(PydrudTheme.ripple(
+                PydrudTheme.shape(Color.TRANSPARENT, radius),
+                PydrudTheme.alpha(accent, PydrudTheme.rippleOpacity), radius));
+        } else if ("tonal".equals(variant)) {
+            int fill = PydrudTheme.dark
+                ? PydrudTheme.blend(accent, PydrudTheme.surface, 0.72f)
+                : PydrudTheme.blend(accent, 0xFFFFFFFF, 0.86f);
+            label = enabled
+                ? (PydrudTheme.dark ? PydrudTheme.lighten(accent, 0.45f)
+                                    : PydrudTheme.darken(accent, 0.35f))
+                : PydrudTheme.disabledFg;
+            btn.setBackground(PydrudTheme.buttonBackground(fill, radius, enabled));
         } else {
-            shape.setColor(bg);
-            btn.setTextColor(Color.WHITE);
+            // filled (default) and elevated
+            label = enabled ? PydrudTheme.onColorFor(accent) : PydrudTheme.disabledFg;
+            btn.setBackground(PydrudTheme.buttonBackground(accent, radius, enabled));
+            float rest = "elevated".equals(variant)
+                ? PydrudTheme.elevationButton * 2f : PydrudTheme.elevationButton;
+            PydrudTheme.elevate(btn, enabled ? rest : 0f);
+            if (enabled) PydrudTheme.pressFeedback(btn, PydrudTheme.pressScale, 0f, 2f);
         }
-        btn.setBackground(shape);
 
-        if (s != null && s.optBoolean("disabled", false)) {
+        if (s != null && s.optJSONObject("font") != null
+                && s.optJSONObject("font").has("color")) {
+            label = parseColor(s.optJSONObject("font").optString("color", ""), label);
+        }
+        PydrudTheme.applyTextDefaults(btn, textSp, 600, label);
+        btn.setLetterSpacing(0.012f);
+
+        // Leading icon (Button(icon="save")).
+        String icon = s != null ? s.optString("icon", "") : "";
+        if (!icon.isEmpty()) {
+            int iconSize = PydrudTheme.adaptive("lg".equals(sizeName) ? 22 : 18);
+            btn.setCompoundDrawablesRelativeWithIntrinsicBounds(
+                PydrudIcons.drawable(icon, label, iconSize), null, null, null);
+            btn.setCompoundDrawablePadding(dp(8));
+        }
+
+        if (!enabled) {
             btn.setEnabled(false);
-            btn.setAlpha(0.5f);
+            btn.setClickable(false);
         }
         return btn;
     }
 
     private EditText createTextField(JSONObject json) {
-        EditText et = new EditText(activity);
+        EditText et = new androidx.appcompat.widget.AppCompatEditText(activity);
         JSONObject p = json.optJSONObject("props");
         if (p != null) {
             et.setText(p.optString("value", ""));
-            if (p.has("hint")) et.setHint(p.optString("hint", ""));
+            String hint = p.optString("hint", "");
+            if (hint.isEmpty()) hint = p.optString("label", "");
+            if (!hint.isEmpty()) et.setHint(hint);
         }
+        styleInput(et, json.optJSONObject("style"));
         JSONObject s = json.optJSONObject("style");
         int inputType = android.text.InputType.TYPE_CLASS_TEXT;
         if (s != null) {
@@ -495,10 +699,68 @@ public class ViewFactory {
             if (s.optBoolean("readOnly", false)) {
                 et.setFocusable(false);
                 et.setClickable(false);
+                et.setAlpha(0.7f);
             }
         }
         et.setInputType(inputType);
+        if (s != null && s.optBoolean("multiline", false)) {
+            et.setGravity(Gravity.TOP | Gravity.START);
+            et.setMinHeight(PydrudTheme.adaptive(96));
+        }
         return et;
+    }
+
+    /**
+     * Give an input the calm, rounded Pydrud look: a filled surface that
+     * grows a coloured border on focus, comfortable padding and a tinted
+     * caret — the Flutter TextField feel, without a wrapper layout.
+     */
+    private void styleInput(EditText et, JSONObject s) {
+        int accent = parseColor(s != null ? s.optString("accent", "") : "",
+                                PydrudTheme.primary);
+        boolean outlined = s != null && "outlined".equals(s.optString("variant", "filled"));
+        float radius = s != null && s.has("borderRadius")
+            ? dp(s.optInt("borderRadius", (int) PydrudTheme.radiusInput))
+            : dp(PydrudTheme.radiusInput);
+
+        int fill = outlined ? PydrudTheme.surface : PydrudTheme.surfaceVariant;
+        int focusFill = outlined ? PydrudTheme.surface
+                                 : PydrudTheme.blend(PydrudTheme.surfaceVariant,
+                                                     PydrudTheme.surface, 0.55f);
+        et.setBackground(PydrudTheme.inputBackground(
+            fill, focusFill, radius,
+            outlined ? PydrudTheme.outlineStrong : PydrudTheme.alpha(PydrudTheme.outline, 0f),
+            accent, dp(1.2f)));
+
+        int padH = PydrudTheme.adaptive(16);
+        int padV = PydrudTheme.adaptive(14);
+        et.setPadding(padH, padV, padH, padV);
+        et.setMinHeight(PydrudTheme.adaptive(PydrudTheme.inputHeight));
+        PydrudTheme.applyTextDefaults(et, 15.5f, 400, PydrudTheme.onSurface);
+        et.setHintTextColor(PydrudTheme.alpha(PydrudTheme.onSurfaceVariant, 0.75f));
+        et.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+
+        // Leading glyph (TextField(icon="magnify")).
+        String icon = s != null ? s.optString("icon", "") : "";
+        if (!icon.isEmpty()) {
+            et.setCompoundDrawablesRelativeWithIntrinsicBounds(
+                PydrudIcons.drawable(icon, PydrudTheme.onSurfaceVariant,
+                                     PydrudTheme.adaptive(20)), null, null, null);
+            et.setCompoundDrawablePadding(dp(10));
+        }
+
+        // Caret + selection in the app colour (stock blue looks out of place).
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                android.graphics.drawable.GradientDrawable caret =
+                    new android.graphics.drawable.GradientDrawable();
+                caret.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
+                caret.setColor(accent);
+                caret.setSize(dp(2), 0);
+                et.setTextCursorDrawable(caret);
+            }
+            et.setHighlightColor(PydrudTheme.alpha(accent, 0.25f));
+        } catch (Throwable ignored) {}
     }
 
     private ImageView createImageView(JSONObject json) {
@@ -542,52 +804,97 @@ public class ViewFactory {
     private ImageView createIconView(JSONObject json) {
         JSONObject p = json.optJSONObject("props");
         String name = p != null ? p.optString("name", "star") : "star";
-        ImageView iv = new ImageView(activity);
-        int res = getIconRes(name);
-        if (res != 0) iv.setImageResource(res);
+        ImageView iv = new androidx.appcompat.widget.AppCompatImageView(activity);
+
         JSONObject s = json.optJSONObject("style");
-        int size = dp(24);
+        float size = 24f;
+        int tint = PydrudTheme.onSurfaceVariant;
         if (s != null && s.optJSONObject("font") != null) {
             JSONObject f = s.optJSONObject("font");
-            size = dp((int) f.optDouble("size", 24));
-            if (f.has("color")) {
-                try {
-                    iv.setColorFilter(Color.parseColor(f.optString("color")));
-                } catch (Exception ignored) {}
-            }
+            size = (float) f.optDouble("size", 24);
+            tint = parseColor(f.optString("color", ""), tint);
         }
-        iv.setLayoutParams(new ViewGroup.LayoutParams(size, size));
+        int px = PydrudTheme.adaptive(size);
+        iv.setImageDrawable(PydrudIcons.drawable(name, tint, px));
+        iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        iv.setLayoutParams(new ViewGroup.LayoutParams(px, px));
         return iv;
     }
 
     private CheckBox createCheckbox(JSONObject json) {
-        CheckBox cb = new CheckBox(activity);
+        CheckBox cb = new androidx.appcompat.widget.AppCompatCheckBox(activity);
         JSONObject p = json.optJSONObject("props");
         if (p != null) {
             cb.setText(p.optString("label", ""));
             cb.setChecked(p.optBoolean("checked", false));
         }
+        styleToggle(cb, json.optJSONObject("style"));
         return cb;
     }
 
-    private Switch createSwitchView(JSONObject json) {
-        Switch sw = new Switch(activity);
+    private CompoundButton createSwitchView(JSONObject json) {
+        androidx.appcompat.widget.SwitchCompat sw =
+            new androidx.appcompat.widget.SwitchCompat(activity);
         JSONObject p = json.optJSONObject("props");
         if (p != null) {
             sw.setText(p.optString("label", ""));
             sw.setChecked(p.optBoolean("active", false));
         }
+        JSONObject s = json.optJSONObject("style");
+        int accent = parseColor(s != null ? s.optString("activeColor", "") : "",
+                                PydrudTheme.primary);
+        styleToggle(sw, s);
+        sw.setSwitchPadding(dp(12));
+        try {
+            android.content.res.ColorStateList thumb = new android.content.res.ColorStateList(
+                new int[][]{
+                    new int[]{-android.R.attr.state_enabled},
+                    new int[]{android.R.attr.state_checked},
+                    new int[]{},
+                },
+                new int[]{PydrudTheme.disabledFg, accent,
+                          PydrudTheme.dark ? 0xFF9BA6B8 : 0xFFFFFFFF});
+            android.content.res.ColorStateList track = new android.content.res.ColorStateList(
+                new int[][]{
+                    new int[]{-android.R.attr.state_enabled},
+                    new int[]{android.R.attr.state_checked},
+                    new int[]{},
+                },
+                new int[]{PydrudTheme.disabledBg,
+                          PydrudTheme.alpha(accent, 0.42f),
+                          PydrudTheme.alpha(PydrudTheme.onSurfaceVariant, 0.35f)});
+            sw.setThumbTintList(thumb);
+            sw.setTrackTintList(track);
+        } catch (Throwable ignored) {}
         return sw;
     }
 
     private RadioButton createRadio(JSONObject json) {
-        RadioButton rb = new RadioButton(activity);
+        RadioButton rb = new androidx.appcompat.widget.AppCompatRadioButton(activity);
         JSONObject p = json.optJSONObject("props");
         if (p != null) {
             rb.setText(p.optString("label", ""));
             rb.setChecked(p.optBoolean("selected", false));
         }
+        styleToggle(rb, json.optJSONObject("style"));
         return rb;
+    }
+
+    /** Shared polish for Checkbox / Radio / Switch rows. */
+    private void styleToggle(CompoundButton button, JSONObject s) {
+        int accent = parseColor(s != null ? s.optString("activeColor", "") : "",
+                                PydrudTheme.primary);
+        PydrudTheme.applyTextDefaults(button, 15f, 500, PydrudTheme.onSurface);
+        PydrudTheme.tintCompound(button, accent);
+        int minH = PydrudTheme.touchTarget();
+        button.setMinHeight(minH);
+        button.setMinimumHeight(minH);
+        button.setGravity(Gravity.CENTER_VERTICAL);
+        button.setPaddingRelative(dp(8), dp(6), dp(4), dp(6));
+        button.setCompoundDrawablePadding(dp(10));
+        button.setBackground(PydrudTheme.ripple(
+            PydrudTheme.shape(Color.TRANSPARENT, dp(10)),
+            PydrudTheme.alpha(accent, 0.10f), dp(10)));
     }
 
     private ProgressBar createProgressBar(JSONObject json) {
@@ -598,28 +905,40 @@ public class ViewFactory {
             : new ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal);
         JSONObject p = json.optJSONObject("props");
         boolean indeterminate = p == null || p.optBoolean("indeterminate", true);
+        int accent = parseColor(s != null ? s.optString("color", "") : "",
+                                PydrudTheme.primary);
+
+        if (!circular) {
+            int height = PydrudTheme.adaptive(
+                s != null ? (float) s.optDouble("thickness", 6) : 6f);
+            pb.setProgressDrawable(PydrudTheme.trackDrawable(
+                PydrudTheme.alpha(accent, PydrudTheme.dark ? 0.24f : 0.16f),
+                accent, height));
+            pb.setMinimumHeight(height);
+            pb.setIndeterminateTintList(
+                android.content.res.ColorStateList.valueOf(accent));
+        } else {
+            int size = PydrudTheme.adaptive(
+                s != null ? (float) s.optDouble("size", 36) : 36f);
+            pb.setLayoutParams(new ViewGroup.LayoutParams(size, size));
+            pb.setIndeterminateTintList(
+                android.content.res.ColorStateList.valueOf(accent));
+            pb.setProgressTintList(
+                android.content.res.ColorStateList.valueOf(accent));
+        }
+
         pb.setIndeterminate(indeterminate);
         if (!indeterminate && p != null) {
-            pb.setMax(100);
-            pb.setProgress((int) Math.round(p.optDouble("value", 0) * 100));
-        }
-        if (s != null && s.has("color")) {
-            try {
-                int c = Color.parseColor(s.optString("color"));
-                pb.getIndeterminateDrawable().setColorFilter(
-                    c, android.graphics.PorterDuff.Mode.SRC_IN);
-                if (pb.getProgressDrawable() != null) {
-                    pb.getProgressDrawable().setColorFilter(
-                        c, android.graphics.PorterDuff.Mode.SRC_IN);
-                }
-            } catch (Exception ignored) {}
+            pb.setMax(1000);
+            pb.setProgress((int) Math.round(p.optDouble("value", 0) * 1000));
         }
         return pb;
     }
 
     private SeekBar createSlider(JSONObject json) {
-        SeekBar sb = new SeekBar(activity);
+        SeekBar sb = new androidx.appcompat.widget.AppCompatSeekBar(activity);
         JSONObject p = json.optJSONObject("props");
+        JSONObject s = json.optJSONObject("style");
         double min = p != null ? p.optDouble("min", 0) : 0;
         double max = p != null ? p.optDouble("max", 100) : 100;
         double value = p != null ? p.optDouble("value", min) : min;
@@ -627,32 +946,107 @@ public class ViewFactory {
         double span = (max - min) == 0 ? 1 : (max - min);
         sb.setProgress((int) Math.round((value - min) / span * 1000));
         sb.setTag(android.R.id.text1, new double[]{min, max});
+
+        int accent = parseColor(s != null ? s.optString("color", "") : "",
+                                PydrudTheme.primary);
+        int trackH = PydrudTheme.adaptive(6);
+        int thumbSize = PydrudTheme.adaptive(20);
+        sb.setProgressDrawable(PydrudTheme.trackDrawable(
+            PydrudTheme.alpha(accent, PydrudTheme.dark ? 0.26f : 0.18f), accent, trackH));
+        sb.setThumb(PydrudTheme.thumbDrawable(accent, thumbSize));
+        sb.setThumbOffset(0);
+        sb.setSplitTrack(false);
+        sb.setMinimumHeight(PydrudTheme.touchTarget());
+        int padH = thumbSize / 2;
+        sb.setPadding(padH, dp(12), padH, dp(12));
         return sb;
     }
 
     private Spinner createDropdown(JSONObject json) {
-        Spinner sp = new Spinner(activity);
+        Spinner sp = new androidx.appcompat.widget.AppCompatSpinner(activity);
         JSONObject p = json.optJSONObject("props");
-        List<String> options = new ArrayList<>();
+        JSONObject s = json.optJSONObject("style");
+        final List<String> options = new ArrayList<>();
         if (p != null) {
             JSONArray arr = p.optJSONArray("options");
             if (arr != null) {
                 for (int i = 0; i < arr.length(); i++) options.add(arr.optString(i, ""));
             }
         }
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(
-            activity, android.R.layout.simple_spinner_item, options);
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+
+        final int accent = parseColor(s != null ? s.optString("accent", "") : "",
+                                      PydrudTheme.primary);
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(
+                activity, android.R.layout.simple_spinner_item, options) {
+            @Override public View getView(int position, View convertView, ViewGroup parent) {
+                TextView tv = rowView(convertView, parent, false);
+                tv.setText(position < options.size() ? options.get(position) : "");
+                return tv;
+            }
+            @Override public View getDropDownView(int position, View convertView,
+                                                  ViewGroup parent) {
+                TextView tv = rowView(convertView, parent, true);
+                tv.setText(position < options.size() ? options.get(position) : "");
+                return tv;
+            }
+            private TextView rowView(View convertView, ViewGroup parent, boolean dropdown) {
+                TextView tv = (convertView instanceof TextView)
+                    ? (TextView) convertView : new TextView(activity);
+                PydrudTheme.applyTextDefaults(tv, 15f, dropdown ? 400 : 500,
+                                              PydrudTheme.onSurface);
+                int padH = PydrudTheme.adaptive(dropdown ? 18 : 2);
+                int padV = PydrudTheme.adaptive(dropdown ? 14 : 2);
+                tv.setPadding(padH, padV, padH, padV);
+                tv.setSingleLine(true);
+                tv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                tv.setGravity(Gravity.CENTER_VERTICAL);
+                if (dropdown) {
+                    tv.setMinHeight(PydrudTheme.touchTarget());
+                    tv.setBackground(PydrudTheme.ripple(
+                        PydrudTheme.shape(Color.TRANSPARENT, 0),
+                        PydrudTheme.alpha(accent, 0.12f), 0));
+                }
+                return tv;
+            }
+        };
         sp.setAdapter(adapter);
+
         int index = p != null ? p.optInt("index", 0) : 0;
         if (index >= 0 && index < options.size()) sp.setSelection(index, false);
+
+        // The stock spinner background is a grey gradient from 2012.
+        float radius = s != null && s.has("borderRadius")
+            ? dp(s.optInt("borderRadius", 14)) : dp(14);
+        android.graphics.drawable.LayerDrawable box =
+            new android.graphics.drawable.LayerDrawable(
+                new android.graphics.drawable.Drawable[]{
+                    PydrudTheme.shape(PydrudTheme.surfaceVariant, radius,
+                                      dp(1.2f), PydrudTheme.outline),
+                    PydrudIcons.drawable("expand_more", PydrudTheme.onSurfaceVariant,
+                                         PydrudTheme.adaptive(20))
+                });
+        box.setLayerGravity(1, Gravity.END | Gravity.CENTER_VERTICAL);
+        box.setLayerInsetEnd(1, PydrudTheme.adaptive(14));
+        sp.setBackground(PydrudTheme.ripple(box, PydrudTheme.alpha(accent, 0.10f), radius));
+        int padH = PydrudTheme.adaptive(16);
+        int padV = PydrudTheme.adaptive(13);
+        sp.setPaddingRelative(padH, padV, PydrudTheme.adaptive(42), padV);
+        sp.setMinimumHeight(PydrudTheme.adaptive(PydrudTheme.inputHeight));
+
+        try {
+            sp.setPopupBackgroundDrawable(PydrudTheme.shape(
+                PydrudTheme.surface, dp(PydrudTheme.radiusInput),
+                dp(PydrudTheme.borderWidth), PydrudTheme.outline));
+            sp.setDropDownVerticalOffset(PydrudTheme.adaptive(PydrudTheme.inputHeight));
+        } catch (Throwable ignored) {}
         return sp;
     }
 
     private View createDivider(JSONObject json) {
         View v = new View(activity);
         JSONObject s = json.optJSONObject("style");
-        int color = parseColor(s != null ? s.optString("color", "") : "", Color.parseColor("#FFCCCCCC"));
+        int color = parseColor(s != null ? s.optString("color", "") : "",
+                               PydrudTheme.outline);
         v.setBackgroundColor(color);
         return v;
     }
@@ -679,6 +1073,7 @@ public class ViewFactory {
         if (events.contains("click")) {
             view.setClickable(true);
             view.setOnClickListener(v -> eventDispatcher.dispatch("click", key));
+            addTouchFeedback(view, json);
         }
         if (events.contains("long_press")) {
             view.setLongClickable(true);
@@ -750,6 +1145,46 @@ public class ViewFactory {
                         }
                         @Override public void onNothingSelected(AdapterView<?> parent) {}
                     });
+            }
+        }
+    }
+
+    /**
+     * Make a tappable widget feel alive.
+     *
+     * <p>Anything clickable gets a bounded ripple plus (for small targets) a
+     * gentle press animation, and icons grow an invisible 48dp hit area so a
+     * thumb actually lands on them. Widgets that already draw their own
+     * feedback — buttons, switches, inputs — are skipped.
+     */
+    private void addTouchFeedback(View view, JSONObject json) {
+        if (view == null) return;
+        if (view instanceof Button || view instanceof CompoundButton
+            || view instanceof EditText || view instanceof SeekBar
+            || view instanceof Spinner) {
+            return;
+        }
+        String type = json != null ? json.optString("type", "") : "";
+        JSONObject s = json != null ? json.optJSONObject("style") : null;
+        if (s != null && !s.optBoolean("feedback", true)) return;
+
+        int tint = PydrudTheme.rippleOn(parseColor(
+            s != null ? s.optString("bg", "") : "", PydrudTheme.surface));
+
+        boolean circular = "Icon".equals(type) || "Avatar".equals(type)
+            || (s != null && s.optBoolean("circular", false))
+            || (s != null && "FAB".equals(s.optString("role", "")));
+
+        if (circular) {
+            PydrudTheme.addCircleRipple(view, tint);
+            PydrudTheme.pressFeedback(view, 0.88f, 0f, 0f);
+            PydrudTheme.expandTouch(view, PydrudTheme.touchTarget());
+        } else {
+            float radius = s != null && s.has("borderRadius")
+                ? dp(s.optInt("borderRadius", 0)) : 0f;
+            PydrudTheme.addRipple(view, tint, radius);
+            if ("Card".equals(type)) {
+                PydrudTheme.pressFeedback(view, 0.985f, 0f, 2f);
             }
         }
     }
@@ -826,7 +1261,13 @@ public class ViewFactory {
             if (s.has("left"))   { grav |= Gravity.START;  lp.leftMargin = dp(s.optInt("left", 0)); }
             if (s.has("right"))  { grav |= Gravity.END;    lp.rightMargin = dp(s.optInt("right", 0)); }
             if (s.has("top"))    { grav |= Gravity.TOP;    lp.topMargin = dp(s.optInt("top", 0)); }
-            if (s.has("bottom")) { grav |= Gravity.BOTTOM; lp.bottomMargin = dp(s.optInt("bottom", 0)); }
+            if (s.has("bottom")) {
+                grav |= Gravity.BOTTOM;
+                // Floating elements clear the gesture bar as well as their
+                // own offset, otherwise a FAB sits on top of it.
+                lp.bottomMargin = dp(s.optInt("bottom", 0))
+                    + (s.optBoolean("safeAreaBottom", true) ? PydrudTheme.insetBottom : 0);
+            }
             if (grav == Gravity.NO_GRAVITY) grav = Gravity.TOP | Gravity.START;
         } else if (s != null && s.has("alignment")) {
             grav = gravity(s.optString("alignment", ""));
@@ -978,8 +1419,21 @@ public class ViewFactory {
             int radius = s.has("borderRadius") ? dp(s.optInt("borderRadius", 0)) : 0;
             boolean hasBorder = s.has("border");
             boolean hasBg = s.has("bg");
+            boolean hasGradient = s.has("gradient");
+            boolean skipBackground = view instanceof Button || view instanceof EditText
+                || view instanceof CompoundButton || view instanceof SeekBar
+                || view instanceof Spinner;
 
-            if (hasBg && radius == 0 && !hasBorder) {
+            if (skipBackground) {
+                // These widgets own their background (ripple + state layers);
+                // overwriting it here would undo the Material styling.
+            } else if (hasGradient) {
+                GradientDrawable gd = gradientDrawable(s.optJSONObject("gradient"));
+                gd.setCornerRadius(radius);
+                applyBorder(gd, s);
+                view.setBackground(withSideBorders(gd, s));
+                if (radius > 0) view.setClipToOutline(true);
+            } else if (hasBg && radius == 0 && !hasBorder) {
                 int c = parseColor(s.optString("bg", ""), Color.TRANSPARENT);
                 view.setBackgroundColor(c);
             } else if (hasBg || radius > 0 || hasBorder) {
@@ -987,17 +1441,15 @@ public class ViewFactory {
                 gd.setCornerRadius(radius);
                 gd.setColor(hasBg ? parseColor(s.optString("bg", ""), Color.TRANSPARENT)
                                   : Color.TRANSPARENT);
-                if (hasBorder) {
-                    JSONObject b = s.optJSONObject("border");
-                    JSONObject side = b != null ? b.optJSONObject("left") : null;
-                    if (side != null) {
-                        gd.setStroke(dp((int) side.optDouble("width", 1)),
-                                     parseColor(side.optString("color", ""), Color.BLACK));
-                    }
-                }
-                view.setBackground(gd);
+                applyBorder(gd, s);
+                view.setBackground(withSideBorders(gd, s));
                 if (radius > 0) view.setClipToOutline(true);
             }
+
+            // Minimum sizes keep rows on the 48dp touch grid even when
+            // their content is short.
+            if (s.has("minHeight")) view.setMinimumHeight(dp((float) s.optDouble("minHeight", 0)));
+            if (s.has("minWidth")) view.setMinimumWidth(dp((float) s.optDouble("minWidth", 0)));
 
             // Padding
             if (s.has("padding")) {
@@ -1047,29 +1499,46 @@ public class ViewFactory {
                 }
             }
 
-            // Font
+            // Font — real weights (API 28+), tuned tracking and line height.
             if (s.has("font") && view instanceof TextView) {
                 JSONObject f = s.optJSONObject("font");
                 TextView tv = (TextView) view;
                 if (f != null) {
+                    float size = (float) f.optDouble("size", tv.getTextSize()
+                        / activity.getResources().getDisplayMetrics().scaledDensity);
                     if (f.has("size")) {
                         tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP,
-                                       (float) f.optDouble("size", 14));
+                                       PydrudTheme.scaledSp(size));
                     }
                     if (f.has("color")) {
-                        try { tv.setTextColor(Color.parseColor(f.optString("color"))); }
-                        catch (Exception ignored) {}
+                        tv.setTextColor(parseColor(f.optString("color", ""),
+                                                   tv.getCurrentTextColor()));
                     }
                     int weight = f.optInt("weight", 400);
-                    boolean bold = weight >= 600;
                     boolean italic = f.optBoolean("italic", false);
-                    int typeface = Typeface.NORMAL;
-                    if (bold && italic) typeface = Typeface.BOLD_ITALIC;
-                    else if (bold) typeface = Typeface.BOLD;
-                    else if (italic) typeface = Typeface.ITALIC;
                     String family = f.optString("family", "");
-                    tv.setTypeface(family.isEmpty() ? null : Typeface.create(family, typeface),
-                                   typeface);
+                    tv.setTypeface(family.isEmpty()
+                        ? PydrudTheme.typeface(weight, italic)
+                        : PydrudTheme.typeface(family, weight, italic));
+                    if (f.has("size") || f.has("weight")) {
+                        tv.setLetterSpacing(PydrudTheme.letterSpacingFor(size, weight));
+                        tv.setLineSpacing(0f, size >= PydrudTheme.textHeadline
+                            ? PydrudTheme.lineHeight * 0.82f : PydrudTheme.lineHeight);
+                    }
+                    if (f.has("lineHeight")) {
+                        tv.setLineSpacing(0f, (float) f.optDouble("lineHeight", 1.22));
+                    }
+                    if (f.has("letterSpacing")) {
+                        tv.setLetterSpacing((float) f.optDouble("letterSpacing", 0));
+                    }
+                    if (f.optBoolean("underline", false)) {
+                        tv.setPaintFlags(tv.getPaintFlags()
+                            | android.graphics.Paint.UNDERLINE_TEXT_FLAG);
+                    }
+                    if (f.optBoolean("strikethrough", false)) {
+                        tv.setPaintFlags(tv.getPaintFlags()
+                            | android.graphics.Paint.STRIKE_THRU_TEXT_FLAG);
+                    }
                 }
             }
 
@@ -1085,7 +1554,9 @@ public class ViewFactory {
 
             if (s.has("opacity")) view.setAlpha((float) s.optDouble("opacity", 1.0));
             if (s.has("rotate")) view.setRotation((float) s.optDouble("rotate", 0));
-            if (s.has("elevation")) view.setElevation(dp(s.optInt("elevation", 0)));
+            if (s.has("elevation")) {
+                PydrudTheme.elevate(view, (float) s.optDouble("elevation", 0));
+            }
             if (s.has("visible")) {
                 view.setVisibility(s.optBoolean("visible", true) ? View.VISIBLE : View.GONE);
             }
@@ -1206,8 +1677,15 @@ public class ViewFactory {
         }
 
         if (view instanceof ImageView && p.has("name")) {
-            int res = getIconRes(p.optString("name", "star"));
-            if (res != 0) ((ImageView) view).setImageResource(res);
+            ImageView iv = (ImageView) view;
+            JSONObject style = node != null ? node.optJSONObject("style") : null;
+            JSONObject font = style != null ? style.optJSONObject("font") : null;
+            float size = font != null ? (float) font.optDouble("size", 24) : 24f;
+            int tint = font != null
+                ? parseColor(font.optString("color", ""), PydrudTheme.onSurfaceVariant)
+                : PydrudTheme.onSurfaceVariant;
+            iv.setImageDrawable(PydrudIcons.drawable(
+                p.optString("name", "star"), tint, PydrudTheme.adaptive(size)));
             return;
         }
 
@@ -1221,13 +1699,116 @@ public class ViewFactory {
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     private int dp(int value) {
-        return Math.round(value * activity.getResources().getDisplayMetrics().density);
+        return PydrudTheme.dp(value);
+    }
+
+    private int dp(float value) {
+        return PydrudTheme.dp(value);
     }
 
     private int parseColor(String value, int fallback) {
-        if (value == null || value.isEmpty()) return fallback;
-        try { return Color.parseColor(value); }
-        catch (Exception e) { return fallback; }
+        return PydrudTheme.parse(value, fallback);
+    }
+
+    /** Build a linear gradient background from ``style.gradient``. */
+    private GradientDrawable gradientDrawable(JSONObject g) {
+        GradientDrawable gd = new GradientDrawable();
+        if (g == null) return gd;
+        JSONArray colorsJson = g.optJSONArray("colors");
+        int[] colors;
+        if (colorsJson != null && colorsJson.length() >= 2) {
+            colors = new int[colorsJson.length()];
+            for (int i = 0; i < colorsJson.length(); i++) {
+                colors[i] = parseColor(colorsJson.optString(i, ""), PydrudTheme.primary);
+            }
+        } else {
+            colors = new int[]{PydrudTheme.primary,
+                               PydrudTheme.lighten(PydrudTheme.primary, 0.3f)};
+        }
+        gd.setColors(colors);
+        gd.setOrientation(gradientOrientation(g.optString("direction", "vertical")));
+        if ("radial".equals(g.optString("kind", "linear"))) {
+            gd.setGradientType(GradientDrawable.RADIAL_GRADIENT);
+            gd.setGradientRadius(dp((float) g.optDouble("radius", 160)));
+        }
+        return gd;
+    }
+
+    private GradientDrawable.Orientation gradientOrientation(String direction) {
+        switch (direction) {
+            case "horizontal": return GradientDrawable.Orientation.LEFT_RIGHT;
+            case "diagonal":   return GradientDrawable.Orientation.TL_BR;
+            case "diagonal_up": return GradientDrawable.Orientation.BL_TR;
+            case "up":         return GradientDrawable.Orientation.BOTTOM_TOP;
+            default:           return GradientDrawable.Orientation.TOP_BOTTOM;
+        }
+    }
+
+    /**
+     * Uniform borders are drawn as a stroke so they follow the corner
+     * radius. Non-uniform ones (e.g. a single hairline under an app bar)
+     * are handled by {@link #withSideBorders}.
+     */
+    private void applyBorder(GradientDrawable gd, JSONObject s) {
+        JSONObject b = s.optJSONObject("border");
+        if (b == null) return;
+        JSONObject side = b.optJSONObject("all");
+        if (side == null && uniformBorder(b)) side = b.optJSONObject("left");
+        if (side == null) {
+            // Flat "border": {"width": 1, "color": "#..."} shorthand.
+            if (b.has("width") || b.has("color")) side = b;
+            else return;
+        }
+        int width = dp((float) side.optDouble("width", 1));
+        if (width <= 0) return;
+        gd.setStroke(width, parseColor(side.optString("color", ""), PydrudTheme.outline));
+    }
+
+    /** True when every declared side has the same width and colour. */
+    private boolean uniformBorder(JSONObject b) {
+        String[] names = {"left", "top", "right", "bottom"};
+        double width = -1;
+        String color = null;
+        for (String name : names) {
+            JSONObject side = b.optJSONObject(name);
+            if (side == null) return false;           // a side is missing
+            double w = side.optDouble("width", 1);
+            String c = side.optString("color", "");
+            if (width < 0) { width = w; color = c; }
+            else if (w != width || !c.equals(color)) return false;
+        }
+        return true;
+    }
+
+    /**
+     * Draw individual edges by painting the border colour behind the
+     * background and insetting the background by each side's width — the
+     * only way to get a bottom-only rule that works at any height.
+     */
+    private android.graphics.drawable.Drawable withSideBorders(
+            android.graphics.drawable.Drawable background, JSONObject s) {
+        JSONObject b = s.optJSONObject("border");
+        if (b == null || b.optJSONObject("all") != null || uniformBorder(b)) return background;
+        int[] widths = new int[4];
+        int color = PydrudTheme.outline;
+        String[] names = {"left", "top", "right", "bottom"};
+        boolean any = false;
+        for (int i = 0; i < names.length; i++) {
+            JSONObject side = b.optJSONObject(names[i]);
+            if (side == null) continue;
+            widths[i] = dp((float) side.optDouble("width", 1));
+            if (widths[i] > 0) {
+                any = true;
+                color = parseColor(side.optString("color", ""), PydrudTheme.outline);
+            }
+        }
+        if (!any) return background;
+        android.graphics.drawable.LayerDrawable layers =
+            new android.graphics.drawable.LayerDrawable(
+                new android.graphics.drawable.Drawable[] {
+                    new android.graphics.drawable.ColorDrawable(color), background });
+        layers.setLayerInset(1, widths[0], widths[1], widths[2], widths[3]);
+        return layers;
     }
 
     private ImageView.ScaleType scaleType(String fit) {
