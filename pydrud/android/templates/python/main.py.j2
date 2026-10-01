@@ -9,10 +9,12 @@ Edit this file, then run `pydrud run` (or `pydrud run --watch`).
 """
 
 from pydrud import (
-    App, AppBar, Button, Card, Center, Checkbox, Colors, Column, Container,
-    Divider, EdgeInsets, FloatingActionButton, Icon, Icons, ListView,
-    Responsive, Router, Row, Scaffold, SizedBox, Slider, State, Switch, Text,
-    TextField,
+    Animation, App, AppBar, Avatar, Badge, Button, Card, Center, Chart,
+    Checkbox, Chip, Colors, Column, Container, Dismissible, Divider,
+    EdgeInsets, FadeIn, FloatingActionButton, GestureDetector, Icon, Icons,
+    ListTile, ListView, ProgressBar, Rating, Responsive, Router, Row,
+    Scaffold, SearchBar, SegmentedButton, SizedBox, Slider, State, Switch,
+    Tab, Tabs, Text, TextField,
 )
 
 # ── State ───────────────────────────────────────────────────────────────────
@@ -23,6 +25,10 @@ new_todo = State("")
 dark_mode = State(False)
 volume = State(40.0)
 agreed = State(False)
+tab_index = State(0)
+interests = State({"Python", "Android"})
+rating = State(4.0)
+query = State("")
 
 router = Router()
 app: App | None = None
@@ -58,6 +64,8 @@ def home_screen(page):
                 key="home_bar",
                 bg_color=Colors.PRIMARY,
                 actions=[
+                    Icon(Icons.DASHBOARD, key="to_showcase", color=Colors.WHITE)
+                    .on_click(lambda _e: router.push("showcase")),
                     Icon(Icons.SETTINGS, key="to_settings", color=Colors.WHITE)
                     .on_click(lambda _e: router.push("settings")),
                 ],
@@ -208,9 +216,140 @@ def settings_screen(page):
     )
 
 
+def showcase_screen(page):
+    """A tour of the Pydrud 1.2 component library."""
+    page.bgcolor = Colors.BACKGROUND if not dark_mode.value else "#FF111827"
+
+    def select_tab(event):
+        tab_index.value = int(event.value or 0)
+        refresh()
+
+    def toggle_interest(name):
+        def handler(event):
+            chosen = set(interests.value)
+            if event.value:
+                chosen.add(name)
+            else:
+                chosen.discard(name)
+            interests.value = chosen
+            refresh()
+        return handler
+
+    def set_rating(event):
+        rating.value = float(event.value or 0)
+        refresh()
+
+    def search(event):
+        query.value = str(event.value or "")
+        refresh()
+
+    def confirm_delete(_event):
+        page.dialog.confirm(
+            "Delete this item?", title="Are you sure?",
+        ).then(lambda yes: page.toast("Deleted" if yes else "Kept"))
+
+    def save_note(_event):
+        page.storage.set("note", query.value)
+        page.haptics.impact("light")
+        page.snack_bar("Saved to device storage", action="OK")
+
+    components_tab = Column(spacing=12, children=[
+        SizedBox(height=8),
+        Row(key="showcase_people", spacing=8, children=[
+            Avatar(initials="AD", key="avatar_ad"),
+            Avatar(icon=Icons.PERSON, key="avatar_icon", bg=Colors.TEAL),
+            Badge(3, key="avatar_badge",
+                  child=Icon(Icons.NOTIFICATIONS, key="bell", size=28)),
+        ]),
+        SearchBar(query.value, key="showcase_search",
+                  hint="Search components").on_change(search),
+        Row(key="showcase_chips", spacing=8, children=[
+            Chip(name, key=f"chip_{name}", variant="filter",
+                 selected=name in interests.value).on_change(
+                     toggle_interest(name))
+            for name in ("Python", "Android", "Flutter")
+        ]),
+        Card(key="showcase_list", child=Column(children=[
+            ListTile("Profile", key="tile_profile", subtitle="Name and photo",
+                     leading=Icons.PERSON, trailing=Icons.CHEVRON_RIGHT),
+            Divider(key="tile_divider"),
+            ListTile("Notifications", key="tile_notify",
+                     subtitle="Sounds and badges", leading=Icons.NOTIFICATIONS,
+                     trailing=Icons.CHEVRON_RIGHT),
+        ])),
+        Dismissible(key="swipe_row", background=Colors.ERROR,
+                    child=Card(key="swipe_card", child=Text(
+                        "Swipe me away", key="swipe_text")),
+                    on_dismiss=lambda _e: page.toast("Dismissed")),
+        Rating(rating.value, key="showcase_rating").on_change(set_rating),
+        Text(f"You rated this {rating.value:g}/5", key="rating_label", size=13,
+             color=Colors.TEXT_SECONDARY),
+    ])
+
+    data_tab = Column(spacing=12, children=[
+        SizedBox(height=8),
+        Text("Weekly taps", key="chart_title", size=16, weight=600),
+        Chart([counter.value, 3, 7, 4, 9, 6, 8], key="showcase_chart",
+              kind="bar", labels=["M", "T", "W", "T", "F", "S", "S"]),
+        ProgressBar(min(counter.value / 10, 1.0), key="goal_bar"),
+        Text(f"Daily goal: {min(counter.value, 10)}/10", key="goal_label",
+             size=13, color=Colors.TEXT_SECONDARY),
+        SegmentedButton(["Day", "Week", "Month"], key="range_picker",
+                        selected=1),
+    ])
+
+    actions_tab = Column(spacing=12, children=[
+        SizedBox(height=8),
+        FadeIn(key="actions_intro", animation=Animation.normal(),
+               child=Text("Native power, from Python.", key="actions_text",
+                          size=16, weight=600)),
+        Button("Confirm dialog", key="dialog_btn").on_click(confirm_delete),
+        Button("Save to storage", key="storage_btn",
+               bg_color=Colors.SECONDARY).on_click(save_note),
+        Button("Share this app", key="share_btn", variant="outlined").on_click(
+            lambda _e: page.share.text("Built with Pydrud!")),
+        GestureDetector(
+            key="gesture_box",
+            child=Container(key="gesture_card", bg=Colors.SURFACE,
+                            padding=24, border_radius=12,
+                            child=Text("Double-tap or swipe me",
+                                       key="gesture_text")),
+            on_double_tap=lambda _e: page.toast("Double tap!"),
+            on_swipe_left=lambda _e: page.toast("Swiped left"),
+            on_swipe_right=lambda _e: page.toast("Swiped right"),
+        ),
+    ])
+
+    page.add(
+        Scaffold(
+            key="showcase",
+            app_bar=AppBar(
+                title="Showcase",
+                key="showcase_bar",
+                bg_color=Colors.PRIMARY,
+                leading=Icon(Icons.BACK, key="showcase_back",
+                             color=Colors.WHITE).on_click(
+                                 lambda _e: router.pop()),
+            ),
+            body=Column(scroll=True, children=[
+                Tabs(
+                    [
+                        Tab("Components", content=components_tab),
+                        Tab("Data", content=data_tab),
+                        Tab("Actions", content=actions_tab),
+                    ],
+                    key="showcase_tabs",
+                    selected=tab_index.value,
+                ).on_change(select_tab),
+            ]),
+        )
+    )
+
+
 # ── Entry Point ─────────────────────────────────────────────────────────────
 
 router.define("home", home_screen)
+router.define("showcase", showcase_screen)
 router.define("settings", settings_screen)
 router.initial("home")
 

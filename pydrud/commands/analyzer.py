@@ -30,6 +30,16 @@ _WIDGET_CLASSES = {
     "Text", "Button", "TextField", "Image", "Icon", "Checkbox", "Switch",
     "ProgressBar", "Slider", "Dropdown", "Radio",
     "AppBar", "Scaffold", "FloatingActionButton",
+    # v1.2 — Material components
+    "ListTile", "ExpansionTile", "Chip", "Badge", "Avatar", "Banner",
+    "Tooltip", "Tabs", "BottomNavigationBar", "NavigationRail", "Drawer",
+    "SegmentedButton", "SearchBar", "Rating", "CircularProgress", "Skeleton",
+    "RefreshIndicator", "Stepper", "WebView", "VideoPlayer", "Chart",
+    # v1.2 — gestures, animation and forms
+    "GestureDetector", "InkWell", "Dismissible", "Draggable",
+    "AnimatedContainer", "AnimatedOpacity", "AnimatedScale",
+    "AnimatedRotation", "AnimatedSwitcher", "FadeIn", "SlideIn", "ScaleIn",
+    "Hero", "Form", "FormField",
 }
 
 # Style property keys known to be valid.
@@ -45,6 +55,9 @@ _VALID_STYLE_KEYS = {
     "borderLeft", "borderRight", "borderTop", "borderBottom",
     "columns", "circular", "divisions", "maxLines", "overflow", "selectable",
     "tristate", "crossAxis", "mainAxisAlignment",
+    # v1.2
+    "animation", "scale", "rotation", "drawerSide", "fabPosition",
+    "safeArea", "resizeForKeyboard", "shadow", "aspectRatio", "zIndex",
 }
 
 

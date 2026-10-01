@@ -137,3 +137,81 @@ class TestStarterAppEndToEnd(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestStarterShowcaseScreen(TestStarterAppEndToEnd):
+    """The v1.2 showcase screen of the generated starter app."""
+
+    def open_showcase(self):
+        self.device.click("to_showcase")
+        self.assertTrue(self.device.wait_for_text("Showcase"))
+
+    def test_showcase_is_reachable_and_renders_tabs(self):
+        self.open_showcase()
+        tabs = self.device.root.find("showcase_tabs")
+        self.assertIsNotNone(tabs)
+        labels = [t["label"] for t in tabs.props["tabs"]]
+        self.assertEqual(labels, ["Components", "Data", "Actions"])
+        # Only the selected tab's body is rendered.
+        self.assertIn("Swipe me away", self.device.texts)
+        self.assertNotIn("Weekly taps", self.device.texts)
+
+    def test_switching_tabs_swaps_the_body(self):
+        self.open_showcase()
+        self.device.change("showcase_tabs", 1)
+        self.assertTrue(self.device.wait_for_text("Weekly taps"))
+        chart = self.device.root.find("showcase_chart")
+        self.assertEqual(chart.props["kind"], "bar")
+        self.assertEqual(len(chart.props["values"]), 7)
+
+        self.device.change("showcase_tabs", 2)
+        self.assertTrue(self.device.wait_for_text("Native power, from Python."))
+
+    def test_filter_chips_toggle(self):
+        self.open_showcase()
+        chip = self.device.root.find("chip_Flutter")
+        self.assertFalse(chip.props.get("selected"))
+        self.device.send_event("change", "chip_Flutter", {"selected": True})
+        self.assertTrue(self.device.wait_for(
+            lambda d: d.root.find("chip_Flutter").props.get("selected")))
+
+    def test_rating_updates_label(self):
+        self.open_showcase()
+        self.device.change("showcase_rating", 2.5)
+        self.assertTrue(self.device.wait_for_text("You rated this 2.5/5"))
+
+    def test_dialog_and_storage_calls_reach_the_device(self):
+        self.open_showcase()
+        self.device.change("showcase_tabs", 2)
+        self.assertTrue(self.device.wait_for_text("Confirm dialog"))
+
+        self.device.on_command("dialog", True)
+        self.device.click("dialog_btn")
+        request = self.device.wait_for_request("dialog")
+        self.assertEqual(request["kind"], "confirm")
+        self.assertTrue(self.device.wait_for_command("toast"))
+
+        self.device.on_command("prefs_set", True)
+        self.device.on_command("vibrate", True)
+        self.device.click("storage_btn")
+        self.assertEqual(self.device.wait_for_request("prefs_set")["key"], "note")
+        self.assertTrue(self.device.wait_for_command("snackbar"))
+
+    def test_gestures_on_the_actions_tab(self):
+        self.open_showcase()
+        self.device.change("showcase_tabs", 2)
+        self.assertTrue(self.device.wait_for_text("Double-tap or swipe me"))
+        box = self.device.root.find("gesture_box")
+        self.assertEqual(box.props["gestures"],
+                         ["double_tap", "swipe_left", "swipe_right"])
+        self.device.gesture("gesture_box", "double_tap")
+        self.assertTrue(self.device.wait_for_command("toast"))
+
+    def test_back_from_showcase_returns_home(self):
+        self.open_showcase()
+        self.device.back()
+        self.assertTrue(self.device.wait_for_command("back_result"))
+        handled = [c for c in self.device.commands
+                   if c.get("cmd") == "back_result"][-1]
+        self.assertTrue(handled["handled"])
+        self.assertTrue(self.device.wait_for_text("taps so far"))

@@ -10,7 +10,22 @@ from pydrud.widgets.basic import (
     Text, Button, TextField, Image, Icon, Checkbox, Switch,
     ProgressBar, Slider, Dropdown, Radio,
 )
-from pydrud.widgets.theme import Colors, Icons, Theme
+from pydrud.widgets.theme import Colors, Icons, Theme, ColorScheme, Typography
+from pydrud.widgets.material import (
+    ListTile, ExpansionTile, Chip, Badge, Avatar, Banner, Tooltip,
+    Tab, Tabs, NavItem, BottomNavigationBar, NavigationRail, Drawer,
+    SegmentedButton, SearchBar, Rating, CircularProgress, Skeleton,
+    RefreshIndicator, Stepper, WebView, VideoPlayer, Chart,
+)
+from pydrud.widgets.gestures import GestureDetector, InkWell, Dismissible, Draggable
+from pydrud.widgets.animation import (
+    Animation, AnimatedContainer, AnimatedOpacity, AnimatedScale,
+    AnimatedRotation, AnimatedSwitcher, FadeIn, SlideIn, ScaleIn, Hero, animate,
+)
+from pydrud.widgets.forms import (
+    Form, FormField, required, min_length, max_length, email, phone, url,
+    numeric, between, pattern, matches, custom,
+)
 from pydrud.widgets.app_bar import AppBar
 from pydrud.widgets.scaffold import Scaffold
 from pydrud.widgets.fab import FloatingActionButton
@@ -59,4 +74,61 @@ __all__ = [
     "Colors",
     "Icons",
     "Theme",
+    "ColorScheme",
+    "Typography",
+    # material
+    "ListTile",
+    "ExpansionTile",
+    "Chip",
+    "Badge",
+    "Avatar",
+    "Banner",
+    "Tooltip",
+    "Tab",
+    "Tabs",
+    "NavItem",
+    "BottomNavigationBar",
+    "NavigationRail",
+    "Drawer",
+    "SegmentedButton",
+    "SearchBar",
+    "Rating",
+    "CircularProgress",
+    "Skeleton",
+    "RefreshIndicator",
+    "Stepper",
+    "WebView",
+    "VideoPlayer",
+    "Chart",
+    # gestures
+    "GestureDetector",
+    "InkWell",
+    "Dismissible",
+    "Draggable",
+    # animation
+    "Animation",
+    "AnimatedContainer",
+    "AnimatedOpacity",
+    "AnimatedScale",
+    "AnimatedRotation",
+    "AnimatedSwitcher",
+    "FadeIn",
+    "SlideIn",
+    "ScaleIn",
+    "Hero",
+    "animate",
+    # forms
+    "Form",
+    "FormField",
+    "required",
+    "min_length",
+    "max_length",
+    "email",
+    "phone",
+    "url",
+    "numeric",
+    "between",
+    "pattern",
+    "matches",
+    "custom",
 ]

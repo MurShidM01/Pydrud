@@ -40,8 +40,16 @@ class Scaffold(Widget):
         app_bar: Optional[AppBar] = None,
         body: Optional[Widget] = None,
         bottom_bar: Optional[Widget] = None,
+        bottom_navigation: Optional[Widget] = None,
+        navigation_rail: Optional[Widget] = None,
+        drawer: Optional[Widget] = None,
+        end_drawer: Optional[Widget] = None,
+        banner: Optional[Widget] = None,
         floating_action_button: Optional[Widget] = None,
+        fab_position: str = "bottom_end",
         bg_color: Optional[str] = None,
+        safe_area: bool = True,
+        resize_to_avoid_keyboard: bool = True,
         key: Optional[str] = None,
         expand: Optional[int] = None,
         style: Optional[dict] = None,
@@ -53,8 +61,19 @@ class Scaffold(Widget):
         self.app_bar = app_bar
         self.body = body
         self.bottom_bar = bottom_bar
+        self.bottom_navigation = bottom_navigation
+        self.navigation_rail = navigation_rail
+        self.drawer = drawer
+        self.end_drawer = end_drawer
+        self.banner = banner
         self.floating_action_button = floating_action_button
+        if fab_position not in ("bottom_end", "bottom_start", "bottom_center"):
+            raise ValueError(
+                "fab_position must be bottom_end, bottom_start or bottom_center")
+        self.fab_position = fab_position
         self.bg_color = bg_color
+        self.safe_area = safe_area
+        self.resize_to_avoid_keyboard = resize_to_avoid_keyboard
 
         self.children = [self._build()]
 
@@ -66,16 +85,33 @@ class Scaffold(Widget):
         if self.app_bar is not None:
             column_children.append(self.app_bar)
 
+        if self.banner is not None:
+            column_children.append(self.banner)
+
         body_container = Container(
             key=f"{self.key}._body",
             expand=1,
             style={"width": "match", "height": 0},
             child=self.body,
         )
-        column_children.append(body_container)
+        if self.navigation_rail is not None:
+            # Rail sits beside the body, so wrap them in a Row.
+            from pydrud.widgets.layout import Row
+
+            column_children.append(Row(
+                key=f"{self.key}._railrow",
+                expand=1,
+                style={"width": "match", "height": 0},
+                children=[self.navigation_rail, body_container],
+            ))
+        else:
+            column_children.append(body_container)
 
         if self.bottom_bar is not None:
             column_children.append(self.bottom_bar)
+
+        if self.bottom_navigation is not None:
+            column_children.append(self.bottom_navigation)
 
         column_style: dict = {"width": "match", "height": "match"}
         if self.bg_color:
@@ -89,9 +125,18 @@ class Scaffold(Widget):
             )
         ]
         if self.floating_action_button is not None:
+            self.floating_action_button.style.setdefault(
+                "fabPosition", self.fab_position)
             stack_children.append(self.floating_action_button)
 
-        stack_style: dict = {"width": "match", "height": "match"}
+        for drawer, side in ((self.drawer, "start"), (self.end_drawer, "end")):
+            if drawer is not None:
+                drawer.style["drawerSide"] = side
+                stack_children.append(drawer)
+
+        stack_style: dict = {"width": "match", "height": "match",
+                             "safeArea": self.safe_area,
+                             "resizeForKeyboard": self.resize_to_avoid_keyboard}
         if self.bg_color:
             stack_style["bg"] = self.bg_color
         stack_style.update(self.style)

@@ -39,6 +39,7 @@ public class BridgeService {
     private final FrameLayout rootView;
     private final ViewFactory viewFactory;
     private final EventDispatcher eventDispatcher;
+    private final NativeServices services;
 
     private ServerSocket serverSocket;
     private volatile Socket clientSocket;
@@ -55,7 +56,11 @@ public class BridgeService {
         this.rootView = rootView;
         this.viewFactory = viewFactory;
         this.eventDispatcher = eventDispatcher;
+        this.services = new NativeServices(activity, this);
     }
+
+    /** Exposed so the Activity can forward permission/activity results. */
+    public NativeServices services() { return services; }
 
     public void start() {
         if (running) return;
@@ -189,13 +194,68 @@ public class BridgeService {
                 case "set_system_ui":   handleSystemUi(json); break;
                 case "vibrate":         handleVibrate(json); break;
                 case "back_result":     activity.onBackResult(json.optBoolean("handled", false)); break;
-                default:                Log.d(TAG, "Unknown cmd: " + cmd);
+                case "drawer":          activity.setDrawerOpen(
+                                            json.optBoolean("open", true),
+                                            json.optString("side", "start")); break;
+                case "end_refresh":     handleEndRefresh(); break;
+                case "scroll_to":       handleScrollTo(json); break;
+                case "focus":           handleFocus(json); break;
+                case "keyboard":        activity.setKeyboardVisible(
+                                            json.optBoolean("show", true)); break;
+                case "keep_awake":      activity.setKeepAwake(
+                                            json.optBoolean("enabled", true)); break;
+                case "orientation":     activity.setOrientationLock(
+                                            json.optString("value", "auto")); break;
+                case "fullscreen":      activity.setFullscreen(
+                                            json.optBoolean("enabled", true)); break;
+                case "theme_mode":      activity.setThemeMode(
+                                            json.optString("mode", "light")); break;
+                default:
+                    // Native services (dialogs, storage, pickers, …) answer
+                    // asynchronously with a `result` event.
+                    if (services == null || !services.handle(cmd, json)) {
+                        Log.d(TAG, "Unknown cmd: " + cmd);
+                    }
             }
         } catch (JSONException e) {
             Log.e(TAG, "JSON error: " + message, e);
         } catch (Exception e) {
             Log.e(TAG, "Command failed", e);
         }
+    }
+
+    private void handleEndRefresh() {
+        activity.runOnUiThread(() -> activity.endRefresh());
+    }
+
+    private void handleScrollTo(final JSONObject json) {
+        activity.runOnUiThread(() -> {
+            android.view.View target = viewFactory.getView(json.optString("key", ""));
+            if (target == null) return;
+            android.view.ViewParent parent = target.getParent();
+            while (parent != null) {
+                if (parent instanceof android.widget.ScrollView) {
+                    final android.widget.ScrollView scroll =
+                        (android.widget.ScrollView) parent;
+                    final int top = target.getTop();
+                    if (json.optBoolean("animate", true)) scroll.smoothScrollTo(0, top);
+                    else scroll.scrollTo(0, top);
+                    return;
+                }
+                parent = parent.getParent();
+            }
+        });
+    }
+
+    private void handleFocus(final JSONObject json) {
+        activity.runOnUiThread(() -> {
+            android.view.View target = viewFactory.getView(json.optString("key", ""));
+            if (target == null) return;
+            target.requestFocus();
+            if (json.optBoolean("keyboard", true)) {
+                activity.setKeyboardVisible(true);
+            }
+        });
     }
 
     private void handleFullRender(JSONObject json) throws JSONException {

@@ -73,6 +73,19 @@ class Widget:
         self.children: list["Widget"] = []
         #: Event callbacks: {"click": callable, "change": callable, ...}
         self.event_handlers: dict[str, Callable] = {}
+        # Any ``on_<event>=callable`` keyword works on every widget, even
+        # when the subclass does not name it explicitly. Without this a typo
+        # like ``TextField(on_change=cb)`` on a widget that forgot to declare
+        # the parameter would silently serialise a function into `props`.
+        for name in [k for k in kwargs if k.startswith("on_")]:
+            handler = kwargs.pop(name)
+            if handler is None:
+                continue
+            if not callable(handler):
+                raise TypeError(
+                    f"{name}= must be callable, got {type(handler).__name__}")
+            self.event_handlers[name[3:]] = handler
+
         #: Catch-all extra properties passed by subclasses.
         self._extra: dict = kwargs
 

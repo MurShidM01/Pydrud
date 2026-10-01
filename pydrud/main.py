@@ -18,6 +18,8 @@ import traceback
 from typing import Any, Callable, Optional
 
 from pydrud.core.state import State
+from pydrud.core.results import Result
+from pydrud.core.tasks import TaskRunner
 from pydrud.core.diff import TreeDiff
 from pydrud.core.events import EventDispatcher
 from pydrud.core.bridge import BridgeProtocol
@@ -58,6 +60,8 @@ class App:
         self._page = _Page(self)
         self._event_dispatcher = EventDispatcher()
         self._current_tree: Optional[Widget] = None
+        #: Clone of the tree as the device last saw it (for partial updates).
+        self._snapshot: Optional[Widget] = None
         self._bridge = BridgeProtocol()
         self._connected = False
         self._transport: Optional[socket.socket] = None
@@ -77,6 +81,12 @@ class App:
         # ── Lifecycle hooks ────────────────────────────────────────
         self._lifecycle_handlers: dict[str, list[Callable]] = {}
         self._error_handler: Optional[Callable[[BaseException], None]] = None
+        # ── Native service calls (request/response) ────────────────
+        self._pending: dict[str, Result] = {}
+        self._request_seq = 0
+        self._tasks = TaskRunner(on_error=self._report_error)
+        # ── UI-thread marshalling ──────────────────────────────────
+        self._ui_queue: queue.Queue = queue.Queue()
 
     # ── public API ────────────────────────────────────────────────────────
 
@@ -114,6 +124,11 @@ class App:
     def update(self):
         """Rebuild the widget tree and send incremental patches via TreeDiff.
 
+        This re-runs the ``target`` builder, so the UI is a pure function of
+        your state — the declarative model. If instead you hold on to a
+        widget, mutate it and want just that subtree refreshed, use
+        :meth:`update_widget` (``page.update(widget)``).
+
         Falls back to a full render when there is no previous tree or when
         the patch list grows beyond :data:`MAX_PATCHES`.
         """
@@ -142,10 +157,54 @@ class App:
             self._send(self._bridge.encode_render([p.to_dict() for p in patches]))
         else:
             self._send(self._bridge.encode_full_render(new.to_dict()))
+        self._snapshot = new.clone()
+
+    def update_widget(self, *widgets: Widget) -> None:
+        """Push changes for mutated widgets without re-running the builder.
+
+        This is the imperative counterpart of :meth:`update`::
+
+            label.value = "Saved"
+            page.update(label)
+
+        Only the affected subtree is diffed, so updating one row of a long
+        list costs one patch instead of a whole rebuild.
+        """
+        if not widgets:
+            return self.update()
+        if self._current_tree is None or self._snapshot is None:
+            return self.update()
+        if not (self._connected and self._transport):
+            # Keep the snapshot honest even while disconnected (tests).
+            self._snapshot = self._current_tree.clone()
+            return None
+
+        patches: list = []
+        for widget in widgets:
+            previous = self._snapshot.find_by_key(widget.key)
+            if previous is None:
+                return self.update()
+            try:
+                patches.extend(TreeDiff.diff(previous, widget))
+            except Exception as exc:  # pragma: no cover - defensive
+                self._report_error(exc)
+                return self.update()
+
+        if patches:
+            if len(patches) <= MAX_PATCHES:
+                self._send(self._bridge.encode_render(
+                    [p.to_dict() for p in patches]))
+            else:
+                self._send(self._bridge.encode_full_render(
+                    self._current_tree.to_dict()))
+        self._snapshot = self._current_tree.clone()
+        self._event_dispatcher.register_tree(self._current_tree)
+        return None
 
     def render(self):
         """Force a full re-render (send the entire tree)."""
         tree = self._build_tree()
+        self._snapshot = tree.clone()
         if self._connected and self._transport:
             self._send(self._bridge.encode_full_render(tree.to_dict()))
 
@@ -153,10 +212,22 @@ class App:
         """Rebuild after a State change."""
         self.update()
 
-    def bind(self, *states: State) -> "App":
-        """Auto-update the UI whenever any of *states* changes."""
+    def bind(self, *states) -> "App":
+        """Auto-update the UI whenever any bound object changes.
+
+        Accepts :class:`~pydrud.core.state.State` values as well as anything
+        observable (``Store``, ``ReactiveList``, ``Computed``) — i.e. objects
+        exposing ``watch()`` or ``subscribe()``.
+        """
         for state in states:
-            state.watch(lambda _old, _new: self.update())
+            if isinstance(state, State):
+                state.watch(lambda _old, _new: self.update())
+            elif hasattr(state, "subscribe"):
+                state.subscribe(lambda *_args, **_kw: self.update())
+            else:
+                raise TypeError(
+                    f"App.bind() expects State or an observable store, "
+                    f"got {type(state).__name__}")
         return self
 
     def stop(self) -> None:
@@ -170,6 +241,11 @@ class App:
                 pass
             self._watcher = None
         self._event_queue.put(None)
+        self._cancel_pending("app stopped")
+        try:
+            self._tasks.shutdown()
+        except Exception:
+            pass
         if self._transport is not None:
             try:
                 self._transport.shutdown(socket.SHUT_RDWR)
@@ -298,6 +374,74 @@ class App:
                 return os.getcwd()
             current = parent
 
+    # ── native service calls ──────────────────────────────────────────────
+
+    def invoke(self, cmd: str, **data) -> Result:
+        """Send a command that expects an answer and return a :class:`Result`.
+
+        A ``request_id`` is attached so the Android side can correlate its
+        reply.  When the bridge is not connected (tests, ``pydrud analyze``)
+        the result fails immediately instead of hanging forever.
+        """
+        with self._lock:
+            self._request_seq += 1
+            request_id = f"r{self._request_seq}"
+        result = Result(request_id, cmd)
+        self._pending[request_id] = result
+        if not self._connected:
+            self._pending.pop(request_id, None)
+            result.fail("bridge not connected")
+            return result
+        payload = {k: v for k, v in data.items() if v is not None}
+        self._send(self._bridge.encode_command(cmd, request_id=request_id,
+                                               **payload))
+        return result
+
+    def _resolve_result(self, data: dict) -> None:
+        request_id = str(data.get("request_id", ""))
+        result = self._pending.pop(request_id, None)
+        if result is None:
+            return
+        if data.get("ok", True):
+            result.complete(data.get("value"))
+        else:
+            result.fail(str(data.get("error", "native call failed")))
+
+    def _cancel_pending(self, reason: str = "bridge closed") -> None:
+        pending, self._pending = self._pending, {}
+        for result in pending.values():
+            result.fail(reason)
+
+    # ── background work ───────────────────────────────────────────────────
+
+    @property
+    def tasks(self) -> TaskRunner:
+        return self._tasks
+
+    def run_task(self, fn: Callable, *args, **kwargs):
+        """Run *fn* on a worker thread (also accepts ``async def``)."""
+        return self._tasks.run(fn, *args, **kwargs)
+
+    def run_on_ui(self, fn: Callable, *args, **kwargs) -> None:
+        """Queue *fn* to run on the event-loop thread.
+
+        Widget mutations from a worker thread must go through this, exactly
+        like ``runOnUiThread`` on Android.
+        """
+        self._ui_queue.put((fn, args, kwargs))
+        self._event_queue.put("__ui__")
+
+    def _drain_ui_queue(self) -> None:
+        while True:
+            try:
+                fn, args, kwargs = self._ui_queue.get_nowait()
+            except queue.Empty:
+                return
+            try:
+                fn(*args, **kwargs)
+            except Exception as exc:
+                self._report_error(exc)
+
     # ── Router support ────────────────────────────────────────────────────
 
     def attach_router(self, router) -> None:
@@ -409,6 +553,7 @@ class App:
                 self._handle_raw_event(raw)
         finally:
             self._connected = False
+            self._cancel_pending()
             if self._transport:
                 try:
                     self._transport.close()
@@ -417,6 +562,9 @@ class App:
 
     def _handle_raw_event(self, raw: str) -> None:
         """Decode and route a single NDJSON event line."""
+        if raw == "__ui__":
+            self._drain_ui_queue()
+            return
         try:
             event = json.loads(raw)
         except json.JSONDecodeError:
@@ -426,6 +574,10 @@ class App:
 
         etype = event.get("type", "")
         data = event.get("data") or {}
+
+        if etype == "result":
+            self._resolve_result(data)
+            return
 
         if etype == "ready":
             self._handle_ready(data)
@@ -489,6 +641,10 @@ class _Page:
         self.scroll: Optional[str] = None
         self.padding: Optional[Any] = None
         self._built = False
+        self.theme_mode: str = "light"
+        self._services: Optional[Any] = None
+        self._http: Optional[Any] = None
+        self._overlays: dict[str, Widget] = {}
 
     # ── content ───────────────────────────────────────────────────────────
 
@@ -524,10 +680,103 @@ class _Page:
                 return found
         return None
 
+    # ── native services ───────────────────────────────────────────────────
+
+    @property
+    def services(self):
+        """All native services (dialogs, storage, permissions, …)."""
+        if self._services is None:
+            from pydrud.services.native import Services
+
+            self._services = Services(self._app.invoke)
+        return self._services
+
+    @property
+    def dialog(self):
+        """Alerts, confirms, prompts, sheets and pickers."""
+        return self.services.dialog
+
+    @property
+    def storage(self):
+        """Persistent key/value storage (SharedPreferences)."""
+        return self.services.storage
+
+    @property
+    def clipboard(self):
+        return self.services.clipboard
+
+    @property
+    def share(self):
+        return self.services.share
+
+    @property
+    def permissions(self):
+        return self.services.permissions
+
+    @property
+    def notifications(self):
+        return self.services.notifications
+
+    @property
+    def location(self):
+        return self.services.location
+
+    @property
+    def device(self):
+        return self.services.device
+
+    @property
+    def files(self):
+        return self.services.files
+
+    @property
+    def haptics(self):
+        return self.services.haptics
+
+    @property
+    def http(self):
+        """A non-blocking HTTP client bound to this page's task runner."""
+        if self._http is None:
+            from pydrud.services.http import Http
+
+            self._http = Http(self._app.run_task)
+        return self._http
+
+    def invoke(self, cmd: str, **data):
+        """Low-level escape hatch: call any native command and await a Result."""
+        return self._app.invoke(cmd, **data)
+
+    # ── concurrency ───────────────────────────────────────────────────────
+
+    def run_task(self, fn: Callable, *args, **kwargs):
+        """Run slow work off the UI thread (``async def`` is supported)."""
+        return self._app.run_task(fn, *args, **kwargs)
+
+    def run_on_ui(self, fn: Callable, *args, **kwargs) -> None:
+        """Hop back onto the UI thread before touching widgets."""
+        self._app.run_on_ui(fn, *args, **kwargs)
+
+    def after(self, delay: float, fn: Callable, *args, **kwargs):
+        """Run *fn* once after *delay* seconds."""
+        return self._app.tasks.after(delay, fn, *args, **kwargs)
+
+    def every(self, interval: float, fn: Callable, *args, **kwargs):
+        """Run *fn* every *interval* seconds until the timer is cancelled."""
+        return self._app.tasks.every(interval, fn, *args, **kwargs)
+
     # ── app commands ──────────────────────────────────────────────────────
 
-    def update(self) -> None:
-        self._app.update()
+    def update(self, *controls: Widget) -> None:
+        """Refresh the UI.
+
+        ``page.update()`` re-runs your builder and diffs the whole page;
+        ``page.update(widget)`` pushes just that widget's subtree, which is
+        what you want after mutating a control you kept a reference to.
+        """
+        if controls:
+            self._app.update_widget(*controls)
+        else:
+            self._app.update()
 
     def toast(self, message: str, *, long: bool = False) -> None:
         """Show an Android toast."""
@@ -573,6 +822,62 @@ class _Page:
         if navigation_bar_color:
             extras["navigation_bar_color"] = navigation_bar_color
         self._send("set_system_ui", **extras)
+
+    # ── UI commands ───────────────────────────────────────────────────────
+
+    def open_drawer(self, side: str = "start") -> None:
+        """Open the navigation drawer declared on the Scaffold."""
+        if side not in ("start", "end"):
+            raise ValueError("side must be 'start' or 'end'")
+        self._send("drawer", open=True, side=side)
+
+    def close_drawer(self, side: str = "start") -> None:
+        self._send("drawer", open=False, side=side)
+
+    def end_refresh(self) -> None:
+        """Stop the pull-to-refresh spinner."""
+        self._send("end_refresh")
+
+    def scroll_to(self, key: str, *, animate: bool = True) -> None:
+        """Scroll the nearest scrollable ancestor to the widget *key*."""
+        self._send("scroll_to", key=str(key), animate=bool(animate))
+
+    def focus(self, key: str, *, keyboard: bool = True) -> None:
+        """Move focus to an input and optionally raise the soft keyboard."""
+        self._send("focus", key=str(key), keyboard=bool(keyboard))
+
+    def hide_keyboard(self) -> None:
+        self._send("keyboard", show=False)
+
+    def show_keyboard(self) -> None:
+        self._send("keyboard", show=True)
+
+    def keep_awake(self, enabled: bool = True) -> None:
+        """Keep the screen on (video players, recipes, navigation)."""
+        self._send("keep_awake", enabled=bool(enabled))
+
+    def set_orientation(self, orientation: str) -> None:
+        """Lock the orientation: ``portrait``, ``landscape`` or ``auto``."""
+        if orientation not in ("portrait", "landscape", "auto"):
+            raise ValueError("orientation must be portrait/landscape/auto")
+        self._send("orientation", value=orientation)
+
+    def fullscreen(self, enabled: bool = True) -> None:
+        """Immersive mode: hide the status and navigation bars."""
+        self._send("fullscreen", enabled=bool(enabled))
+
+    def set_theme_mode(self, mode: str) -> None:
+        """Switch between ``"light"``, ``"dark"`` and ``"system"``."""
+        if mode not in ("light", "dark", "system"):
+            raise ValueError("theme mode must be light/dark/system")
+        from pydrud.widgets.theme import Theme
+
+        self.theme_mode = mode
+        if mode == "dark":
+            Theme.dark()
+        elif mode == "light":
+            Theme.light()
+        self._send("theme_mode", mode=mode)
 
     def _send(self, cmd: str, **data) -> None:
         self._app._send(self._app._bridge.encode_command(cmd, **data))

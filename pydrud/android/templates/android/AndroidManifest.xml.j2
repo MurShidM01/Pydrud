@@ -2,8 +2,23 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Optional: required only when the app calls page.vibrate(). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Optional: required only when the app calls page.vibrate()/page.haptics. -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Optional: required only when the app calls page.notifications.show(). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!--
+      Dangerous permissions are intentionally NOT declared by default: Play
+      rejects apps that request what they do not use. Uncomment the ones your
+      app actually needs, then request them at runtime with
+      page.permissions.request("camera", …).
+
+      <uses-permission android:name="android.permission.CAMERA" />
+      <uses-permission android:name="android.permission.RECORD_AUDIO" />
+      <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+      <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    -->
 
     <application
         android:allowBackup="true"

@@ -1,5 +1,6 @@
 package {{ package }};
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
@@ -31,6 +32,7 @@ public class {{ app_name }}Activity extends AppCompatActivity {
     private volatile boolean pythonStarted = false;
     private volatile boolean awaitingBackResult = false;
     private Runnable pendingBack;
+    private volatile boolean drawerOpen = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -89,6 +91,183 @@ public class {{ app_name }}Activity extends AppCompatActivity {
         tv.setPadding(48, 48, 48, 48);
         rootView.removeAllViews();
         rootView.addView(tv);
+    }
+
+    // ── Platform results ──────────────────────────────────────────────────
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (bridge != null && bridge.services().onActivityResult(
+                requestCode, resultCode, data)) {
+            return;
+        }
+        Log.d(TAG, "unhandled activity result " + requestCode);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions,
+                                           int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (bridge != null) {
+            bridge.services().onPermissionResult(requestCode, permissions, grantResults);
+        }
+    }
+
+    // ── UI commands from Python ───────────────────────────────────────────
+
+    /** Slide the Drawer widget in or out. */
+    public void setDrawerOpen(final boolean open, final String side) {
+        runOnUiThread(() -> {
+            android.view.View drawer = findDrawer(side);
+            if (drawer == null) {
+                Log.d(TAG, "no drawer declared for side " + side);
+                return;
+            }
+            float width = drawer.getWidth() > 0 ? drawer.getWidth() : 600f;
+            boolean fromEnd = "end".equals(side);
+            if (open) {
+                drawer.setTranslationX(fromEnd ? width : -width);
+                drawer.setVisibility(android.view.View.VISIBLE);
+                drawer.animate().translationX(0f).setDuration(220).start();
+            } else {
+                drawer.animate().translationX(fromEnd ? width : -width)
+                      .setDuration(200)
+                      .withEndAction(() -> drawer.setVisibility(android.view.View.GONE))
+                      .start();
+            }
+            drawerOpen = open;
+        });
+    }
+
+    public boolean isDrawerOpen() { return drawerOpen; }
+
+    private android.view.View findDrawer(String side) {
+        return findDrawerIn(rootView, side);
+    }
+
+    private android.view.View findDrawerIn(android.view.ViewGroup group, String side) {
+        for (int i = 0; i < group.getChildCount(); i++) {
+            android.view.View child = group.getChildAt(i);
+            Object tag = child.getTag();
+            if (tag instanceof String && viewFactory != null) {
+                org.json.JSONObject node = viewFactory.getNode((String) tag);
+                if (node != null && "Drawer".equals(node.optString("type", ""))) {
+                    org.json.JSONObject props = node.optJSONObject("props");
+                    String nodeSide = props != null
+                        ? props.optString("side", "start") : "start";
+                    if (nodeSide.equals(side)) return child;
+                }
+            }
+            if (child instanceof android.view.ViewGroup) {
+                android.view.View found =
+                    findDrawerIn((android.view.ViewGroup) child, side);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    /** Stop every SwipeRefreshLayout spinner in the tree. */
+    public void endRefresh() {
+        endRefreshIn(rootView);
+    }
+
+    private void endRefreshIn(android.view.ViewGroup group) {
+        for (int i = 0; i < group.getChildCount(); i++) {
+            android.view.View child = group.getChildAt(i);
+            if (child instanceof androidx.swiperefreshlayout.widget.SwipeRefreshLayout) {
+                ((androidx.swiperefreshlayout.widget.SwipeRefreshLayout) child)
+                    .setRefreshing(false);
+            }
+            if (child instanceof android.view.ViewGroup) {
+                endRefreshIn((android.view.ViewGroup) child);
+            }
+        }
+    }
+
+    public void setKeyboardVisible(final boolean show) {
+        runOnUiThread(() -> {
+            android.view.inputmethod.InputMethodManager imm =
+                (android.view.inputmethod.InputMethodManager)
+                    getSystemService(INPUT_METHOD_SERVICE);
+            if (imm == null) return;
+            android.view.View focused = getCurrentFocus();
+            if (show) {
+                if (focused != null) {
+                    imm.showSoftInput(focused,
+                        android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+                }
+            } else {
+                android.view.View target = focused != null ? focused : rootView;
+                imm.hideSoftInputFromWindow(target.getWindowToken(), 0);
+            }
+        });
+    }
+
+    public void setKeepAwake(final boolean enabled) {
+        runOnUiThread(() -> {
+            if (enabled) {
+                getWindow().addFlags(
+                    android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            } else {
+                getWindow().clearFlags(
+                    android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            }
+        });
+    }
+
+    public void setOrientationLock(final String orientation) {
+        runOnUiThread(() -> {
+            switch (orientation) {
+                case "portrait":
+                    setRequestedOrientation(
+                        android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+                    break;
+                case "landscape":
+                    setRequestedOrientation(
+                        android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+                    break;
+                default:
+                    setRequestedOrientation(
+                        android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+            }
+        });
+    }
+
+    public void setFullscreen(final boolean enabled) {
+        runOnUiThread(() -> {
+            androidx.core.view.WindowInsetsControllerCompat controller =
+                WindowCompat.getInsetsController(getWindow(), rootView);
+            if (controller == null) return;
+            if (enabled) {
+                controller.hide(WindowInsetsCompat.Type.systemBars());
+                controller.setSystemBarsBehavior(
+                    androidx.core.view.WindowInsetsControllerCompat
+                        .BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            } else {
+                controller.show(WindowInsetsCompat.Type.systemBars());
+            }
+        });
+    }
+
+    public void setThemeMode(final String mode) {
+        runOnUiThread(() -> {
+            switch (mode) {
+                case "dark":
+                    androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(
+                        androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_YES);
+                    break;
+                case "light":
+                    androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(
+                        androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_NO);
+                    break;
+                default:
+                    androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(
+                        androidx.appcompat.app.AppCompatDelegate
+                            .MODE_NIGHT_FOLLOW_SYSTEM);
+            }
+        });
     }
 
     // ── Back button ───────────────────────────────────────────────────────

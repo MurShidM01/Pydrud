@@ -39,13 +39,36 @@ public class ViewFactory {
     private final Map<String, String> parentMap = new HashMap<>();
     private final Map<String, JSONObject> nodeMap = new HashMap<>();
     private final WidgetRegistry registry = new WidgetRegistry();
+    private final MaterialViews material;
+    private final GestureBinder gestures;
     private EventDispatcher eventDispatcher;
 
     public ViewFactory({{ app_name }}Activity activity) {
         this.activity = activity;
+        this.material = new MaterialViews(activity, this);
+        this.gestures = new GestureBinder(activity);
     }
 
-    public void setEventDispatcher(EventDispatcher d) { this.eventDispatcher = d; }
+    public void setEventDispatcher(EventDispatcher d) {
+        this.eventDispatcher = d;
+        material.setEventDispatcher(d);
+        gestures.setEventDispatcher(d);
+    }
+
+    /** Resolve a Pydrud icon name to a drawable resource (public for MaterialViews). */
+    public int iconResource(String name) { return getIconRes(name); }
+
+    /** Load an asset/remote image into an ImageView (public for MaterialViews). */
+    public void loadImage(ImageView view, String src) {
+        JSONObject node = new JSONObject();
+        JSONObject props = new JSONObject();
+        try {
+            props.put("src", src);
+            node.put("props", props);
+        } catch (JSONException ignored) {}
+        ImageView loaded = createImageView(node);
+        view.setImageDrawable(loaded.getDrawable());
+    }
 
     /** Register a custom widget type rendered by user-supplied Java code. */
     public void registerWidget(String type, ViewCreator creator) {
@@ -53,6 +76,9 @@ public class ViewFactory {
     }
 
     public View getView(String key) { return viewMap.get(key); }
+
+    /** The JSON node a view was created from (used for drawer lookup, etc.). */
+    public JSONObject getNode(String key) { return nodeMap.get(key); }
 
     // ── Public API ────────────────────────────────────────────────────────
 
@@ -101,9 +127,16 @@ public class ViewFactory {
                 if (patch.has("style")) {
                     JSONObject style = patch.getJSONObject("style");
                     mergeInto(node, "style", style);
-                    applyStyle(v, node != null ? node.optJSONObject("style") : style);
-                    applySize(v, node != null ? node.optJSONObject("style") : style);
-                    v.requestLayout();
+                    JSONObject merged = node != null ? node.optJSONObject("style") : style;
+                    // Widgets carrying an `animation` spec tween towards the
+                    // new values; everything else snaps, as before.
+                    if (!animateStyleChange(v, node, style)) {
+                        applyStyle(v, merged);
+                        applySize(v, merged);
+                        v.requestLayout();
+                    } else {
+                        applyStyle(v, merged);
+                    }
                 }
                 break;
             }
@@ -204,7 +237,9 @@ public class ViewFactory {
                 case "Dropdown":
                     view = createDropdown(json); break;
                 default:
-                    if (registry.hasType(type)) {
+                    if (material.handles(type)) {
+                        view = material.create(json);
+                    } else if (registry.hasType(type)) {
                         view = registry.create(json, activity, this);
                     } else {
                         Log.w(TAG, "Unknown widget type: " + type + " — rendering empty box");
@@ -225,6 +260,9 @@ public class ViewFactory {
             applyStyle(view, style);
             applySize(view, style);
             bindEvents(view, json);
+            gestures.bind(view, json);
+            applyTransforms(view, style);
+            playEntrance(view, type, json);
 
             if (!json.optBoolean("visible", true)) view.setVisibility(View.GONE);
 
@@ -1201,6 +1239,144 @@ public class ViewFactory {
         }
     }
 
+    // ── Animations ──────────────────────────────────────────────────────
+
+    /** Apply opacity / scale / rotation from the style to a fresh view. */
+    private void applyTransforms(View view, JSONObject style) {
+        if (style == null) return;
+        if (style.has("opacity")) {
+            view.setAlpha((float) style.optDouble("opacity", 1.0));
+        }
+        if (style.has("scale")) {
+            float scale = (float) style.optDouble("scale", 1.0);
+            view.setScaleX(scale);
+            view.setScaleY(scale);
+        }
+        if (style.has("rotation")) {
+            view.setRotation((float) style.optDouble("rotation", 0));
+        }
+    }
+
+    /** Play a one-shot entrance animation for FadeIn / SlideIn / ScaleIn. */
+    private void playEntrance(final View view, String type, JSONObject json) {
+        if (!"FadeIn".equals(type) && !"SlideIn".equals(type)
+                && !"ScaleIn".equals(type)) {
+            return;
+        }
+        JSONObject style = json.optJSONObject("style");
+        JSONObject spec = style != null ? style.optJSONObject("animation") : null;
+        long duration = spec != null ? spec.optLong("duration", 250) : 250;
+        long delay = spec != null ? spec.optLong("delay", 0) : 0;
+        JSONObject props = json.optJSONObject("props");
+
+        view.setAlpha(0f);
+        android.view.ViewPropertyAnimator animator = view.animate()
+            .alpha(1f).setDuration(duration).setStartDelay(delay)
+            .setInterpolator(interpolator(spec));
+
+        if ("ScaleIn".equals(type)) {
+            view.setScaleX(0.8f);
+            view.setScaleY(0.8f);
+            animator.scaleX(1f).scaleY(1f);
+        } else if ("SlideIn".equals(type)) {
+            float distance = dp(props != null
+                ? (int) props.optDouble("distance", 24) : 24);
+            String direction = props != null
+                ? props.optString("direction", "up") : "up";
+            switch (direction) {
+                case "down":  view.setTranslationY(-distance); break;
+                case "left":  view.setTranslationX(distance);  break;
+                case "right": view.setTranslationX(-distance); break;
+                default:      view.setTranslationY(distance);
+            }
+            animator.translationX(0f).translationY(0f);
+        }
+        animator.start();
+    }
+
+    /** Animate a style change instead of snapping, when the node opted in. */
+    private boolean animateStyleChange(View view, JSONObject node,
+                                       JSONObject changed) {
+        JSONObject style = node != null ? node.optJSONObject("style") : null;
+        JSONObject spec = style != null ? style.optJSONObject("animation") : null;
+        if (spec == null || changed == null) return false;
+
+        long duration = spec.optLong("duration", 250);
+        long delay = spec.optLong("delay", 0);
+        android.view.ViewPropertyAnimator animator = view.animate()
+            .setDuration(duration).setStartDelay(delay)
+            .setInterpolator(interpolator(spec));
+        boolean animated = false;
+
+        if (changed.has("opacity")) {
+            animator.alpha((float) changed.optDouble("opacity", 1.0));
+            animated = true;
+        }
+        if (changed.has("scale")) {
+            float scale = (float) changed.optDouble("scale", 1.0);
+            animator.scaleX(scale).scaleY(scale);
+            animated = true;
+        }
+        if (changed.has("rotation")) {
+            animator.rotation((float) changed.optDouble("rotation", 0));
+            animated = true;
+        }
+        if (changed.has("width") || changed.has("height")) {
+            animateSize(view, changed, duration);
+            animated = true;
+        }
+        if (animated) animator.start();
+        return animated;
+    }
+
+    private void animateSize(final View view, JSONObject changed, long duration) {
+        final ViewGroup.LayoutParams lp = view.getLayoutParams();
+        if (lp == null) return;
+        if (changed.has("width")) {
+            animateDimension(view, lp.width,
+                             dimension(changed, "width", lp.width), duration, true);
+        }
+        if (changed.has("height")) {
+            animateDimension(view, lp.height,
+                             dimension(changed, "height", lp.height), duration, false);
+        }
+    }
+
+    private void animateDimension(final View view, int from, int to,
+                                  long duration, final boolean horizontal) {
+        if (from < 0 || to < 0) return;
+        android.animation.ValueAnimator animator =
+            android.animation.ValueAnimator.ofInt(from, to);
+        animator.setDuration(duration);
+        animator.addUpdateListener(
+            new android.animation.ValueAnimator.AnimatorUpdateListener() {
+                @Override public void onAnimationUpdate(
+                        android.animation.ValueAnimator value) {
+                    ViewGroup.LayoutParams lp = view.getLayoutParams();
+                    if (lp == null) return;
+                    int v = (Integer) value.getAnimatedValue();
+                    if (horizontal) lp.width = v; else lp.height = v;
+                    view.setLayoutParams(lp);
+                }
+            });
+        animator.start();
+    }
+
+    private android.view.animation.Interpolator interpolator(JSONObject spec) {
+        String curve = spec != null ? spec.optString("curve", "ease_in_out") : "ease_in_out";
+        switch (curve) {
+            case "linear":      return new android.view.animation.LinearInterpolator();
+            case "ease_in":     case "accelerate":
+                return new android.view.animation.AccelerateInterpolator();
+            case "ease_out":    case "decelerate":
+                return new android.view.animation.DecelerateInterpolator();
+            case "bounce":      return new android.view.animation.BounceInterpolator();
+            case "overshoot":   return new android.view.animation.OvershootInterpolator();
+            case "anticipate":  return new android.view.animation.AnticipateInterpolator();
+            default:            return new android.view.animation.AccelerateDecelerateInterpolator();
+        }
+    }
+
     private int getIconRes(String name) {
         switch (name) {
             case "star":     return android.R.drawable.star_on;
@@ -1227,6 +1403,48 @@ public class ViewFactory {
             case "person":   return android.R.drawable.ic_menu_myplaces;
             case "agenda":   return android.R.drawable.ic_menu_agenda;
             case "sort":     return android.R.drawable.ic_menu_sort_by_size;
+            case "favorite": return android.R.drawable.btn_star_big_on;
+            case "favorite_border": return android.R.drawable.btn_star_big_off;
+            case "bookmark": return android.R.drawable.ic_menu_agenda;
+            case "notifications": return android.R.drawable.ic_popup_reminder;
+            case "check":    case "check_circle": return android.R.drawable.checkbox_on_background;
+            case "cancel":   return android.R.drawable.ic_delete;
+            case "warning":  return android.R.drawable.ic_dialog_alert;
+            case "error":    return android.R.drawable.stat_notify_error;
+            case "download": return android.R.drawable.stat_sys_download;
+            case "folder":   return android.R.drawable.ic_menu_archive;
+            case "file":     case "list": return android.R.drawable.ic_menu_agenda;
+            case "image":    return android.R.drawable.ic_menu_gallery;
+            case "video":    return android.R.drawable.ic_media_play;
+            case "music":    return android.R.drawable.ic_media_play;
+            case "mic":      return android.R.drawable.ic_btn_speak_now;
+            case "play":     return android.R.drawable.ic_media_play;
+            case "pause":    return android.R.drawable.ic_media_pause;
+            case "stop":     return android.R.drawable.ic_media_pause;
+            case "skip_next":     return android.R.drawable.ic_media_next;
+            case "skip_previous": return android.R.drawable.ic_media_previous;
+            case "volume":   return android.R.drawable.ic_lock_silent_mode_off;
+            case "location": case "map": return android.R.drawable.ic_menu_mylocation;
+            case "calendar": return android.R.drawable.ic_menu_my_calendar;
+            case "clock":    return android.R.drawable.ic_menu_recent_history;
+            case "filter":   return android.R.drawable.ic_menu_sort_alphabetically;
+            case "more_vert": case "more_horiz": return android.R.drawable.ic_menu_more;
+            case "expand_more":    return android.R.drawable.arrow_down_float;
+            case "expand_less":    return android.R.drawable.arrow_up_float;
+            case "chevron_right":  return android.R.drawable.ic_media_ff;
+            case "chevron_left":   return android.R.drawable.ic_media_rew;
+            case "logout":   case "login": return android.R.drawable.ic_lock_power_off;
+            case "cart":     case "payment": return android.R.drawable.ic_menu_agenda;
+            case "wifi":     return android.R.drawable.stat_sys_download_done;
+            case "bluetooth": return android.R.drawable.stat_sys_data_bluetooth;
+            case "battery":  return android.R.drawable.ic_lock_idle_charging;
+            case "dark_mode": case "light_mode": return android.R.drawable.ic_menu_day;
+            case "visibility": case "visibility_off": return android.R.drawable.ic_menu_view;
+            case "copy":     case "paste": return android.R.drawable.ic_menu_crop;
+            case "link":     return android.R.drawable.ic_menu_set_as;
+            case "send":     case "chat": return android.R.drawable.ic_menu_send;
+            case "group":    return android.R.drawable.ic_menu_myplaces;
+            case "dashboard": case "grid": return android.R.drawable.ic_menu_sort_by_size;
             default:         return android.R.drawable.ic_menu_help;
         }
     }
