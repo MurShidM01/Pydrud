@@ -40,12 +40,14 @@ public class ViewFactory {
     private final Map<String, JSONObject> nodeMap = new HashMap<>();
     private final WidgetRegistry registry = new WidgetRegistry();
     private final MaterialViews material;
+    private final AdvancedViews advanced;
     private final GestureBinder gestures;
     private EventDispatcher eventDispatcher;
 
     public ViewFactory({{ app_name }}Activity activity) {
         this.activity = activity;
         this.material = new MaterialViews(activity, this);
+        this.advanced = new AdvancedViews(activity, eventDispatcher);
         this.gestures = new GestureBinder(activity);
     }
 
@@ -236,6 +238,21 @@ public class ViewFactory {
                     view = createSlider(json); break;
                 case "Dropdown":
                     view = createDropdown(json); break;
+                case "Canvas":
+                    view = advanced.createCanvas(json.optJSONObject("props") == null
+                        ? new JSONObject() : json.optJSONObject("props")); break;
+                case "RichText":
+                    view = advanced.createRichText(props(json), key); break;
+                case "Markdown":
+                    view = advanced.createMarkdown(props(json), key); break;
+                case "MapView":
+                    view = advanced.createMap(props(json), key); break;
+                case "CameraPreview":
+                    view = createCameraPreview(json); break;
+                case "ReorderableList":
+                case "InfiniteList":
+                    view = createRecyclerList(json, key,
+                        "ReorderableList".equals(type)); break;
                 default:
                     if (material.handles(type)) {
                         view = material.create(json);
@@ -1448,4 +1465,41 @@ public class ViewFactory {
             default:         return android.R.drawable.ic_menu_help;
         }
     }
+
+    /** Props object of a node, never null. */
+    private JSONObject props(JSONObject json) {
+        JSONObject p = json.optJSONObject("props");
+        return p == null ? new JSONObject() : p;
+    }
+
+    /**
+     * CameraX preview surface. The Python side drives capture/flash/zoom
+     * through PlatformServices, so here we only mount the view.
+     */
+    private View createCameraPreview(JSONObject json) {
+        androidx.camera.view.PreviewView preview =
+            new androidx.camera.view.PreviewView(activity);
+        JSONObject p = props(json);
+        preview.setScaleType("contain".equals(p.optString("fit", "cover"))
+            ? androidx.camera.view.PreviewView.ScaleType.FIT_CENTER
+            : androidx.camera.view.PreviewView.ScaleType.FILL_CENTER);
+        activity.bindCameraPreview(json.optString("key", ""), preview, p);
+        return preview;
+    }
+
+    /** RecyclerView-backed ReorderableList / InfiniteList. */
+    private View createRecyclerList(JSONObject json, String key,
+                                    boolean reorderable) {
+        androidx.recyclerview.widget.RecyclerView list =
+            advanced.createList(key, props(json), reorderable);
+        java.util.List<View> rows = new java.util.ArrayList<>();
+        JSONArray children = json.optJSONArray("children");
+        for (int i = 0; children != null && i < children.length(); i++) {
+            View row = createView(children.optJSONObject(i));
+            if (row != null) rows.add(row);
+        }
+        advanced.setListViews(list, rows);
+        return list;
+    }
+
 }

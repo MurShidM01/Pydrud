@@ -38,6 +38,9 @@ class Colors:
     SURFACE = "#FFFFFFFF"
     OUTLINE = "#FFE5E7EB"
 
+    BORDER = "#FFE5E7EB"
+    SURFACE_VARIANT = "#FFF3F4F6"
+
     TEXT = "#FF1F2937"
     TEXT_SECONDARY = "#FF6B7280"
     TEXT_DISABLED = "#FF9CA3AF"
@@ -55,6 +58,10 @@ class Colors:
     ORANGE = "#FFF97316"
     BROWN = "#FF78716C"
     GREY = "#FF6B7280"
+
+    #: Default series colours for Chart and Canvas.pie().
+    CHART_PALETTE = ("#FF6366F1", "#FF14B8A6", "#FFF59E0B", "#FFEF4444",
+                     "#FFA855F7", "#FF3B82F6", "#FF22C55E", "#FFEC4899")
 
     @staticmethod
     def with_opacity(color: str, opacity: float) -> str:

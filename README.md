@@ -41,12 +41,129 @@ pydrud run                            # Build, install, launch
 | Reactive State | `State<T>` auto-triggers UI re-renders on value change |
 | Full Styling | Colors, padding, margin, borders, fonts, elevation, alignment |
 | Native Rendering | Every widget becomes a real Android View — not a WebView or canvas |
-| CLI Toolchain | `init` / `build` / `run` / `watch` / `analyze` / `doctor` / `clean` |
+| CLI Toolchain | `init` / `build` / `run` / `watch` / `analyze` / `doctor` / `clean` / `pip` / `icons` / `keygen` / `permissions` / `docs` / `inspect` |
+| Data Layer | SQLite `Database`, `Model` ORM with migrations, and a TTL `Cache` |
+| PyPI on Android | 119 verified packages installable with `pydrud pip add` |
+| Background & Hardware | WorkManager jobs, foreground services, push, camera, sensors, biometrics, BLE, NFC, audio |
 | Responsive | `Responsive.text()` auto-scales UI to any screen size |
 | Native Services | Dialogs, storage, permissions, files, share, notifications, GPS, haptics, device info |
 | Async by Default | Thread pool + timers + a non-blocking HTTP client, so the UI never freezes |
 | Testable | `pydrud.testing.AppTester` runs your whole app in CI without a device or emulator |
 | TCP Bridge | Clean NDJSON protocol over port 8595 |
+
+---
+
+## New in v1.3.0 — the "ship it" release
+
+v1.2 completed the toolkit. v1.3 closes the gap with Flet and Flutter: a real
+data layer, URL-based navigation, background execution, hardware access and
+the release plumbing you need to put an app on the Play Store.
+
+| Area | What you get |
+|------|--------------|
+| **Data** | `Database` (SQLite + migrations + transactions), a tiny `Model` ORM with lookups, pagination and bulk ops, and a TTL `Cache` with an `@cached` decorator |
+| **Navigation** | Pattern routes (`/items/:id`, `/files/*rest`), query strings, guards and redirects, nested navigators, deep links and 7 screen transitions |
+| **PyPI packages** | `pydrud pip add yt-dlp` — 119 verified Android-compatible packages wired into Chaquopy automatically |
+| **Background** | WorkManager jobs with constraints, foreground services with progress, FCM push and notification routing |
+| **Hardware** | Camera preview + capture + scanning, sensors, biometrics, Bluetooth LE, NFC, audio record/play, TTS and speech-to-text |
+| **Security** | `page.secure` — EncryptedSharedPreferences-backed keystore storage |
+| **Graphics** | `Canvas` with paths, gradients, transforms, sparklines and pies; `AnimationController` + `Tween` + `Sequence_` for explicit animations |
+| **Widgets** | `CameraPreview`, `MapView`, `RichText`, `Markdown`, `ReorderableList`, virtualising `InfiniteList` |
+| **Release** | `pydrud keygen` (upload keystore), `pydrud icons` (every density + adaptive + splash), `pydrud permissions`, R8 shrinking |
+| **DX** | Stateful hot reload (your counters survive a save), `pydrud inspect` widget inspector, `pydrud docs` offline API reference |
+
+### Data layer
+
+```python
+from pydrud import Model, Field, Database
+
+class Note(Model):
+    title = Field(str, index=True)
+    body  = Field(str, default="")
+    done  = Field(bool, default=False)
+
+db = page.database("notes.db")
+Note.bind(db)
+
+Note.create(title="Buy milk")
+open_notes = Note.where(done=False, title__contains="milk").order_by("-id").page(1, 20)
+```
+
+### Navigation
+
+```python
+router = Router()
+router.define("/", home)
+router.define("/items/:id", details, transition="slide_left")
+router.define("/settings", settings, guard=lambda name, params: signed_in())
+router.initial("/")
+app.attach_router(router)
+
+router.push("/items/42")            # or router.push("/items/:id", id=42)
+app.on_deep_link(router.handle_link)  # myapp://items/42?tab=specs
+```
+
+### Background work
+
+```python
+@page.background.job("sync")
+def sync(inputs):
+    return {"synced": True}
+
+page.background.schedule("sync", every=900, network="unmetered", charging=True)
+```
+
+The job runs through WorkManager even when the app is closed, calling
+`app.main.run_background_job(name, inputs_json)` in your project.
+
+### Secure storage, hardware and push
+
+```python
+page.secure.set("token", jwt)                       # EncryptedSharedPreferences
+page.biometrics.authenticate(title="Unlock").wait()
+page.sensors.listen("accelerometer", on_reading, rate="game")
+page.camera.capture(key="cam", quality=90).then(upload)
+page.audio.speak("Done")
+page.push.subscribe("news")
+```
+
+### PyPI packages on Android
+
+```bash
+pydrud pip add yt-dlp requests     # verified, wired into Chaquopy, Gradle synced
+pydrud pip search qr               # find what is supported
+pydrud pip list --all              # the full catalogue by category
+```
+
+Packages that cannot work on Android (server frameworks, desktop GUI toolkits)
+are rejected with an explanation; anything else can still be forced with
+`--force`.
+
+<details>
+<summary><strong>119 verified packages</strong></summary>
+
+| Category | Count | Packages |
+|----------|-------|----------|
+| **ai** | 8 | `anthropic`, `google-generativeai`, `groq`, `huggingface-hub`, `openai`, `sentencepiece`, `tiktoken`, `transformers` |
+| **database** | 8 | `firebase-admin`, `peewee`, `pymongo`, `pysqlcipher3`, `redis`, `sqlalchemy`, `supabase`, `tinydb` |
+| **documents** | 5 | `et-xmlfile`, `openpyxl`, `pypdf`, `python-docx`, `reportlab` |
+| **media** | 16 | `ffmpeg-python`, `gtts`, `imageio`, `instaloader`, `moviepy`, `mutagen`, `opencv-python`, `pillow`, `pydub`, `python-barcode`, `pytube`, `pyzbar`, `qrcode`, `speechrecognition`, `youtube-search-python`, `yt-dlp` |
+| **network** | 19 | `aiohttp`, `certifi`, `charset-normalizer`, `deep-translator`, `feedparser`, `geopy`, `googletrans`, `httpx`, `idna`, `paho-mqtt`, `praw`, `requests`, `sseclient-py`, `telethon`, `tweepy`, `urllib3`, `websocket-client`, `websockets`, `wikipedia` |
+| **parsing** | 15 | `beautifulsoup4`, `chardet`, `csvkit`, `html5lib`, `jsonschema`, `lxml`, `markdown`, `markdownify`, `orjson`, `pyyaml`, `soupsieve`, `toml`, `tomli`, `ujson`, `xmltodict` |
+| **science** | 10 | `matplotlib`, `mpmath`, `networkx`, `numpy`, `pandas`, `qiskit`, `scikit-learn`, `scipy`, `statsmodels`, `sympy` |
+| **security** | 8 | `bcrypt`, `cryptography`, `keyring`, `passlib`, `pycryptodome`, `pyjwt`, `pyotp`, `python-jose` |
+| **utility** | 30 | `arrow`, `attrs`, `cachetools`, `chevron`, `croniter`, `emoji`, `faker`, `fuzzywuzzy`, `humanize`, `jinja2`, `markupsafe`, `more-itertools`, `phonenumbers`, `psutil`, `pydantic`, `python-dateutil`, `python-dotenv`, `python-slugify`, `pytz`, `qrcode-terminal`, `rapidfuzz`, `regex`, `rich`, `schedule`, `shortuuid`, `tabulate`, `tenacity`, `typing-extensions`, `tzdata`, `validators` |
+
+</details>
+
+### Release workflow
+
+```bash
+pydrud permissions add camera location   # friendly names -> manifest entries
+pydrud icons --source logo.png           # every density, adaptive icon, splash
+pydrud keygen                            # upload keystore + keystore.properties
+pydrud build --release                   # signed, R8-shrunk APK
+```
 
 ---
 
@@ -729,6 +846,16 @@ the target child `index`, so the renderer inserts views in the right place:
 | `pydrud analyze --json` | Machine-readable JSON output |
 | `pydrud clean` | Clean build artifacts |
 | `pydrud doctor` | Check environment requirements |
+| `pydrud pip add <pkg>...` | Add verified PyPI packages (auto-syncs Gradle) |
+| `pydrud pip remove <pkg>...` | Remove packages |
+| `pydrud pip list [--all] [--category ai]` | Installed, or the whole catalogue |
+| `pydrud pip search <term>` | Search the supported-package registry |
+| `pydrud pip sync` | Re-apply `pydrud.toml` packages to `build.gradle.kts` |
+| `pydrud permissions add\|remove <name>...` | Edit `AndroidManifest.xml` by friendly name |
+| `pydrud icons [--source logo.png]` | Launcher, round, adaptive icons and splash |
+| `pydrud keygen` | Create the Play Store upload keystore |
+| `pydrud docs [--serve]` | Offline HTML API reference |
+| `pydrud inspect [--tree] [--watch]` | Widget inspector for a running app |
 
 ### Environment
 
@@ -911,7 +1038,8 @@ pydrud/
 | **v1.0.1** | Router, Scaffold, AppBar, FAB, MediaQuery, Hot Reload, incremental patches, WidgetRegistry, analyze CLI |
 | **v1.1.0** | Stable keys + keyed diffing, 10 new widgets, Colors/Icons/Theme, working back button, FAB overlays, toast/snackbar/vibrate, lifecycle hooks, self-bootstrapping Gradle, FakeDevice test harness |
 | **v1.2.0** | 21 Material 3 components, gestures, implicit animations + Hero, forms & validation, native services (dialogs/storage/permissions/files/notifications/location/haptics), HTTP client, task runner & timers, Store/Computed/ReactiveList, Material You theming, `pydrud.testing.AppTester` |
-| **v1.3** | SQLite store, background services, camera preview widget, Play Store signing flow |
+| **v1.3.0** | SQLite + ORM + cache, pattern routes/deep links/nested navigators, 119 PyPI packages via `pydrud pip`, WorkManager jobs & foreground services, FCM push, camera/sensors/biometrics/BLE/NFC/audio, secure storage, Canvas & explicit animations, stateful hot reload, inspector, docs generator, signing & icon tooling |
+| **v1.4** | Desktop preview target, richer Material 3 motion, Compose interop |
 | **v2.0** | iOS backend (SwiftUI), Web (WASM), macOS desktop |
 
 ---

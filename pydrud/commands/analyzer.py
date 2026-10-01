@@ -37,6 +37,9 @@ _WIDGET_CLASSES = {
     "RefreshIndicator", "Stepper", "WebView", "VideoPlayer", "Chart",
     # v1.2 — gestures, animation and forms
     "GestureDetector", "InkWell", "Dismissible", "Draggable",
+    # v1.3 — painting, hardware, maps, rich text, big lists
+    "Canvas", "CameraPreview", "MapView", "RichText", "Markdown",
+    "ReorderableList", "InfiniteList",
     "AnimatedContainer", "AnimatedOpacity", "AnimatedScale",
     "AnimatedRotation", "AnimatedSwitcher", "FadeIn", "SlideIn", "ScaleIn",
     "Hero", "Form", "FormField",

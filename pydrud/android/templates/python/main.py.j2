@@ -364,4 +364,45 @@ def start_app():
     global app
     app = App(target=router.build_root(), title="{{ project_name }}")
     app.attach_router(router)
+    # Deep links ({{ scheme }}://showcase), launcher shortcuts and push
+    # notification taps all arrive here and are routed automatically.
+    app.on_deep_link(lambda url: print("[{{ project_name }}] link:", url))
     app.run()
+
+
+# ── Background jobs ─────────────────────────────────────────────────────────
+#
+# WorkManager calls this from PydrudWorker, possibly while the UI is gone,
+# so it must not touch widgets. Register jobs with
+# ``page.background.job("name")`` and schedule them with
+# ``page.background.schedule("name", every=900)``.
+
+JOBS = {}
+
+
+def job(name):
+    """Decorator registering a background job by name."""
+    def decorator(fn):
+        JOBS[name] = fn
+        return fn
+    return decorator
+
+
+@job("refresh")
+def _refresh(inputs):
+    """Example job: runs even when the app is closed."""
+    return {"refreshed": True, "inputs": inputs}
+
+
+def run_background_job(name, inputs_json="{}"):
+    """Entry point invoked by PydrudWorker.java."""
+    import json
+
+    handler = JOBS.get(name)
+    if handler is None:
+        return f"no such job: {name}"
+    try:
+        payload = json.loads(inputs_json or "{}")
+    except ValueError:
+        payload = {}
+    return json.dumps(handler(payload), default=str)

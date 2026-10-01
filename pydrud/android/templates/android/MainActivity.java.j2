@@ -34,6 +34,13 @@ public class {{ app_name }}Activity extends AppCompatActivity {
     private Runnable pendingBack;
     private volatile boolean drawerOpen = false;
 
+    /** Live CameraX previews, keyed by widget key. */
+    private final java.util.Map<String, androidx.camera.view.PreviewView>
+        cameraPreviews = new java.util.HashMap<>();
+    private androidx.camera.core.ImageCapture imageCapture;
+    private androidx.camera.lifecycle.ProcessCameraProvider cameraProvider;
+    private String cameraFacing = "back";
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -53,6 +60,10 @@ public class {{ app_name }}Activity extends AppCompatActivity {
             v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
             return WindowInsetsCompat.CONSUMED;
         });
+
+        // A deep link (myapp://route), launcher shortcut or notification tap
+        // may have started us — forward it once Python is listening.
+        handleDeepLinkIntent(getIntent());
 
         eventDispatcher = new EventDispatcher();
         viewFactory = new ViewFactory(this);
@@ -339,11 +350,173 @@ public class {{ app_name }}Activity extends AppCompatActivity {
         } catch (org.json.JSONException ignored) {}
     }
 
+    // ── deep links ───────────────────────────────────────────────────────
+
+    private String pendingDeepLink = null;
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleDeepLinkIntent(intent);
+        flushDeepLink();
+    }
+
+    /** Remember the launching URL so it can be delivered when Python is up. */
+    public void handleDeepLinkIntent(Intent intent) {
+        if (intent == null) return;
+        String url = null;
+        if (intent.getData() != null) {
+            url = intent.getData().toString();
+        } else if (intent.hasExtra("pydrud_route")) {
+            url = intent.getStringExtra("pydrud_route");
+        }
+        if (url != null && !url.isEmpty()) pendingDeepLink = url;
+    }
+
+    /** Called once the bridge is connected (and after onNewIntent). */
+    public void flushDeepLink() {
+        if (pendingDeepLink == null || bridge == null) return;
+        org.json.JSONObject data = new org.json.JSONObject();
+        try {
+            data.put("url", pendingDeepLink);
+        } catch (Exception ignored) { }
+        bridge.sendEvent("deep_link", "", data);
+        pendingDeepLink = null;
+    }
+
+    // ── camera ───────────────────────────────────────────────────────────
+
+    /** Register a preview surface created by ViewFactory. */
+    public void bindCameraPreview(final String key,
+                                  final androidx.camera.view.PreviewView preview,
+                                  final org.json.JSONObject props) {
+        cameraPreviews.put(key, preview);
+        cameraFacing = props.optString("facing", "back");
+        startCamera(key, cameraFacing);
+    }
+
+    /** Bind (or rebind) CameraX to the lifecycle for a preview widget. */
+    public void startCamera(final String key, final String facing) {
+        final androidx.camera.view.PreviewView preview =
+            cameraPreviews.isEmpty() ? null
+            : (key == null || key.isEmpty()
+                ? cameraPreviews.values().iterator().next()
+                : cameraPreviews.get(key));
+        if (preview == null) return;
+        cameraFacing = facing;
+
+        final com.google.common.util.concurrent.ListenableFuture<
+            androidx.camera.lifecycle.ProcessCameraProvider> future =
+            androidx.camera.lifecycle.ProcessCameraProvider.getInstance(this);
+        future.addListener(new Runnable() {
+            @Override public void run() {
+                try {
+                    cameraProvider = future.get();
+                    androidx.camera.core.Preview previewUseCase =
+                        new androidx.camera.core.Preview.Builder().build();
+                    previewUseCase.setSurfaceProvider(preview.getSurfaceProvider());
+                    imageCapture = new androidx.camera.core.ImageCapture.Builder()
+                        .build();
+                    androidx.camera.core.CameraSelector selector =
+                        "front".equals(cameraFacing)
+                        ? androidx.camera.core.CameraSelector.DEFAULT_FRONT_CAMERA
+                        : androidx.camera.core.CameraSelector.DEFAULT_BACK_CAMERA;
+                    cameraProvider.unbindAll();
+                    cameraProvider.bindToLifecycle(
+                        {{ app_name }}Activity.this, selector,
+                        previewUseCase, imageCapture);
+                    org.json.JSONObject data = new org.json.JSONObject();
+                    data.put("facing", cameraFacing);
+                    eventDispatcher.dispatch("ready", key, data);
+                } catch (Exception e) {
+                    Log.e(TAG, "camera bind failed", e);
+                    org.json.JSONObject data = new org.json.JSONObject();
+                    try { data.put("error", String.valueOf(e.getMessage())); }
+                    catch (Exception ignored) { }
+                    eventDispatcher.dispatch("error", key, data);
+                }
+            }
+        }, androidx.core.content.ContextCompat.getMainExecutor(this));
+    }
+
+    public void stopCamera() {
+        if (cameraProvider != null) cameraProvider.unbindAll();
+    }
+
+    /** Take a photo; the callback receives the saved path or null. */
+    public void capturePhoto(final String path,
+                             final androidx.core.util.Consumer<String> callback) {
+        if (imageCapture == null) {
+            callback.accept(null);
+            return;
+        }
+        final java.io.File file = new java.io.File(
+            path == null || path.isEmpty()
+                ? new java.io.File(getCacheDir(),
+                    "photo_" + System.currentTimeMillis() + ".jpg").getAbsolutePath()
+                : path);
+        androidx.camera.core.ImageCapture.OutputFileOptions options =
+            new androidx.camera.core.ImageCapture.OutputFileOptions.Builder(file)
+                .build();
+        imageCapture.takePicture(options,
+            androidx.core.content.ContextCompat.getMainExecutor(this),
+            new androidx.camera.core.ImageCapture.OnImageSavedCallback() {
+                @Override
+                public void onImageSaved(
+                        androidx.camera.core.ImageCapture.OutputFileResults results) {
+                    callback.accept(file.getAbsolutePath());
+                }
+
+                @Override
+                public void onError(androidx.camera.core.ImageCaptureException e) {
+                    Log.e(TAG, "capture failed", e);
+                    callback.accept(null);
+                }
+            });
+    }
+
+    /** Animate the next full render (Router transitions). */
+    public void setRouteTransition(final String transition, final int duration) {
+        if (rootView == null || "none".equals(transition)) return;
+        runOnUiThread(new Runnable() {
+            @Override public void run() {
+                android.view.animation.Animation anim;
+                if (transition.startsWith("slide")) {
+                    float fromX = "slide_right".equals(transition) ? -1f
+                        : "slide_left".equals(transition) ? 1f : 0f;
+                    float fromY = "slide_up".equals(transition) ? 1f
+                        : "slide_down".equals(transition) ? -1f : 0f;
+                    anim = new android.view.animation.TranslateAnimation(
+                        android.view.animation.Animation.RELATIVE_TO_PARENT, fromX,
+                        android.view.animation.Animation.RELATIVE_TO_PARENT, 0f,
+                        android.view.animation.Animation.RELATIVE_TO_PARENT, fromY,
+                        android.view.animation.Animation.RELATIVE_TO_PARENT, 0f);
+                } else if ("scale".equals(transition)) {
+                    anim = new android.view.animation.ScaleAnimation(0.92f, 1f,
+                        0.92f, 1f,
+                        android.view.animation.Animation.RELATIVE_TO_SELF, 0.5f,
+                        android.view.animation.Animation.RELATIVE_TO_SELF, 0.5f);
+                } else {
+                    anim = new android.view.animation.AlphaAnimation(0f, 1f);
+                }
+                anim.setDuration(duration);
+                anim.setInterpolator(
+                    new android.view.animation.DecelerateInterpolator());
+                rootView.startAnimation(anim);
+            }
+        });
+    }
+
     @Override
     protected void onDestroy() {
         sendLifecycle("destroy");
         if (bridge != null) bridge.stop();
         if (viewFactory != null) viewFactory.clear();
+        stopCamera();
+        if (bridge != null && bridge.platform() != null) {
+            bridge.platform().dispose();
+        }
         super.onDestroy();
     }
 }

@@ -80,6 +80,14 @@ class App:
         self._hot_reload_requested = hot_reload
         # ── Lifecycle hooks ────────────────────────────────────────
         self._lifecycle_handlers: dict[str, list[Callable]] = {}
+        #: Deep links / shortcuts / push messages / sensor streams.
+        self._deep_link_handlers: list[Callable] = []
+        self._push_handlers: list[Callable] = []
+        self._pending_deep_link: Optional[str] = None
+        #: Bound reactive objects — also used to carry values across reloads.
+        self._bound_states: list = []
+        self._bound_stores: list = []
+        self._preserve_state: bool = True
         self._error_handler: Optional[Callable[[BaseException], None]] = None
         # ── Native service calls (request/response) ────────────────
         self._pending: dict[str, Result] = {}
@@ -221,8 +229,10 @@ class App:
         """
         for state in states:
             if isinstance(state, State):
+                self._bound_states.append(state)
                 state.watch(lambda _old, _new: self.update())
             elif hasattr(state, "subscribe"):
+                self._bound_stores.append(state)
                 state.subscribe(lambda *_args, **_kw: self.update())
             else:
                 raise TypeError(
@@ -263,6 +273,41 @@ class App:
         """Register a lifecycle callback (``resume``/``pause``/``stop``/``destroy``)."""
         self._lifecycle_handlers.setdefault(event, []).append(callback)
         return self
+
+    def on_deep_link(self, callback: Callable[[str], None]) -> "App":
+        """Handle ``myapp://`` / https links and launcher shortcuts.
+
+        The callback receives the raw URL.  When a router is attached, the
+        link is *also* resolved against its route table automatically.
+        """
+        self._deep_link_handlers.append(callback)
+        if self._pending_deep_link is not None:
+            link, self._pending_deep_link = self._pending_deep_link, None
+            self._handle_deep_link({"url": link})
+        return self
+
+    def on_push(self, callback: Callable[[dict], None]) -> "App":
+        """Handle an incoming FCM message (foreground or notification tap)."""
+        self._push_handlers.append(callback)
+        return self
+
+    def _handle_deep_link(self, data: dict) -> None:
+        url = data.get("url") or data.get("route") or ""
+        if not url:
+            return
+        if not self._deep_link_handlers and self._router is None:
+            self._pending_deep_link = url
+            return
+        for cb in list(self._deep_link_handlers):
+            try:
+                cb(url)
+            except Exception as exc:
+                self._report_error(exc)
+        if self._router is not None and hasattr(self._router, "handle_link"):
+            try:
+                self._router.handle_link(url)
+            except Exception as exc:
+                self._report_error(exc)
 
     def on_error(self, callback: Callable[[BaseException], None]) -> "App":
         """Register a handler called when an event callback raises."""
@@ -327,8 +372,83 @@ class App:
             self._watcher.stop()
             self._watcher = None
 
+    # ── stateful hot reload ──────────────────────────────────────────────
+
+    def capture_state(self) -> dict:
+        """Snapshot every bound State/Store value before a reload."""
+        snapshot: dict = {"states": [], "stores": [], "route": None,
+                          "params": {}}
+        for state in self._bound_states:
+            try:
+                snapshot["states"].append(
+                    (getattr(state, "name", "") or "", state.value))
+            except Exception:
+                snapshot["states"].append(("", None))
+        for store in self._bound_stores:
+            try:
+                snapshot["stores"].append(
+                    dict(store.state) if hasattr(store, "state") else None)
+            except Exception:
+                snapshot["stores"].append(None)
+        if self._router is not None:
+            # Store the *pattern* (e.g. "/items/:id"), which is what the
+            # rebuilt router will know about, plus the resolved params.
+            snapshot["route"] = self._router.current_route
+            snapshot["params"] = dict(self._router.current_params)
+            snapshot["path"] = self._router.path()
+        return snapshot
+
+    def restore_state(self, snapshot: dict) -> None:
+        """Push a snapshot back into the reloaded module's objects.
+
+        Hot reload rebuilds module-level ``State`` objects, so values are
+        matched positionally (and by name when one was given) — the same
+        trade-off Flutter makes, and it keeps a counter or a half-typed form
+        intact while you edit the screen around it.
+        """
+        states = snapshot.get("states") or []
+        for index, state in enumerate(self._bound_states):
+            if index >= len(states):
+                break
+            name, value = states[index]
+            if name and getattr(state, "name", "") and name != state.name:
+                continue
+            try:
+                state.value = value
+            except Exception:
+                pass
+        stores = snapshot.get("stores") or []
+        for index, store in enumerate(self._bound_stores):
+            if index >= len(stores) or stores[index] is None:
+                continue
+            try:
+                store.replace(stores[index])
+            except AttributeError:
+                try:
+                    store.state.update(stores[index])
+                except Exception:
+                    pass
+        route = snapshot.get("route")
+        if not route or self._router is None:
+            return
+        try:
+            if self._router.has_route(route):
+                self._router.replace(route, **(snapshot.get("params") or {}))
+            elif snapshot.get("path"):
+                # The route pattern was renamed or removed; fall back to
+                # resolving the concrete URL path again.
+                self._router.go(snapshot["path"])
+        except Exception:
+            pass
+
+    def preserve_state(self, enabled: bool = True) -> "App":
+        """Keep State/Store values across hot reloads (default: on)."""
+        self._preserve_state = bool(enabled)
+        return self
+
     def _on_hot_reload(self, filepath: str) -> None:
         """Called by the file watcher when a source file changes."""
+        snapshot = self.capture_state() if self._preserve_state else None
         try:
             mod_name = _module_name_for(filepath, self._project_root)
             if mod_name and mod_name in sys.modules:
@@ -340,7 +460,12 @@ class App:
                     new_target = getattr(module, target_name, None)
                     if callable(new_target):
                         self.target = new_target
-            print(f"[Pydrud] Hot Reload: {os.path.basename(filepath)}")
+            if snapshot is not None:
+                self.restore_state(snapshot)
+            kept = len(snapshot["states"]) + len(snapshot["stores"]) \
+                if snapshot else 0
+            print(f"[Pydrud] Hot Reload: {os.path.basename(filepath)}"
+                  + (f" (kept {kept} state object(s))" if kept else ""))
             self.update()
         except Exception as exc:
             print(f"[Pydrud] Hot Reload error for {filepath}: {exc}")
@@ -428,6 +553,11 @@ class App:
         Widget mutations from a worker thread must go through this, exactly
         like ``runOnUiThread`` on Android.
         """
+        if not self._running:
+            # No event loop yet (tests, CLI, headless renders): run inline so
+            # callers never silently lose work.
+            fn(*args, **kwargs)
+            return
         self._ui_queue.put((fn, args, kwargs))
         self._event_queue.put("__ui__")
 
@@ -595,6 +725,40 @@ class App:
             )
             return
 
+        if etype == "deep_link":
+            self._handle_deep_link(data)
+            return
+
+        if etype == "push":
+            for cb in list(self._push_handlers):
+                try:
+                    cb(dict(data))
+                except Exception as exc:
+                    self._report_error(exc)
+            return
+
+        if etype == "sensor":
+            try:
+                self._page.sensors.dispatch(dict(data))
+            except Exception as exc:
+                self._report_error(exc)
+            return
+
+        if etype == "job":
+            # WorkManager asking Python to run a registered background job.
+            name = data.get("name", "")
+            try:
+                value = self._page.background.run_job(name, data.get("inputs"))
+                ok, payload = True, value
+            except Exception as exc:
+                self._report_error(exc)
+                ok, payload = False, str(exc)
+            self._send(self._bridge.encode_command(
+                "job_result", name=name, ok=ok,
+                value=payload if ok else None,
+                error=None if ok else payload))
+            return
+
         if etype == "lifecycle":
             state = data.get("state", "")
             for cb in self._lifecycle_handlers.get(state, []):
@@ -644,6 +808,9 @@ class _Page:
         self.theme_mode: str = "light"
         self._services: Optional[Any] = None
         self._http: Optional[Any] = None
+        self._cache: Optional[Any] = None
+        self._databases: dict = {}
+        self._app_dir: Optional[str] = None
         self._overlays: dict[str, Widget] = {}
 
     # ── content ───────────────────────────────────────────────────────────
@@ -732,6 +899,92 @@ class _Page:
     @property
     def haptics(self):
         return self.services.haptics
+
+    @property
+    def secure(self):
+        """Keystore-backed encrypted key/value storage."""
+        return self.services.secure
+
+    @property
+    def background(self):
+        """WorkManager jobs and foreground services."""
+        return self.services.background
+
+    @property
+    def push(self):
+        """Firebase Cloud Messaging tokens and topics."""
+        return self.services.push
+
+    @property
+    def shortcuts(self):
+        """Launcher shortcuts and home-screen widgets."""
+        return self.services.shortcuts
+
+    @property
+    def camera(self):
+        """Live camera control (pairs with the CameraPreview widget)."""
+        return self.services.camera
+
+    @property
+    def sensors(self):
+        """Accelerometer, gyroscope, light, proximity, step counter, …"""
+        return self.services.sensors
+
+    @property
+    def bluetooth(self):
+        """Bluetooth Low Energy scanning and GATT access."""
+        return self.services.bluetooth
+
+    @property
+    def nfc(self):
+        """NFC tag reading and NDEF writing."""
+        return self.services.nfc
+
+    @property
+    def biometrics(self):
+        """Fingerprint / face authentication."""
+        return self.services.biometrics
+
+    @property
+    def audio(self):
+        """Recording, playback, text-to-speech and speech-to-text."""
+        return self.services.audio
+
+    def database(self, name: str = "app.db", **kwargs):
+        """Open (once) a SQLite database inside the app's private storage.
+
+        ``page.database()`` works on the device *and* on a laptop: when there
+        is no bridge, the file lands in ``.pydrud/`` next to the project.
+        """
+        from pydrud.data.database import Database
+
+        if name in self._databases:
+            return self._databases[name]
+        path = name if os.path.isabs(name) else os.path.join(
+            self._storage_dir("databases"), name)
+        database = Database(path, **kwargs)
+        self._databases[name] = database
+        return database
+
+    @property
+    def cache(self):
+        """A persistent TTL + LRU cache in the app's cache directory."""
+        if self._cache is None:
+            from pydrud.data.cache import Cache
+
+            self._cache = Cache(self._storage_dir("cache"))
+        return self._cache
+
+    def _storage_dir(self, kind: str) -> str:
+        """Resolve a writable directory, on-device or on a dev machine."""
+        base = self._app_dir
+        if base is None:
+            base = os.environ.get("PYDRUD_APP_DIR") or os.path.join(
+                getattr(self._app, "_project_root", ".") or ".", ".pydrud")
+            self._app_dir = base
+        path = os.path.join(base, kind)
+        os.makedirs(path, exist_ok=True)
+        return path
 
     @property
     def http(self):
@@ -865,6 +1118,29 @@ class _Page:
     def fullscreen(self, enabled: bool = True) -> None:
         """Immersive mode: hide the status and navigation bars."""
         self._send("fullscreen", enabled=bool(enabled))
+
+    def route_transition(self, transition: str = "fade",
+                         *, duration: int = 220) -> None:
+        """Animate the *next* screen swap (used by Router transitions)."""
+        from pydrud.navigation import TRANSITIONS
+
+        if transition not in TRANSITIONS:
+            raise ValueError(f"transition must be one of {TRANSITIONS}")
+        self._send("route_transition", transition=transition,
+                   duration=int(duration))
+
+    def animation(self, duration: float = 0.3, *, curve: str = "ease_in_out",
+                  fps: int = 60):
+        """Create an :class:`AnimationController` driven by this page.
+
+        Ticks run on the task runner and listeners are marshalled back onto
+        the UI thread, so a listener may safely mutate widgets.
+        """
+        from pydrud.core.controllers import AnimationController
+
+        return AnimationController(duration, curve=curve, fps=fps,
+                                   runner=self._app.tasks,
+                                   on_ui=self._app.run_on_ui)
 
     def set_theme_mode(self, mode: str) -> None:
         """Switch between ``"light"``, ``"dark"`` and ``"system"``."""

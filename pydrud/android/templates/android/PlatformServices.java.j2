@@ -1,0 +1,732 @@
+package {{ package }};
+
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.ShortcutInfo;
+import android.content.pm.ShortcutManager;
+import android.graphics.drawable.Icon;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
+import android.media.MediaPlayer;
+import android.media.MediaRecorder;
+import android.net.Uri;
+import android.os.Build;
+import android.speech.tts.TextToSpeech;
+import android.util.Log;
+
+import androidx.biometric.BiometricManager;
+import androidx.biometric.BiometricPrompt;
+import androidx.core.content.ContextCompat;
+import androidx.security.crypto.EncryptedSharedPreferences;
+import androidx.security.crypto.MasterKey;
+import androidx.work.Constraints;
+import androidx.work.Data;
+import androidx.work.ExistingPeriodicWorkPolicy;
+import androidx.work.ExistingWorkPolicy;
+import androidx.work.NetworkType;
+import androidx.work.OneTimeWorkRequest;
+import androidx.work.PeriodicWorkRequest;
+import androidx.work.WorkManager;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+
+/**
+ * PlatformServices — the v1.3 half of the native bridge.
+ *
+ * Handles encrypted storage, WorkManager jobs, foreground services, push
+ * tokens, launcher shortcuts, sensors, biometrics and audio. Like
+ * {@link NativeServices} every command replies exactly once with a
+ * {@code result} event so the Python {@code Result} always settles.
+ */
+public class PlatformServices {
+
+    private static final String TAG = "PydrudPlatform";
+    private static final String SECURE_PREFS = "pydrud_secure";
+
+    private final {{ app_name }}Activity activity;
+    private final BridgeService bridge;
+
+    private SharedPreferences securePrefs;
+    private SensorManager sensorManager;
+    private final Map<String, SensorEventListener> sensorListeners = new HashMap<>();
+    private MediaRecorder recorder;
+    private MediaPlayer player;
+    private TextToSpeech tts;
+    private String recordingPath = "";
+
+    public PlatformServices({{ app_name }}Activity activity, BridgeService bridge) {
+        this.activity = activity;
+        this.bridge = bridge;
+    }
+
+    /** Handle one command; returns true when it was recognised. */
+    public boolean handle(final String cmd, final JSONObject msg) {
+        final String requestId = msg.optString("request_id", "");
+        try {
+            switch (cmd) {
+                case "secure_set":        secureSet(requestId, msg); return true;
+                case "secure_get":        secureGet(requestId, msg); return true;
+                case "secure_remove":     secureRemove(requestId, msg); return true;
+                case "secure_keys":       secureKeys(requestId); return true;
+                case "secure_clear":      secureClear(requestId); return true;
+                case "secure_available":  reply(requestId, Build.VERSION.SDK_INT >= 23); return true;
+
+                case "work_schedule":     workSchedule(requestId, msg); return true;
+                case "work_cancel":       workCancel(requestId, msg); return true;
+                case "work_status":       workStatus(requestId, msg); return true;
+                case "service_start":     serviceStart(requestId, msg); return true;
+                case "service_update":    serviceUpdate(requestId, msg); return true;
+                case "service_stop":      serviceStop(requestId); return true;
+                case "battery_exemption": batteryExemption(requestId); return true;
+
+                case "push_token":        pushToken(requestId); return true;
+                case "push_subscribe":    pushTopic(requestId, msg, true); return true;
+                case "push_unsubscribe":  pushTopic(requestId, msg, false); return true;
+                case "push_delete_token": reply(requestId, true); return true;
+
+                case "shortcuts_set":     shortcutsSet(requestId, msg); return true;
+                case "shortcut_pin":      shortcutPin(requestId, msg); return true;
+                case "appwidget_update":  appWidgetUpdate(requestId, msg); return true;
+
+                case "sensors_available": sensorsAvailable(requestId); return true;
+                case "sensor_start":      sensorStart(requestId, msg); return true;
+                case "sensor_stop":       sensorStop(requestId, msg); return true;
+                case "sensor_read":       sensorRead(requestId, msg); return true;
+
+                case "biometric_available": biometricAvailable(requestId); return true;
+                case "biometric_auth":      biometricAuth(requestId, msg); return true;
+                case "biometric_enroll":    biometricEnroll(requestId); return true;
+
+                case "audio_record":      audioRecord(requestId, msg); return true;
+                case "audio_record_stop": audioRecordStop(requestId); return true;
+                case "audio_play":        audioPlay(requestId, msg); return true;
+                case "audio_pause":       audioPause(requestId); return true;
+                case "audio_resume":      audioResume(requestId); return true;
+                case "audio_stop":        audioStop(requestId); return true;
+                case "audio_seek":        audioSeek(requestId, msg); return true;
+                case "audio_volume":      audioVolume(requestId, msg); return true;
+                case "tts_speak":         ttsSpeak(requestId, msg); return true;
+
+                default: return false;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "command " + cmd + " failed", e);
+            fail(requestId, e.getMessage() == null ? "error" : e.getMessage());
+            return true;
+        }
+    }
+
+    // ── replies ──────────────────────────────────────────────────────────
+
+    private void reply(String requestId, Object value) {
+        if (requestId == null || requestId.isEmpty() || bridge == null) return;
+        JSONObject data = new JSONObject();
+        try {
+            data.put("request_id", requestId);
+            data.put("ok", true);
+            data.put("value", value == null ? JSONObject.NULL : value);
+        } catch (Exception ignored) { }
+        bridge.sendEvent("result", "", data);
+    }
+
+    private void fail(String requestId, String error) {
+        if (requestId == null || requestId.isEmpty() || bridge == null) return;
+        JSONObject data = new JSONObject();
+        try {
+            data.put("request_id", requestId);
+            data.put("ok", false);
+            data.put("error", error);
+        } catch (Exception ignored) { }
+        bridge.sendEvent("result", "", data);
+    }
+
+    // ── encrypted storage ────────────────────────────────────────────────
+
+    private SharedPreferences secure() throws Exception {
+        if (securePrefs == null) {
+            MasterKey key = new MasterKey.Builder(activity)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build();
+            securePrefs = EncryptedSharedPreferences.create(
+                activity, SECURE_PREFS, key,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM);
+        }
+        return securePrefs;
+    }
+
+    private void secureSet(String requestId, JSONObject msg) throws Exception {
+        secure().edit().putString(msg.optString("key", ""),
+                                  msg.optString("value", "")).apply();
+        reply(requestId, true);
+    }
+
+    private void secureGet(String requestId, JSONObject msg) throws Exception {
+        String value = secure().getString(msg.optString("key", ""), null);
+        reply(requestId, value == null ? msg.opt("default") : value);
+    }
+
+    private void secureRemove(String requestId, JSONObject msg) throws Exception {
+        secure().edit().remove(msg.optString("key", "")).apply();
+        reply(requestId, true);
+    }
+
+    private void secureKeys(String requestId) throws Exception {
+        JSONArray keys = new JSONArray();
+        for (String key : secure().getAll().keySet()) keys.put(key);
+        reply(requestId, keys);
+    }
+
+    private void secureClear(String requestId) throws Exception {
+        secure().edit().clear().apply();
+        reply(requestId, true);
+    }
+
+    // ── WorkManager ──────────────────────────────────────────────────────
+
+    private void workSchedule(String requestId, JSONObject msg) {
+        String name = msg.optString("name", "job");
+        Constraints.Builder constraints = new Constraints.Builder()
+            .setRequiresCharging(msg.optBoolean("charging", false))
+            .setRequiresBatteryNotLow(msg.optBoolean("battery_not_low", false));
+        String network = msg.optString("network", "any");
+        if ("connected".equals(network)) {
+            constraints.setRequiredNetworkType(NetworkType.CONNECTED);
+        } else if ("unmetered".equals(network)) {
+            constraints.setRequiredNetworkType(NetworkType.UNMETERED);
+        } else if ("not_roaming".equals(network)) {
+            constraints.setRequiredNetworkType(NetworkType.NOT_ROAMING);
+        } else {
+            constraints.setRequiredNetworkType(NetworkType.NOT_REQUIRED);
+        }
+        if (Build.VERSION.SDK_INT >= 23) {
+            constraints.setRequiresDeviceIdle(msg.optBoolean("idle", false));
+        }
+
+        Data.Builder data = new Data.Builder().putString("pydrud_job", name);
+        JSONObject inputs = msg.optJSONObject("inputs");
+        if (inputs != null) data.putString("pydrud_inputs", inputs.toString());
+
+        WorkManager manager = WorkManager.getInstance(activity);
+        double every = msg.optDouble("every", 0);
+        long delay = (long) (msg.optDouble("delay", 0) * 1000);
+
+        if (every > 0) {
+            PeriodicWorkRequest request = new PeriodicWorkRequest.Builder(
+                    PydrudWorker.class, (long) every, TimeUnit.SECONDS)
+                .setConstraints(constraints.build())
+                .setInputData(data.build())
+                .setInitialDelay(delay, TimeUnit.MILLISECONDS)
+                .build();
+            manager.enqueueUniquePeriodicWork(name,
+                ExistingPeriodicWorkPolicy.UPDATE, request);
+        } else {
+            OneTimeWorkRequest request = new OneTimeWorkRequest.Builder(
+                    PydrudWorker.class)
+                .setConstraints(constraints.build())
+                .setInputData(data.build())
+                .setInitialDelay(delay, TimeUnit.MILLISECONDS)
+                .build();
+            manager.enqueueUniqueWork(name,
+                msg.optBoolean("replace", true)
+                    ? ExistingWorkPolicy.REPLACE : ExistingWorkPolicy.KEEP,
+                request);
+        }
+        reply(requestId, name);
+    }
+
+    private void workCancel(String requestId, JSONObject msg) {
+        WorkManager manager = WorkManager.getInstance(activity);
+        if (msg.optBoolean("all", false)) {
+            manager.cancelAllWork();
+        } else {
+            manager.cancelUniqueWork(msg.optString("name", ""));
+        }
+        reply(requestId, true);
+    }
+
+    private void workStatus(String requestId, JSONObject msg) {
+        try {
+            List<androidx.work.WorkInfo> infos = WorkManager.getInstance(activity)
+                .getWorkInfosForUniqueWork(msg.optString("name", "")).get();
+            if (infos.isEmpty()) {
+                reply(requestId, "unknown");
+            } else {
+                reply(requestId, infos.get(0).getState().name().toLowerCase());
+            }
+        } catch (Exception e) {
+            fail(requestId, "status unavailable");
+        }
+    }
+
+    // ── foreground service ───────────────────────────────────────────────
+
+    private void serviceStart(String requestId, JSONObject msg) {
+        Intent intent = new Intent(activity, PydrudForegroundService.class);
+        intent.setAction("start");
+        intent.putExtra("title", msg.optString("title", "Running"));
+        intent.putExtra("message", msg.optString("message", ""));
+        intent.putExtra("ongoing", msg.optBoolean("ongoing", true));
+        ContextCompat.startForegroundService(activity, intent);
+        reply(requestId, true);
+    }
+
+    private void serviceUpdate(String requestId, JSONObject msg) {
+        Intent intent = new Intent(activity, PydrudForegroundService.class);
+        intent.setAction("update");
+        intent.putExtra("title", msg.optString("title", ""));
+        intent.putExtra("message", msg.optString("message", ""));
+        intent.putExtra("progress", msg.optInt("progress", -1));
+        ContextCompat.startForegroundService(activity, intent);
+        reply(requestId, true);
+    }
+
+    private void serviceStop(String requestId) {
+        activity.stopService(new Intent(activity, PydrudForegroundService.class));
+        reply(requestId, true);
+    }
+
+    private void batteryExemption(String requestId) {
+        try {
+            Intent intent = new Intent(
+                android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+            intent.setData(Uri.parse("package:" + activity.getPackageName()));
+            activity.startActivity(intent);
+            reply(requestId, true);
+        } catch (Exception e) {
+            fail(requestId, "not supported");
+        }
+    }
+
+    // ── push ─────────────────────────────────────────────────────────────
+
+    private void pushToken(final String requestId) {
+{%- if firebase %}
+        com.google.firebase.messaging.FirebaseMessaging.getInstance().getToken()
+            .addOnCompleteListener(task -> {
+                if (task.isSuccessful()) {
+                    reply(requestId, task.getResult());
+                } else {
+                    fail(requestId, "token unavailable");
+                }
+            });
+{%- else %}
+        fail(requestId, "Firebase is not configured — add google-services.json "
+                      + "to the project root and rebuild");
+{%- endif %}
+    }
+
+    private void pushTopic(final String requestId, JSONObject msg, boolean subscribe) {
+{%- if firebase %}
+        String topic = msg.optString("topic", "");
+        com.google.android.gms.tasks.Task<Void> task = subscribe
+            ? com.google.firebase.messaging.FirebaseMessaging.getInstance()
+                .subscribeToTopic(topic)
+            : com.google.firebase.messaging.FirebaseMessaging.getInstance()
+                .unsubscribeFromTopic(topic);
+        task.addOnCompleteListener(done -> reply(requestId, done.isSuccessful()));
+{%- else %}
+        fail(requestId, "Firebase is not configured");
+{%- endif %}
+    }
+
+    // ── shortcuts & widgets ──────────────────────────────────────────────
+
+    private void shortcutsSet(String requestId, JSONObject msg) {
+        if (Build.VERSION.SDK_INT < 25) { reply(requestId, false); return; }
+        ShortcutManager manager = activity.getSystemService(ShortcutManager.class);
+        if (manager == null) { reply(requestId, false); return; }
+        JSONArray items = msg.optJSONArray("shortcuts");
+        List<ShortcutInfo> shortcuts = new ArrayList<>();
+        for (int i = 0; items != null && i < items.length(); i++) {
+            JSONObject item = items.optJSONObject(i);
+            if (item == null) continue;
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(
+                "{{ scheme | default(pydrud_app_name) }}://"
+                + item.optString("route", "/")), activity,
+                {{ app_name }}Activity.class);
+            shortcuts.add(new ShortcutInfo.Builder(activity, item.optString("id"))
+                .setShortLabel(item.optString("label"))
+                .setLongLabel(item.optString("label"))
+                .setIcon(Icon.createWithResource(activity,
+                        android.R.drawable.ic_menu_compass))
+                .setIntent(intent)
+                .build());
+        }
+        manager.setDynamicShortcuts(shortcuts);
+        reply(requestId, shortcuts.size());
+    }
+
+    private void shortcutPin(String requestId, JSONObject msg) {
+        if (Build.VERSION.SDK_INT < 26) { reply(requestId, false); return; }
+        ShortcutManager manager = activity.getSystemService(ShortcutManager.class);
+        if (manager == null || !manager.isRequestPinShortcutSupported()) {
+            reply(requestId, false);
+            return;
+        }
+        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(
+            "{{ scheme | default(pydrud_app_name) }}://"
+            + msg.optString("route", "/")), activity, {{ app_name }}Activity.class);
+        ShortcutInfo shortcut = new ShortcutInfo.Builder(activity,
+                msg.optString("id", "pinned"))
+            .setShortLabel(msg.optString("label", "Open"))
+            .setIcon(Icon.createWithResource(activity,
+                    android.R.drawable.ic_menu_compass))
+            .setIntent(intent)
+            .build();
+        manager.requestPinShortcut(shortcut, null);
+        reply(requestId, true);
+    }
+
+    private void appWidgetUpdate(String requestId, JSONObject msg) {
+        Intent intent = new Intent("{{ package }}.APPWIDGET_UPDATE");
+        intent.putExtra("values", msg.optJSONObject("values") == null
+            ? "{}" : msg.optJSONObject("values").toString());
+        intent.setPackage(activity.getPackageName());
+        activity.sendBroadcast(intent);
+        reply(requestId, true);
+    }
+
+    // ── sensors ──────────────────────────────────────────────────────────
+
+    private SensorManager sensors() {
+        if (sensorManager == null) {
+            sensorManager = (SensorManager)
+                activity.getSystemService(Context.SENSOR_SERVICE);
+        }
+        return sensorManager;
+    }
+
+    private int sensorType(String name) {
+        switch (name) {
+            case "accelerometer":       return Sensor.TYPE_ACCELEROMETER;
+            case "shake":               return Sensor.TYPE_ACCELEROMETER;
+            case "gyroscope":           return Sensor.TYPE_GYROSCOPE;
+            case "magnetometer":        return Sensor.TYPE_MAGNETIC_FIELD;
+            case "gravity":             return Sensor.TYPE_GRAVITY;
+            case "linear_acceleration": return Sensor.TYPE_LINEAR_ACCELERATION;
+            case "rotation":            return Sensor.TYPE_ROTATION_VECTOR;
+            case "step_counter":        return Sensor.TYPE_STEP_COUNTER;
+            case "light":               return Sensor.TYPE_LIGHT;
+            case "proximity":           return Sensor.TYPE_PROXIMITY;
+            case "pressure":            return Sensor.TYPE_PRESSURE;
+            case "humidity":            return Sensor.TYPE_RELATIVE_HUMIDITY;
+            case "temperature":         return Sensor.TYPE_AMBIENT_TEMPERATURE;
+            default:                    return -1;
+        }
+    }
+
+    private int sensorRate(String rate) {
+        switch (rate) {
+            case "fastest": return SensorManager.SENSOR_DELAY_FASTEST;
+            case "game":    return SensorManager.SENSOR_DELAY_GAME;
+            case "normal":  return SensorManager.SENSOR_DELAY_NORMAL;
+            default:        return SensorManager.SENSOR_DELAY_UI;
+        }
+    }
+
+    private void sensorsAvailable(String requestId) {
+        JSONArray names = new JSONArray();
+        String[] all = {"accelerometer", "gyroscope", "magnetometer", "gravity",
+                        "linear_acceleration", "rotation", "step_counter",
+                        "light", "proximity", "pressure", "humidity",
+                        "temperature"};
+        for (String name : all) {
+            if (sensors().getDefaultSensor(sensorType(name)) != null) {
+                names.put(name);
+            }
+        }
+        reply(requestId, names);
+    }
+
+    private void sensorStart(String requestId, JSONObject msg) {
+        final String name = msg.optString("sensor", "accelerometer");
+        final boolean shake = "shake".equals(name);
+        final double threshold = msg.optDouble("threshold", 12.0);
+        int type = sensorType(name);
+        Sensor sensor = type < 0 ? null : sensors().getDefaultSensor(type);
+        if (sensor == null) { fail(requestId, "sensor unavailable: " + name); return; }
+        sensorStopInternal(name);
+
+        SensorEventListener listener = new SensorEventListener() {
+            @Override public void onSensorChanged(SensorEvent event) {
+                JSONObject data = new JSONObject();
+                try {
+                    data.put("sensor", name);
+                    float[] v = event.values;
+                    if (v.length > 0) data.put("x", v[0]);
+                    if (v.length > 1) data.put("y", v[1]);
+                    if (v.length > 2) data.put("z", v[2]);
+                    data.put("accuracy", event.accuracy);
+                    if (shake) {
+                        double magnitude = Math.sqrt(
+                            v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) - 9.81;
+                        if (magnitude < threshold) return;
+                        data.put("magnitude", magnitude);
+                    }
+                } catch (Exception ignored) { }
+                bridge.sendEvent("sensor", "", data);
+            }
+
+            @Override public void onAccuracyChanged(Sensor s, int accuracy) { }
+        };
+        sensorListeners.put(name, listener);
+        sensors().registerListener(listener, sensor,
+            sensorRate(msg.optString("rate", "ui")));
+        reply(requestId, true);
+    }
+
+    private void sensorStopInternal(String name) {
+        SensorEventListener existing = sensorListeners.remove(name);
+        if (existing != null) sensors().unregisterListener(existing);
+    }
+
+    private void sensorStop(String requestId, JSONObject msg) {
+        sensorStopInternal(msg.optString("sensor", ""));
+        reply(requestId, true);
+    }
+
+    private void sensorRead(final String requestId, JSONObject msg) {
+        final String name = msg.optString("sensor", "accelerometer");
+        int type = sensorType(name);
+        Sensor sensor = type < 0 ? null : sensors().getDefaultSensor(type);
+        if (sensor == null) { fail(requestId, "sensor unavailable: " + name); return; }
+        final SensorEventListener[] once = new SensorEventListener[1];
+        once[0] = new SensorEventListener() {
+            @Override public void onSensorChanged(SensorEvent event) {
+                JSONObject data = new JSONObject();
+                try {
+                    data.put("sensor", name);
+                    float[] v = event.values;
+                    if (v.length > 0) data.put("x", v[0]);
+                    if (v.length > 1) data.put("y", v[1]);
+                    if (v.length > 2) data.put("z", v[2]);
+                } catch (Exception ignored) { }
+                sensors().unregisterListener(once[0]);
+                reply(requestId, data);
+            }
+
+            @Override public void onAccuracyChanged(Sensor s, int accuracy) { }
+        };
+        sensors().registerListener(once[0], sensor, SensorManager.SENSOR_DELAY_UI);
+    }
+
+    // ── biometrics ───────────────────────────────────────────────────────
+
+    private void biometricAvailable(String requestId) {
+        BiometricManager manager = BiometricManager.from(activity);
+        int status = manager.canAuthenticate(
+            BiometricManager.Authenticators.BIOMETRIC_WEAK
+            | BiometricManager.Authenticators.DEVICE_CREDENTIAL);
+        JSONObject data = new JSONObject();
+        try {
+            data.put("available", status == BiometricManager.BIOMETRIC_SUCCESS);
+            data.put("enrolled", status != BiometricManager
+                .BIOMETRIC_ERROR_NONE_ENROLLED);
+            data.put("status", status);
+        } catch (Exception ignored) { }
+        reply(requestId, data);
+    }
+
+    private void biometricAuth(final String requestId, final JSONObject msg) {
+        activity.runOnUiThread(() -> {
+            Executor executor = ContextCompat.getMainExecutor(activity);
+            BiometricPrompt prompt = new BiometricPrompt(activity, executor,
+                new BiometricPrompt.AuthenticationCallback() {
+                    @Override
+                    public void onAuthenticationSucceeded(
+                            BiometricPrompt.AuthenticationResult result) {
+                        reply(requestId, true);
+                    }
+
+                    @Override
+                    public void onAuthenticationError(int code, CharSequence err) {
+                        reply(requestId, false);
+                    }
+                });
+
+            BiometricPrompt.PromptInfo.Builder builder =
+                new BiometricPrompt.PromptInfo.Builder()
+                    .setTitle(msg.optString("title", "Verify it's you"))
+                    .setSubtitle(msg.optString("subtitle", ""))
+                    .setDescription(msg.optString("description", ""));
+            if (msg.optBoolean("allow_credential", true)) {
+                builder.setAllowedAuthenticators(
+                    BiometricManager.Authenticators.BIOMETRIC_WEAK
+                    | BiometricManager.Authenticators.DEVICE_CREDENTIAL);
+            } else {
+                builder.setNegativeButtonText(msg.optString("cancel", "Cancel"));
+            }
+            prompt.authenticate(builder.build());
+        });
+    }
+
+    private void biometricEnroll(String requestId) {
+        try {
+            Intent intent = Build.VERSION.SDK_INT >= 30
+                ? new Intent(android.provider.Settings.ACTION_BIOMETRIC_ENROLL)
+                : new Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS);
+            activity.startActivity(intent);
+            reply(requestId, true);
+        } catch (Exception e) {
+            fail(requestId, "cannot open enrolment");
+        }
+    }
+
+    // ── audio ────────────────────────────────────────────────────────────
+
+    private void audioRecord(String requestId, JSONObject msg) {
+        try {
+            String path = msg.optString("path", "");
+            if (path.isEmpty()) {
+                path = new File(activity.getCacheDir(),
+                    "recording_" + System.currentTimeMillis() + "."
+                    + msg.optString("format", "m4a")).getAbsolutePath();
+            }
+            recordingPath = path;
+            recorder = Build.VERSION.SDK_INT >= 31
+                ? new MediaRecorder(activity) : new MediaRecorder();
+            recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+            recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
+            recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+            recorder.setAudioSamplingRate(msg.optInt("sample_rate", 44100));
+            recorder.setOutputFile(path);
+            int maxSeconds = msg.optInt("max_seconds", 0);
+            if (maxSeconds > 0) recorder.setMaxDuration(maxSeconds * 1000);
+            recorder.prepare();
+            recorder.start();
+            reply(requestId, path);
+        } catch (Exception e) {
+            fail(requestId, "recording failed: " + e.getMessage());
+        }
+    }
+
+    private void audioRecordStop(String requestId) {
+        try {
+            if (recorder == null) { fail(requestId, "not recording"); return; }
+            recorder.stop();
+            recorder.release();
+            recorder = null;
+            File file = new File(recordingPath);
+            JSONObject data = new JSONObject();
+            data.put("path", recordingPath);
+            data.put("size", file.length());
+            reply(requestId, data);
+        } catch (Exception e) {
+            fail(requestId, "stop failed: " + e.getMessage());
+        }
+    }
+
+    private void audioPlay(final String requestId, JSONObject msg) {
+        try {
+            audioStopInternal();
+            player = new MediaPlayer();
+            String source = msg.optString("source", "");
+            if (source.startsWith("http") || source.startsWith("content")) {
+                player.setDataSource(activity, Uri.parse(source));
+            } else {
+                player.setDataSource(source);
+            }
+            player.setLooping(msg.optBoolean("loop", false));
+            float volume = (float) msg.optDouble("volume", 1.0);
+            player.setVolume(volume, volume);
+            player.setOnCompletionListener(mp -> {
+                JSONObject data = new JSONObject();
+                try { data.put("source", msg.optString("source", "")); }
+                catch (Exception ignored) { }
+                bridge.sendEvent("audio_complete", "", data);
+            });
+            player.prepare();
+            player.start();
+            reply(requestId, player.getDuration() / 1000.0);
+        } catch (Exception e) {
+            fail(requestId, "playback failed: " + e.getMessage());
+        }
+    }
+
+    private void audioStopInternal() {
+        if (player != null) {
+            try { player.stop(); } catch (Exception ignored) { }
+            player.release();
+            player = null;
+        }
+    }
+
+    private void audioPause(String requestId) {
+        if (player != null && player.isPlaying()) player.pause();
+        reply(requestId, true);
+    }
+
+    private void audioResume(String requestId) {
+        if (player != null) player.start();
+        reply(requestId, true);
+    }
+
+    private void audioStop(String requestId) {
+        audioStopInternal();
+        reply(requestId, true);
+    }
+
+    private void audioSeek(String requestId, JSONObject msg) {
+        if (player != null) {
+            player.seekTo((int) (msg.optDouble("seconds", 0) * 1000));
+        }
+        reply(requestId, true);
+    }
+
+    private void audioVolume(String requestId, JSONObject msg) {
+        float level = (float) msg.optDouble("level", 1.0);
+        if (player != null) player.setVolume(level, level);
+        reply(requestId, true);
+    }
+
+    private void ttsSpeak(final String requestId, final JSONObject msg) {
+        final String text = msg.optString("text", "");
+        if (tts != null) {
+            tts.setSpeechRate((float) msg.optDouble("rate", 1.0));
+            tts.setPitch((float) msg.optDouble("pitch", 1.0));
+            tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "pydrud");
+            reply(requestId, true);
+            return;
+        }
+        tts = new TextToSpeech(activity, status -> {
+            if (status == TextToSpeech.SUCCESS) {
+                tts.setSpeechRate((float) msg.optDouble("rate", 1.0));
+                tts.setPitch((float) msg.optDouble("pitch", 1.0));
+                tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "pydrud");
+                reply(requestId, true);
+            } else {
+                fail(requestId, "text-to-speech unavailable");
+            }
+        });
+    }
+
+    /** Release every long-lived resource (called from onDestroy). */
+    public void dispose() {
+        for (String name : new ArrayList<>(sensorListeners.keySet())) {
+            sensorStopInternal(name);
+        }
+        audioStopInternal();
+        if (recorder != null) {
+            try { recorder.release(); } catch (Exception ignored) { }
+            recorder = null;
+        }
+        if (tts != null) {
+            tts.shutdown();
+            tts = null;
+        }
+    }
+}

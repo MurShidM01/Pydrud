@@ -8,17 +8,34 @@
     <!-- Optional: required only when the app calls page.notifications.show(). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Background work (page.background.schedule / start_service). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+{%- for permission in permissions | default([]) %}
+    <uses-permission android:name="android.permission.{{ permission }}" />
+{%- endfor %}
+
     <!--
       Dangerous permissions are intentionally NOT declared by default: Play
-      rejects apps that request what they do not use. Uncomment the ones your
-      app actually needs, then request them at runtime with
-      page.permissions.request("camera", …).
+      rejects apps that request what they do not use. Add the ones your app
+      needs with `pydrud permissions add camera`, or uncomment them here,
+      then request them at runtime with page.permissions.request("camera").
 
       <uses-permission android:name="android.permission.CAMERA" />
       <uses-permission android:name="android.permission.RECORD_AUDIO" />
       <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
       <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+      <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+      <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+      <uses-permission android:name="android.permission.NFC" />
+      <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     -->
+
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
 
     <application
         android:allowBackup="true"
@@ -36,7 +53,40 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- Deep links: {{ scheme | default(pydrud_app_name) }}://items/7
+                 reaches app.on_deep_link() and the Router. -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="{{ scheme | default(pydrud_app_name) }}" />
+            </intent-filter>
+{%- if app_links_host %}
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="{{ app_links_host }}" />
+            </intent-filter>
+{%- endif %}
         </activity>
+
+        <!-- Foreground service for long-running Python work. -->
+        <service
+            android:name=".PydrudForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+{%- if firebase %}
+
+        <service
+            android:name=".PydrudMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+{%- endif %}
     </application>
 
 </manifest>

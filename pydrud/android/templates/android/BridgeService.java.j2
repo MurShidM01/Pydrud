@@ -40,6 +40,13 @@ public class BridgeService {
     private final ViewFactory viewFactory;
     private final EventDispatcher eventDispatcher;
     private final NativeServices services;
+    private final PlatformServices platform;
+
+    /** The live bridge, so background services (FCM) can reach Python. */
+    private static volatile BridgeService instance;
+
+    /** The currently running bridge, or null when the app is not up. */
+    public static BridgeService current() { return instance; }
 
     private ServerSocket serverSocket;
     private volatile Socket clientSocket;
@@ -57,10 +64,15 @@ public class BridgeService {
         this.viewFactory = viewFactory;
         this.eventDispatcher = eventDispatcher;
         this.services = new NativeServices(activity, this);
+        this.platform = new PlatformServices(activity, this);
+        instance = this;
     }
 
     /** Exposed so the Activity can forward permission/activity results. */
     public NativeServices services() { return services; }
+
+    /** v1.3 platform services (secure storage, work, sensors, audio, …). */
+    public PlatformServices platform() { return platform; }
 
     public void start() {
         if (running) return;
@@ -119,6 +131,9 @@ public class BridgeService {
                 writer = null;
                 Log.i(TAG, "Python connected");
                 sendReady();
+                // A deep link that launched the app waits here until Python
+                // is actually listening, so no link is ever dropped.
+                activity.flushDeepLink();
                 serveClient(socket);
                 Log.i(TAG, "Python disconnected");
                 closeClient();
@@ -210,9 +225,28 @@ public class BridgeService {
                                             json.optBoolean("enabled", true)); break;
                 case "theme_mode":      activity.setThemeMode(
                                             json.optString("mode", "light")); break;
+                case "route_transition": activity.setRouteTransition(
+                                            json.optString("transition", "fade"),
+                                            json.optInt("duration", 220)); break;
+                case "camera_start":    activity.startCamera(
+                                            json.optString("key", ""),
+                                            json.optString("facing", "back"));
+                                        replyOk(json); break;
+                case "camera_stop":     activity.stopCamera(); replyOk(json); break;
+                case "camera_switch":   activity.startCamera(
+                                            json.optString("key", ""),
+                                            "front".equals(json.optString("facing", ""))
+                                                ? "back" : "front");
+                                        replyOk(json); break;
+                case "camera_capture":  handleCapture(json); break;
+                // Ack for a `job` event we dispatched to Python while the app
+                // was in the foreground — nothing to do, but it must not be
+                // logged as an unknown command.
+                case "job_result":      break;
                 default:
                     // Native services (dialogs, storage, pickers, …) answer
                     // asynchronously with a `result` event.
+                    if (platform != null && platform.handle(cmd, json)) break;
                     if (services == null || !services.handle(cmd, json)) {
                         Log.d(TAG, "Unknown cmd: " + cmd);
                     }
@@ -222,6 +256,37 @@ public class BridgeService {
         } catch (Exception e) {
             Log.e(TAG, "Command failed", e);
         }
+    }
+
+    /** Acknowledge a fire-and-forget command that still carries a request id. */
+    private void replyOk(JSONObject json) {
+        String requestId = json.optString("request_id", "");
+        if (requestId.isEmpty()) return;
+        JSONObject data = new JSONObject();
+        try {
+            data.put("request_id", requestId);
+            data.put("ok", true);
+            data.put("value", true);
+        } catch (Exception ignored) { }
+        sendEvent("result", "", data);
+    }
+
+    private void handleCapture(final JSONObject json) {
+        final String requestId = json.optString("request_id", "");
+        activity.runOnUiThread(() -> activity.capturePhoto(
+            json.optString("path", ""), path -> {
+                JSONObject data = new JSONObject();
+                try {
+                    data.put("request_id", requestId);
+                    data.put("ok", path != null);
+                    if (path != null) {
+                        data.put("value", path);
+                    } else {
+                        data.put("error", "capture failed");
+                    }
+                } catch (Exception ignored) { }
+                sendEvent("result", "", data);
+            }));
     }
 
     private void handleEndRefresh() {

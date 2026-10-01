@@ -188,6 +188,9 @@ def create_project(
     org: str = "com.example",
     min_sdk: int = 24,
     target_sdk: int = 35,
+    pip_packages=None,
+    firebase: bool = False,
+    permissions=None,
 ):
     """Scaffold a new Pydrud project in a subdirectory ``./<name>/``."""
 
@@ -232,6 +235,20 @@ def create_project(
         "sdk_dir": sdk_dir,
         "python_executable": python_exe,
         "ndk": ndk_version,
+        # v1.3: Chaquopy pip packages, Firebase and R8 are data-driven.
+        "pip_packages": list(pip_packages or []),
+        "firebase": bool(firebase) or os.path.isfile(
+            os.path.join(project_dir, "google-services.json")),
+        "shrink": "false",
+        "version_code": 1,
+        "version_name": "1.0.0",
+        "permissions": list(permissions or []),
+        # ABIs shipped in the APK. 32-bit arm is still common on budget
+        # devices; x86_64 keeps the emulator working.
+        "abi_filters": ", ".join(
+            f'"{abi}"' for abi in ("arm64-v8a", "armeabi-v7a", "x86_64")),
+        "scheme": pydrud_app_name.replace("_", ""),
+        "app_links_host": "",
     }
 
     print(header(f"\n  Creating Pydrud project: {name}"))
@@ -267,6 +284,17 @@ def create_project(
                     f"{project_dir}/android/app/src/main/java/{java_package_path}/GestureBinder.java", ctx)
     _write_template("android/NativeServices.java.j2",
                     f"{project_dir}/android/app/src/main/java/{java_package_path}/NativeServices.java", ctx)
+    _write_template("android/PlatformServices.java.j2",
+                    f"{project_dir}/android/app/src/main/java/{java_package_path}/PlatformServices.java", ctx)
+    _write_template("android/AdvancedViews.java.j2",
+                    f"{project_dir}/android/app/src/main/java/{java_package_path}/AdvancedViews.java", ctx)
+    _write_template("android/PydrudWorker.java.j2",
+                    f"{project_dir}/android/app/src/main/java/{java_package_path}/PydrudWorker.java", ctx)
+    _write_template("android/PydrudForegroundService.java.j2",
+                    f"{project_dir}/android/app/src/main/java/{java_package_path}/PydrudForegroundService.java", ctx)
+    if ctx.get("firebase"):
+        _write_template("android/PydrudMessagingService.java.j2",
+                        f"{project_dir}/android/app/src/main/java/{java_package_path}/PydrudMessagingService.java", ctx)
 
     # AndroidManifest.xml
     _ensure_dir(f"{project_dir}/android/app/src/main")
@@ -278,6 +306,8 @@ def create_project(
                     f"{project_dir}/android/build.gradle.kts", ctx)
     _write_template("android/app/build.gradle.kts.j2",
                     f"{project_dir}/android/app/build.gradle.kts", ctx)
+    _write_template("android/proguard-rules.pro.j2",
+                    f"{project_dir}/android/app/proguard-rules.pro", ctx)
     _write_template("android/settings.gradle.kts.j2",
                     f"{project_dir}/android/settings.gradle.kts", ctx)
     _write_template("android/gradle.properties.j2",
@@ -321,6 +351,7 @@ def create_project(
 
     # ── 4.  Top-level config ──────────────────────────────────────────────
     _write_template("pydrud.yaml.j2", f"{project_dir}/pydrud.yaml", ctx)
+    _write_template("pydrud.toml.j2", f"{project_dir}/pydrud.toml", ctx)
 
     # Write .gitignore
     _write_template("dot.gitignore.j2", f"{project_dir}/.gitignore", ctx)

@@ -2,6 +2,70 @@
 
 All notable changes to Pydrud are documented here.
 
+## [1.3.0] — The "ship it" release
+
+### Added — data
+* `Database`: SQLite with named migrations, transactions, `scalar`/`query`
+  helpers, schema introspection and a per-app directory (`page.database()`).
+* `Model` + `Field`: a small ORM with `create`, `get`, `get_or_create`,
+  `where`, `bulk_create`, `count`, `update`, `delete`, `refresh`, `to_dict`,
+  field lookups (`__gte`, `__contains`, `__in`, `__startswith`, …), ordering,
+  slicing and `page()` pagination.
+* `Cache` + `@cached`: TTL/LRU cache with size accounting, `get_or_set`,
+  `purge`, `stats` and decorator-level `invalidate()`; `page.cache`.
+
+### Added — navigation
+* Pattern routes (`/items/:id`, `/files/*rest`) with typed path parameters and
+  query strings, specific-over-wildcard matching and a `not_found` screen.
+* Route guards (block or redirect), nested navigators with correct back-button
+  precedence, deep links (`myapp://…` and `https://…`) and seven transitions.
+* `push`/`replace`/`reset` now accept a concrete path or full URL as well as a
+  route pattern.
+
+### Added — platform
+* Ten new services: `secure` (EncryptedSharedPreferences), `background`
+  (WorkManager jobs, constraints, foreground services), `push` (FCM tokens and
+  topics), `shortcuts` (app shortcuts and home-screen widgets), `sensors`
+  (streams plus shake detection), `biometrics`, `bluetooth` (BLE), `nfc`,
+  `camera` (capture, flash, switch) and `audio` (record, play, TTS, speech
+  recognition).
+* Background jobs run headlessly through `PydrudWorker` →
+  `app.main.run_background_job(name, inputs_json)`, with a `@job` decorator in
+  the generated project.
+* Deep links and notification/shortcut intents route via the `pydrud_route`
+  extra; links arriving before a handler is attached are replayed.
+
+### Added — UI
+* `Canvas` with `Paint`, `Path`, transforms, gradients, `grid`, `sparkline`
+  and `pie`, plus an `on_draw` callback redrawn on every render.
+* Explicit animations: `AnimationController` (forward, reverse, repeat,
+  ping-pong, dispose), `Tween` (numbers, colours, tuples), `Sequence_` and
+  `page.animation()`.
+* New widgets: `CameraPreview`, `MapView`/`Marker`, `RichText`/`Span`,
+  `Markdown` (headings, lists, task lists, quotes, code, rules, inline spans),
+  `ReorderableList` and a virtualising `InfiniteList`.
+
+### Added — tooling
+* `pydrud pip add/remove/list/search/sync`: 119 verified Android-compatible
+  PyPI packages recorded in `pydrud.toml` and injected into Chaquopy's
+  `build.gradle.kts`; known-incompatible packages are rejected with a reason.
+* `pydrud keygen`, `pydrud icons`, `pydrud permissions add|remove`,
+  `pydrud docs` (offline HTML API reference) and `pydrud inspect` (live widget
+  inspector with a static fallback).
+* Release builds support an upload keystore, R8 shrinking and ProGuard rules.
+
+### Added — developer experience
+* Stateful hot reload: bound `State` and `Store` values, and the current
+  route, survive a file save. `State(name=…)` makes the match explicit;
+  `app.preserve_state(False)` opts out.
+* `Store.replace()` swaps a whole state dict and notifies every changed key.
+* The package now ships `py.typed`.
+
+### Fixed
+* `abi_filters` is supplied by the project context instead of relying on the
+  Gradle template default.
+* `job_result` acks are no longer logged as unknown bridge commands.
+
 ## [1.2.0] — The full Android toolkit
 
 ### Added — components

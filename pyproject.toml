@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pydrud"
-version = "1.2.0"
+version = "1.3.0"
 description = "A lightweight Python framework for building native Android apps — Flutter-inspired, radically simpler."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -59,7 +59,7 @@ pydrud = "pydrud.commands.cli:main"
 include = ["pydrud*"]
 
 [tool.setuptools.package-data]
-"pydrud" = ["android/templates/**/*"]
+"pydrud" = ["android/templates/**/*", "py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

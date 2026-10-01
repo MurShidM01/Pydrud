@@ -1,0 +1,61 @@
+package {{ package }};
+
+import android.content.Context;
+import android.util.Log;
+
+import androidx.annotation.NonNull;
+import androidx.work.Data;
+import androidx.work.Worker;
+import androidx.work.WorkerParameters;
+
+import com.chaquo.python.PyObject;
+import com.chaquo.python.Python;
+import com.chaquo.python.android.AndroidPlatform;
+
+/**
+ * PydrudWorker — runs a Python background job scheduled with
+ * {@code page.background.schedule(...)}.
+ *
+ * WorkManager may start this long after the Activity is gone, so the worker
+ * boots its own Python interpreter when needed and calls
+ * {@code app.main.run_background_job(name, inputs_json)}.
+ */
+public class PydrudWorker extends Worker {
+
+    private static final String TAG = "PydrudWorker";
+
+    public PydrudWorker(@NonNull Context context,
+                        @NonNull WorkerParameters params) {
+        super(context, params);
+    }
+
+    @NonNull
+    @Override
+    public Result doWork() {
+        Data input = getInputData();
+        String job = input.getString("pydrud_job");
+        String inputs = input.getString("pydrud_inputs");
+        if (job == null || job.isEmpty()) {
+            return Result.failure();
+        }
+
+        try {
+            if (!Python.isStarted()) {
+                Python.start(new AndroidPlatform(getApplicationContext()));
+            }
+            PyObject module = Python.getInstance().getModule("app.main");
+            PyObject result = module.callAttr("run_background_job", job,
+                                              inputs == null ? "{}" : inputs);
+            String text = result == null ? "" : result.toString();
+            Data output = new Data.Builder()
+                .putString("result", text)
+                .build();
+            return Result.success(output);
+        } catch (Exception e) {
+            Log.e(TAG, "background job '" + job + "' failed", e);
+            // Transient failures (no network, DB locked) are worth retrying;
+            // WorkManager applies exponential backoff automatically.
+            return getRunAttemptCount() < 3 ? Result.retry() : Result.failure();
+        }
+    }
+}

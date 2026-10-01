@@ -337,6 +337,474 @@ class Haptics(_Service):
 # ──────────────────────────────────────────────────────────────────────────
 
 
+# ──────────────────────────────────────────────────────────────────────────
+# Secure storage (Keystore-backed)
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class Secure(_Service):
+    """Encrypted key/value storage backed by the Android Keystore.
+
+    Values are written through ``EncryptedSharedPreferences`` (AES-256-GCM
+    with a hardware-backed master key when the device has a TEE), so tokens
+    and credentials never sit in plaintext on disk::
+
+        page.secure.set("token", jwt)
+        page.secure.get("token").then(use_token)
+        page.secure.delete("token")
+    """
+
+    def set(self, key: str, value: str) -> Result:
+        return self._invoke("secure_set", key=str(key), value=str(value))
+
+    def get(self, key: str, default: Any = None) -> Result:
+        return self._invoke("secure_get", key=str(key), default=default)
+
+    def delete(self, key: str) -> Result:
+        return self._invoke("secure_remove", key=str(key))
+
+    def keys(self) -> Result:
+        return self._invoke("secure_keys")
+
+    def clear(self) -> Result:
+        return self._invoke("secure_clear")
+
+    def available(self) -> Result:
+        """Whether hardware-backed encryption is available on this device."""
+        return self._invoke("secure_available")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Background execution
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class Background(_Service):
+    """WorkManager jobs and foreground services.
+
+    A *job* is a Python callable that WorkManager re-invokes later — even
+    after the app is killed or the device reboots::
+
+        page.background.schedule("sync", every=900, network=True)
+
+        @page.background.job("sync")
+        def sync_now(inputs):
+            Note.where(dirty=True).update(dirty=False)
+
+    A *foreground service* keeps Python alive with a sticky notification
+    (music playback, long downloads, location tracking).
+    """
+
+    NETWORKS = ("any", "connected", "unmetered", "not_roaming")
+
+    def __init__(self, invoke: Invoke):
+        super().__init__(invoke)
+        self._jobs: dict[str, Callable] = {}
+
+    # ── jobs ─────────────────────────────────────────────────────────────
+
+    def job(self, name: str) -> Callable:
+        """Decorator registering the Python callable WorkManager will run."""
+        def decorator(fn: Callable) -> Callable:
+            if not callable(fn):
+                raise TypeError("background job must be callable")
+            self._jobs[str(name)] = fn
+            return fn
+        return decorator
+
+    def register(self, name: str, fn: Callable) -> "Background":
+        self.job(name)(fn)
+        return self
+
+    def run_job(self, name: str, inputs: Optional[dict] = None) -> Any:
+        """Invoke a registered job locally (used by the worker and in tests)."""
+        fn = self._jobs.get(str(name))
+        if fn is None:
+            raise KeyError(f"No background job named {name!r}")
+        try:
+            return fn(dict(inputs or {}))
+        except TypeError:
+            return fn()
+
+    @property
+    def jobs(self) -> list[str]:
+        return sorted(self._jobs)
+
+    # ── scheduling ───────────────────────────────────────────────────────
+
+    def schedule(self, name: str, *, every: Optional[float] = None,
+                 delay: float = 0, network: Any = False,
+                 charging: bool = False, idle: bool = False,
+                 battery_not_low: bool = False, replace: bool = True,
+                 inputs: Optional[dict] = None) -> Result:
+        """Queue a job. With *every* it repeats (minimum 15 minutes)."""
+        if every is not None and float(every) < 900:
+            raise ValueError(
+                "WorkManager's minimum periodic interval is 900 seconds")
+        if isinstance(network, bool):
+            network = "connected" if network else "any"
+        if network not in self.NETWORKS:
+            raise ValueError(f"network must be one of {self.NETWORKS}")
+        return self._invoke("work_schedule", name=str(name),
+                            every=None if every is None else float(every),
+                            delay=float(delay), network=network,
+                            charging=bool(charging), idle=bool(idle),
+                            battery_not_low=bool(battery_not_low),
+                            replace=bool(replace), inputs=dict(inputs or {}))
+
+    def cancel(self, name: str) -> Result:
+        return self._invoke("work_cancel", name=str(name))
+
+    def cancel_all(self) -> Result:
+        return self._invoke("work_cancel", name=None, all=True)
+
+    def status(self, name: str) -> Result:
+        """Resolves with ``enqueued`` / ``running`` / ``succeeded`` / …"""
+        return self._invoke("work_status", name=str(name))
+
+    # ── foreground service ───────────────────────────────────────────────
+
+    def start_service(self, *, title: str = "Running",
+                      message: str = "", icon: str = "",
+                      ongoing: bool = True,
+                      actions: Optional[Sequence[str]] = None) -> Result:
+        """Promote the app to a foreground service with a sticky notification."""
+        return self._invoke("service_start", title=title, message=message,
+                            icon=icon, ongoing=bool(ongoing),
+                            actions=[str(a) for a in (actions or [])])
+
+    def update_service(self, *, title: str = "", message: str = "",
+                       progress: Optional[int] = None) -> Result:
+        return self._invoke("service_update", title=title, message=message,
+                            progress=progress)
+
+    def stop_service(self) -> Result:
+        return self._invoke("service_stop")
+
+    def request_battery_exemption(self) -> Result:
+        """Ask the user to exempt the app from Doze (use sparingly)."""
+        return self._invoke("battery_exemption")
+
+
+class Push(_Service):
+    """Firebase Cloud Messaging.
+
+    ``pydrud build`` wires FCM in automatically when a
+    ``google-services.json`` is present in the project root.
+    """
+
+    def token(self) -> Result:
+        """The device's current registration token."""
+        return self._invoke("push_token")
+
+    def subscribe(self, topic: str) -> Result:
+        return self._invoke("push_subscribe", topic=str(topic))
+
+    def unsubscribe(self, topic: str) -> Result:
+        return self._invoke("push_unsubscribe", topic=str(topic))
+
+    def delete_token(self) -> Result:
+        return self._invoke("push_delete_token")
+
+    def permission(self) -> Result:
+        """Request the Android 13+ POST_NOTIFICATIONS permission."""
+        return self._invoke("permission_request", names=["notifications"])
+
+
+class Shortcuts(_Service):
+    """Launcher shortcuts and home-screen app widgets."""
+
+    def set(self, shortcuts: Sequence[dict]) -> Result:
+        """Replace the dynamic shortcuts.
+
+        Each item is ``{"id", "label", "icon", "route"}`` — tapping one
+        launches the app and fires a ``deep_link`` event for *route*.
+        """
+        items = []
+        for item in shortcuts:
+            if "id" not in item or "label" not in item:
+                raise ValueError("each shortcut needs an 'id' and a 'label'")
+            items.append({"id": str(item["id"]), "label": str(item["label"]),
+                          "icon": str(item.get("icon", "")),
+                          "route": str(item.get("route", "/"))})
+        if len(items) > 4:
+            raise ValueError("Android allows at most 4 dynamic shortcuts")
+        return self._invoke("shortcuts_set", shortcuts=items)
+
+    def clear(self) -> Result:
+        return self._invoke("shortcuts_set", shortcuts=[])
+
+    def pin(self, id: str, label: str, *, icon: str = "",
+            route: str = "/") -> Result:
+        """Ask the launcher to pin a shortcut to the home screen."""
+        return self._invoke("shortcut_pin", id=str(id), label=str(label),
+                            icon=icon, route=route)
+
+    def update_widget(self, values: dict, *, widget: str = "default") -> Result:
+        """Push new text/values into the app's home-screen widget."""
+        return self._invoke("appwidget_update", widget=str(widget),
+                            values=dict(values))
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Hardware
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class Camera(_Service):
+    """Controls the :class:`~pydrud.widgets.advanced.CameraPreview` widget."""
+
+    def start(self, *, key: str = "", facing: str = "back") -> Result:
+        if facing not in ("back", "front"):
+            raise ValueError("facing must be 'back' or 'front'")
+        return self._invoke("camera_start", key=key, facing=facing)
+
+    def stop(self, *, key: str = "") -> Result:
+        return self._invoke("camera_stop", key=key)
+
+    def capture(self, *, key: str = "", path: str = "",
+                quality: int = 90) -> Result:
+        """Take a still photo. Resolves with the saved file path."""
+        if not 1 <= int(quality) <= 100:
+            raise ValueError("quality must be between 1 and 100")
+        return self._invoke("camera_capture", key=key, path=path,
+                            quality=int(quality))
+
+    def switch(self, *, key: str = "") -> Result:
+        return self._invoke("camera_switch", key=key)
+
+    def flash(self, mode: str = "auto", *, key: str = "") -> Result:
+        if mode not in ("on", "off", "auto", "torch"):
+            raise ValueError("mode must be on/off/auto/torch")
+        return self._invoke("camera_flash", key=key, mode=mode)
+
+    def zoom(self, ratio: float, *, key: str = "") -> Result:
+        return self._invoke("camera_zoom", key=key, ratio=float(ratio))
+
+    def record(self, *, key: str = "", path: str = "",
+               max_seconds: int = 0) -> Result:
+        return self._invoke("camera_record", key=key, path=path,
+                            max_seconds=int(max_seconds))
+
+    def stop_recording(self, *, key: str = "") -> Result:
+        return self._invoke("camera_record_stop", key=key)
+
+    def scan_codes(self, *, key: str = "", enabled: bool = True) -> Result:
+        """Turn on barcode/QR scanning — matches arrive as ``scan`` events."""
+        return self._invoke("camera_scan", key=key, enabled=bool(enabled))
+
+
+class Sensors(_Service):
+    """Motion and environment sensors.
+
+    ``page.sensors.listen("accelerometer", cb)`` streams readings as
+    ``sensor`` events; the callback receives ``{"sensor", "x", "y", "z"}``.
+    """
+
+    KINDS = ("accelerometer", "gyroscope", "magnetometer", "gravity",
+             "linear_acceleration", "rotation", "step_counter", "light",
+             "proximity", "pressure", "humidity", "temperature")
+    RATES = ("fastest", "game", "ui", "normal")
+
+    def __init__(self, invoke: Invoke):
+        super().__init__(invoke)
+        self._listeners: dict[str, list[Callable]] = {}
+
+    def available(self) -> Result:
+        """Resolves with the list of sensors this device actually has."""
+        return self._invoke("sensors_available")
+
+    def listen(self, kind: str, callback: Callable, *,
+               rate: str = "ui") -> Result:
+        self._check(kind)
+        if rate not in self.RATES:
+            raise ValueError(f"rate must be one of {self.RATES}")
+        if not callable(callback):
+            raise TypeError("sensor callback must be callable")
+        self._listeners.setdefault(kind, []).append(callback)
+        return self._invoke("sensor_start", sensor=kind, rate=rate)
+
+    def stop(self, kind: str) -> Result:
+        self._check(kind)
+        self._listeners.pop(kind, None)
+        return self._invoke("sensor_stop", sensor=kind)
+
+    def read(self, kind: str) -> Result:
+        """One-shot reading."""
+        self._check(kind)
+        return self._invoke("sensor_read", sensor=kind)
+
+    def shake(self, callback: Callable, *, threshold: float = 12.0) -> Result:
+        """Convenience detector built on the accelerometer."""
+        self._listeners.setdefault("shake", []).append(callback)
+        return self._invoke("sensor_start", sensor="shake",
+                            threshold=float(threshold))
+
+    def dispatch(self, data: dict) -> None:
+        """Called by the app when a ``sensor`` event arrives."""
+        for callback in list(self._listeners.get(data.get("sensor", ""), [])):
+            callback(data)
+
+    def _check(self, kind: str) -> None:
+        if kind not in self.KINDS and kind != "shake":
+            raise ValueError(f"Unknown sensor {kind!r}. "
+                             f"Available: {', '.join(self.KINDS)}")
+
+
+class Bluetooth(_Service):
+    """Bluetooth Low Energy: scan, connect, read/write/notify."""
+
+    def enabled(self) -> Result:
+        return self._invoke("bt_enabled")
+
+    def enable(self) -> Result:
+        """Ask the user to turn Bluetooth on."""
+        return self._invoke("bt_enable")
+
+    def scan(self, *, seconds: float = 8.0,
+             services: Optional[Sequence[str]] = None) -> Result:
+        """Scan for peripherals. Resolves with a list of devices."""
+        return self._invoke("bt_scan", seconds=float(seconds),
+                            services=[str(s) for s in (services or [])])
+
+    def stop_scan(self) -> Result:
+        return self._invoke("bt_scan_stop")
+
+    def connect(self, address: str) -> Result:
+        return self._invoke("bt_connect", address=str(address))
+
+    def disconnect(self, address: str) -> Result:
+        return self._invoke("bt_disconnect", address=str(address))
+
+    def services(self, address: str) -> Result:
+        return self._invoke("bt_services", address=str(address))
+
+    def read(self, address: str, service: str, characteristic: str) -> Result:
+        return self._invoke("bt_read", address=str(address),
+                            service=str(service),
+                            characteristic=str(characteristic))
+
+    def write(self, address: str, service: str, characteristic: str,
+              value: Any, *, response: bool = True) -> Result:
+        if isinstance(value, (bytes, bytearray)):
+            value = list(value)
+        return self._invoke("bt_write", address=str(address),
+                            service=str(service),
+                            characteristic=str(characteristic),
+                            value=value, response=bool(response))
+
+    def notify(self, address: str, service: str, characteristic: str, *,
+               enabled: bool = True) -> Result:
+        """Subscribe to notifications — they arrive as ``bluetooth`` events."""
+        return self._invoke("bt_notify", address=str(address),
+                            service=str(service),
+                            characteristic=str(characteristic),
+                            enabled=bool(enabled))
+
+    def bonded(self) -> Result:
+        """Already-paired devices."""
+        return self._invoke("bt_bonded")
+
+
+class Nfc(_Service):
+    """NFC tag reading and NDEF writing."""
+
+    def available(self) -> Result:
+        return self._invoke("nfc_available")
+
+    def read(self, *, timeout: float = 30.0) -> Result:
+        """Wait for a tag. Resolves with ``{"id", "techs", "records"}``."""
+        return self._invoke("nfc_read", timeout=float(timeout))
+
+    def write(self, records: Sequence[dict], *,
+              timeout: float = 30.0) -> Result:
+        """Write NDEF records, e.g. ``[{"type": "text", "value": "hi"}]``."""
+        items = []
+        for record in records:
+            kind = str(record.get("type", "text"))
+            if kind not in ("text", "uri", "mime"):
+                raise ValueError("record type must be text, uri or mime")
+            items.append({"type": kind, "value": str(record.get("value", "")),
+                          "mime": str(record.get("mime", ""))})
+        if not items:
+            raise ValueError("write() needs at least one record")
+        return self._invoke("nfc_write", records=items, timeout=float(timeout))
+
+    def cancel(self) -> Result:
+        return self._invoke("nfc_cancel")
+
+
+class Biometrics(_Service):
+    """Fingerprint / face unlock via ``BiometricPrompt``."""
+
+    def available(self) -> Result:
+        """Resolves with ``{"available", "kind", "enrolled"}``."""
+        return self._invoke("biometric_available")
+
+    def authenticate(self, *, title: str = "Verify it's you",
+                     subtitle: str = "", description: str = "",
+                     cancel: str = "Cancel",
+                     allow_device_credential: bool = True) -> Result:
+        """Prompt the user. Resolves ``True`` on success, ``False`` if denied."""
+        return self._invoke("biometric_auth", title=title, subtitle=subtitle,
+                            description=description, cancel=cancel,
+                            allow_credential=bool(allow_device_credential))
+
+    def enroll(self) -> Result:
+        """Open the system screen for enrolling a fingerprint/face."""
+        return self._invoke("biometric_enroll")
+
+
+class Audio(_Service):
+    """Recording and playback."""
+
+    FORMATS = ("m4a", "aac", "wav", "3gp")
+
+    def record(self, *, path: str = "", format: str = "m4a",
+               max_seconds: int = 0, sample_rate: int = 44100) -> Result:
+        if format not in self.FORMATS:
+            raise ValueError(f"format must be one of {self.FORMATS}")
+        return self._invoke("audio_record", path=path, format=format,
+                            max_seconds=int(max_seconds),
+                            sample_rate=int(sample_rate))
+
+    def stop_recording(self) -> Result:
+        """Resolves with ``{"path", "seconds", "size"}``."""
+        return self._invoke("audio_record_stop")
+
+    def play(self, source: str, *, loop: bool = False,
+             volume: float = 1.0) -> Result:
+        if not 0.0 <= float(volume) <= 1.0:
+            raise ValueError("volume must be between 0 and 1")
+        return self._invoke("audio_play", source=str(source),
+                            loop=bool(loop), volume=float(volume))
+
+    def pause(self) -> Result:
+        return self._invoke("audio_pause")
+
+    def resume(self) -> Result:
+        return self._invoke("audio_resume")
+
+    def stop(self) -> Result:
+        return self._invoke("audio_stop")
+
+    def seek(self, seconds: float) -> Result:
+        return self._invoke("audio_seek", seconds=float(seconds))
+
+    def volume(self, level: float) -> Result:
+        return self._invoke("audio_volume", level=float(level))
+
+    def speak(self, text: str, *, locale: str = "", rate: float = 1.0,
+              pitch: float = 1.0) -> Result:
+        """Text-to-speech."""
+        return self._invoke("tts_speak", text=str(text), locale=locale,
+                            rate=float(rate), pitch=float(pitch))
+
+    def listen(self, *, locale: str = "", prompt: str = "") -> Result:
+        """Speech-to-text. Resolves with the recognised string."""
+        return self._invoke("speech_listen", locale=locale, prompt=prompt)
+
+
 class Services:
     """All native services, lazily constructed and cached."""
 
@@ -352,7 +820,19 @@ class Services:
         self.device = DeviceInfo(invoke)
         self.files = FilePicker(invoke)
         self.haptics = Haptics(invoke)
+        self.secure = Secure(invoke)
+        self.background = Background(invoke)
+        self.push = Push(invoke)
+        self.shortcuts = Shortcuts(invoke)
+        self.camera = Camera(invoke)
+        self.sensors = Sensors(invoke)
+        self.bluetooth = Bluetooth(invoke)
+        self.nfc = Nfc(invoke)
+        self.biometrics = Biometrics(invoke)
+        self.audio = Audio(invoke)
 
     def __repr__(self) -> str:
         return "<Services dialog storage clipboard share permissions " \
-               "notifications location device files haptics>"
+               "notifications location device files haptics secure " \
+               "background push shortcuts camera sensors bluetooth nfc " \
+               "biometrics audio>"

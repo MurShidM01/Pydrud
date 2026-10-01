@@ -6,7 +6,7 @@ Python widget tree into native Android Views at runtime. No XML layouts,
 no Kotlin UI code — just Python.
 """
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 __app_name__ = "Pydrud"
 
 from pydrud.main import App
@@ -16,7 +16,9 @@ from pydrud.core.events import Event, EventDispatcher
 from pydrud.core.results import Result, ResultError
 from pydrud.core.tasks import TaskRunner, Timer, debounce, throttle
 from pydrud.core.responsive import Responsive, MediaQuery
-from pydrud.navigation import Router, NavigationStack, Route
+from pydrud.navigation import Router, NavigationStack, Route, parse_url
+from pydrud.core.controllers import AnimationController, Tween, curve
+from pydrud.data import Cache, Database, Field, Migration, Model, Query, cached, column
 from pydrud.widgets import (
     Widget,
     Container,
@@ -109,6 +111,9 @@ from pydrud.widgets import (
     pattern,
     matches,
     custom,
+    Canvas, Paint, Path, radial_point,
+    CameraPreview, MapView, Marker, RichText, Span, Markdown,
+    ReorderableList, InfiniteList,
 )
 
 __all__ = [
@@ -223,4 +228,31 @@ __all__ = [
     "pattern",
     "matches",
     "custom",
+    # v1.3 — painting, hardware, maps, rich text and big lists
+    "Canvas",
+    "Paint",
+    "Path",
+    "radial_point",
+    "CameraPreview",
+    "MapView",
+    "Marker",
+    "RichText",
+    "Span",
+    "Markdown",
+    "ReorderableList",
+    "InfiniteList",
+    # v1.3 — data layer
+    "Database",
+    "Model",
+    "Field",
+    "column",
+    "Query",
+    "Migration",
+    "Cache",
+    "cached",
+    # v1.3 — explicit animation
+    "AnimationController",
+    "Tween",
+    "curve",
+    "parse_url",
 ]

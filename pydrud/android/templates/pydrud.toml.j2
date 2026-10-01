@@ -1,0 +1,16 @@
+# Pydrud project configuration.
+#
+# Packages below are installed into the APK by Chaquopy at build time —
+# manage them with 'pydrud pip add <name>' / 'pydrud pip remove <name>'.
+# Only packages verified to work on Android are accepted; run
+# 'pydrud pip list --all' to see them.
+
+[app]
+name = "{{ project_name }}"
+package = "{{ package }}"
+scheme = "{{ scheme }}"
+
+[python.packages]
+{% for requirement in pip_packages | default([]) -%}
+{{ requirement }} = ""
+{% endfor %}

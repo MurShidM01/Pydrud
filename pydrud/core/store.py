@@ -159,6 +159,30 @@ class Store(_Observable):
         self._emit(dict(self._state), set(diff))
         return self
 
+    def replace(self, state: dict, *, action: str = "replace") -> "Store":
+        """Swap the whole state for *state*, notifying every changed key.
+
+        Used by stateful hot reload to push a pre-reload snapshot back into
+        a freshly constructed store, including keys that were removed.
+        """
+        if not isinstance(state, dict):
+            raise TypeError("Store.replace() expects a dict")
+        previous = dict(self._state)
+        changed = {k for k in set(previous) | set(state)
+                   if previous.get(k) != state.get(k)}
+        if not changed:
+            return self
+        self._push_history(previous)
+        self._state = dict(state)
+        for hook in self._middleware:
+            try:
+                hook(action, previous, dict(self._state))
+            except Exception as exc:  # pragma: no cover
+                print(f"[Pydrud] middleware error: {exc}")
+        self._notify_selectors(previous)
+        self._emit(dict(self._state), changed)
+        return self
+
     def mutate(self, fn: Callable[[dict], Optional[dict]], *,
                action: str = "mutate") -> "Store":
         """Mutate via a function receiving a *copy* of the state.

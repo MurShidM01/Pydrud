@@ -26,6 +26,11 @@ from pydrud.widgets.forms import (
     Form, FormField, required, min_length, max_length, email, phone, url,
     numeric, between, pattern, matches, custom,
 )
+from pydrud.widgets.canvas import Canvas, Paint, Path, radial_point
+from pydrud.widgets.advanced import (
+    CameraPreview, InfiniteList, MapView, Markdown, Marker, ReorderableList,
+    RichText, Span,
+)
 from pydrud.widgets.app_bar import AppBar
 from pydrud.widgets.scaffold import Scaffold
 from pydrud.widgets.fab import FloatingActionButton
@@ -131,4 +136,17 @@ __all__ = [
     "pattern",
     "matches",
     "custom",
+    # v1.3 — painting, hardware, maps, rich text and big lists
+    "Canvas",
+    "Paint",
+    "Path",
+    "radial_point",
+    "CameraPreview",
+    "MapView",
+    "Marker",
+    "RichText",
+    "Span",
+    "Markdown",
+    "ReorderableList",
+    "InfiniteList",
 ]
