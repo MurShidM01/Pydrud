@@ -33,7 +33,8 @@ class Builder:
             print(fail("Gradle wrapper not found. Run `pydrud init` first."))
             return None
 
-        self._validate_environment()
+        if not self._validate_environment():
+            return None
 
         task = "assembleRelease" if release else "assembleDebug"
 
@@ -80,7 +81,8 @@ class Builder:
         print(fail("APK not found at expected path."))
         return None
 
-    def run(self, device: str | None = None, release: bool = False):
+    def run(self, device: str | None = None, release: bool = False,
+            watch: bool = False):
         """Build, install, launch the app and tail debug logs (like ``flutter run``)."""
         import signal
 
@@ -90,6 +92,11 @@ class Builder:
 
         if not self._check_adb():
             sys.exit(1)
+
+        if watch:
+            self._install_and_launch(apk, device)
+            self.watch(device=device, release=release)
+            return
 
         device_arg = ["-s", device] if device else []
 
@@ -188,6 +195,87 @@ class Builder:
 
         print()
 
+    # ── install / launch / watch ──────────────────────────────────────────
+
+    def _install_and_launch(self, apk: str, device: str | None = None) -> bool:
+        """Install the APK and start the main activity. Returns success."""
+        device_arg = ["-s", device] if device else []
+
+        print_step("Installing APK on device")
+        result = subprocess.run(
+            ["adb"] + device_arg + ["install", "-r", "-d", apk],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0 or "Failure" in (result.stdout or ""):
+            message = (result.stderr or result.stdout or "").strip()
+            print(fail(f"Install failed: {message}"))
+            return False
+        print(ok("Install succeeded."))
+
+        package_name = self._get_package_name()
+        activity_class = self._get_activity_class()
+        if package_name and activity_class:
+            print_step("Launching app")
+            subprocess.run(
+                ["adb"] + device_arg
+                + ["shell", "am", "start", "-n", f"{package_name}/{activity_class}"],
+                capture_output=True,
+            )
+            print(ok("App launched!"))
+        else:
+            print(warn("Could not resolve the launch activity; start the app manually."))
+        return True
+
+    def watch(self, device: str | None = None, release: bool = False,
+              paths: list[str] | None = None) -> None:
+        """Rebuild, reinstall and relaunch whenever a source file changes.
+
+        Python runs *on the device* (Chaquopy), so a host-side file change has
+        to be shipped there. Gradle's incremental build plus
+        ``adb install -r`` makes this loop take a couple of seconds.
+        """
+        from pydrud.core.watcher import FileWatcher
+        import threading
+
+        watch_dirs = [
+            os.path.join(self.root, p) for p in (paths or ["src", "assets"])
+        ]
+        watch_dirs = [p for p in watch_dirs if os.path.isdir(p)]
+        if not watch_dirs:
+            print(fail("Nothing to watch (no src/ directory)."))
+            return
+
+        print()
+        print(header("═════════════════ Watch mode ═════════════════"))
+        print(info(f"Watching: {', '.join(os.path.relpath(p, self.root) for p in watch_dirs)}"))
+        print(info("Edit a file to rebuild & reinstall. Ctrl+C to stop."))
+        print()
+
+        pending = threading.Event()
+
+        def _on_change(filepath: str) -> None:
+            print(info(f"Changed: {os.path.relpath(filepath, self.root)}"))
+            pending.set()
+
+        watcher = FileWatcher(watch_dirs, _on_change)
+        watcher.start()
+        try:
+            while True:
+                if pending.wait(timeout=1.0):
+                    pending.clear()
+                    time.sleep(0.3)  # debounce bursts of saves
+                    pending.clear()
+                    apk = self.build(release=release)
+                    if apk:
+                        self._install_and_launch(apk, device)
+                    else:
+                        print(fail("Rebuild failed — fix the error and save again."))
+        except KeyboardInterrupt:
+            print()
+            print(info("Watch stopped."))
+        finally:
+            watcher.stop()
+
     def clean(self):
         """Clean Gradle build artifacts."""
         print(header("\n  Cleaning Pydrud project\n"))
@@ -219,35 +307,27 @@ class Builder:
     def _gradlew(self) -> str | None:
         """Find a usable Gradle launcher.
 
-        Tries, in order:
-          1. The Gradle wrapper script (project/android/gradlew[.bat])
-          2. The cached Gradle distribution (from gradle-wrapper.properties)
-          3. A system-installed ``gradle`` command
+        Order:
+          1. The project's ``gradlew`` script — Pydrud generates a
+             self-bootstrapping launcher that downloads Gradle on first use,
+             so it works even without ``gradle-wrapper.jar``.
+          2. A system-installed ``gradle``.
+          3. A Gradle distribution already in the wrapper cache.
         """
         wrapper_name = "gradlew.bat" if sys.platform == "win32" else "gradlew"
-
-        # 1. Wrapper script.
         path = os.path.join(self.android_dir, wrapper_name)
         if os.path.isfile(path):
-            # Check if the wrapper JAR exists too.
-            jar = os.path.join(self.android_dir, "gradle", "wrapper", "gradle-wrapper.jar")
-            if os.path.isfile(jar):
-                return path
-            # JAR missing — try extracting the cached distribution.
-            cached = self._cached_gradle_bin()
-            if cached:
-                return cached
-
-        # 2. Just try the wrapper anyway — Gradle may handle it.
-        if os.path.isfile(path):
+            if sys.platform != "win32" and not os.access(path, os.X_OK):
+                try:
+                    os.chmod(path, 0o755)
+                except OSError:
+                    pass
             return path
 
-        # 3. System-installed Gradle.
         sys_gradle = shutil.which("gradle")
         if sys_gradle:
             return sys_gradle
 
-        # 4. Fall back to cached distribution binary.
         return self._cached_gradle_bin()
 
     def _cached_gradle_bin(self) -> str | None:
@@ -375,10 +455,23 @@ class Builder:
                 env["GRADLE_OPTS"] = opts
         return env
 
-    def _validate_environment(self):
+    def _validate_environment(self) -> bool:
+        """Report the toolchain state. Returns False when a build is impossible."""
+        java_home = os.environ.get("JAVA_HOME", "")
+        java = shutil.which("java") or (
+            os.path.join(java_home, "bin", "java") if java_home else ""
+        )
+        if not java or (os.path.sep in java and not os.path.isfile(java)):
+            print(fail("Java (JDK 17+) not found."))
+            print(info("Install a JDK and set JAVA_HOME, then run `pydrud doctor`."))
+            return False
+
         sdk = self.sdk_dir
         if not os.path.isdir(sdk):
-            print(warn(f"Android SDK not found at {sdk}"))
+            print(fail(f"Android SDK not found at {sdk}"))
+            print(info("Install the Android SDK and set ANDROID_HOME "
+                       "(see `pydrud doctor`)."))
+            return False
         else:
             platforms = os.path.join(sdk, "platforms")
             build_tools = os.path.join(sdk, "build-tools")
@@ -389,6 +482,7 @@ class Builder:
             if os.path.isdir(build_tools):
                 dirs = sorted(os.listdir(build_tools))
                 print(info(f"  Build tools: {', '.join(dirs[-3:])}"))
+        return True
 
     def _check_adb(self) -> bool:
         adb = shutil.which("adb")

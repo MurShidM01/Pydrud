@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pydrud"
-version = "1.0.1"
+version = "1.1.0"
 description = "A lightweight Python framework for building native Android apps — Flutter-inspired, radically simpler."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -36,6 +36,16 @@ dependencies = [
     "Pillow>=10.0",
 ]
 
+[project.optional-dependencies]
+# Faster, event-driven file watching for hot reload / watch mode.
+watch = ["watchdog>=3.0"]
+# Everything needed to run the test suite.
+dev = [
+    "pytest>=7.0",
+    "javalang>=0.13",
+    "watchdog>=3.0",
+]
+
 [project.urls]
 Homepage = "https://github.com/MurShidM01/Pydrud"
 Repository = "https://github.com/MurShidM01/Pydrud"
@@ -54,4 +64,5 @@ include = ["pydrud*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+filterwarnings = ["ignore::DeprecationWarning"]
 

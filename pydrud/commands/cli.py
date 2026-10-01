@@ -20,10 +20,6 @@ def _find_project_root() -> str | None:
     """Walk up from cwd looking for a ``pydrud.yaml`` or ``pyproject.toml``
     with a [tool.pydrud] section."""
     cwd = os.getcwd()
-    for parent in [cwd] + [os.path.dirname(cwd)[:idx] for idx in range(len(cwd), 0, -1) if cwd[:idx] == cwd[:idx] and os.path.isdir(cwd[:idx])]:
-        # Actually just walk up properly
-        pass
-
     current = cwd
     while True:
         if os.path.isfile(os.path.join(current, "pydrud.yaml")):
@@ -73,7 +69,7 @@ def init(name, org, min_sdk, target_sdk):
 @main.command()
 @click.option("--device", default=None, help="Target device ID (adb).")
 @click.option("--release", is_flag=True, default=False, help="Build in release mode.")
-@click.option("--watch", is_flag=True, default=False, help="Enable hot-reload: rebuild UI on file changes without APK recompile.")
+@click.option("--watch", is_flag=True, default=False, help="Rebuild, reinstall and relaunch whenever a source file changes.")
 def run(device, release, watch):
     """Build the APK, install and launch on a connected device."""
     from pydrud.commands.builder import Builder
@@ -84,7 +80,7 @@ def run(device, release, watch):
         sys.exit(1)
 
     builder = Builder(root)
-    builder.run(device=device, release=release)
+    builder.run(device=device, release=release, watch=watch)
 
 
 @main.command()
@@ -101,12 +97,14 @@ def build(release, output):
 
     builder = Builder(root)
     apk_path = builder.build(release=release)
-    if apk_path:
-        click.echo(f"APK ready: {apk_path}")
-        if output:
-            import shutil
-            shutil.copy2(apk_path, output)
-            click.echo(f"Copied to: {output}")
+    if not apk_path:
+        sys.exit(1)
+
+    click.echo(f"APK ready: {apk_path}")
+    if output:
+        import shutil
+        shutil.copy2(apk_path, output)
+        click.echo(f"Copied to: {output}")
 
 
 @main.command()
@@ -122,6 +120,39 @@ def clean(device):
 
     builder = Builder(root)
     builder.clean()
+
+
+@main.command()
+@click.option("--device", default=None, help="Target device ID (adb).")
+@click.option("--release", is_flag=True, default=False, help="Build in release mode.")
+def watch(device, release):
+    """Watch sources and rebuild/reinstall the app on every change."""
+    from pydrud.commands.builder import Builder
+
+    root = _find_project_root()
+    if not root:
+        click.echo("Error: not inside a Pydrud project (no pydrud.yaml found)", err=True)
+        sys.exit(1)
+
+    builder = Builder(root)
+    apk = builder.build(release=release)
+    if not apk:
+        sys.exit(1)
+    builder._install_and_launch(apk, device)
+    builder.watch(device=device, release=release)
+
+
+@main.command()
+def devices():
+    """List connected Android devices."""
+    import shutil as _shutil
+    import subprocess
+
+    if not _shutil.which("adb"):
+        click.echo("adb not found in PATH. Install Android platform-tools.", err=True)
+        sys.exit(1)
+    result = subprocess.run(["adb", "devices", "-l"], capture_output=True, text=True)
+    click.echo(result.stdout.strip() or "No devices found.")
 
 
 @main.command()

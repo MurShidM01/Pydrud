@@ -47,6 +47,27 @@ pydrud run                            # Build, install, launch
 
 ---
 
+## New in v1.1.0
+
+| Feature | Description |
+|---------|-------------|
+| **Stable widget keys** | Auto-generated keys are now deterministic, so `page.update()` really does send tiny patches instead of silently re-rendering everything |
+| **Keyed diffing** | Insert/remove/reorder in a list emits `create` / `delete` / `move` for just that item (with target `index`) |
+| **10 new widgets** | `Stack`, `Positioned`, `SizedBox`, `Padding`, `Card`, `ListView`, `GridView`, `ProgressBar`, `Slider`, `Dropdown`, `Radio` |
+| **Colors / Icons / Theme** | A Material palette, an icon catalogue, and a switchable light/dark theme |
+| **Clicks on any widget** | `on_click` / `on_long_press` now work on Containers, Icons, Images, Cards — not just Buttons |
+| **Working back button** | Android waits for Python's `back_result` before closing the activity — `router.pop()` no longer exits the app |
+| **Scaffold overlays** | `Scaffold(floating_action_button=...)` renders a real floating FAB via absolute positioning |
+| **page.toast / snack_bar / vibrate / close** | Direct access to common Android affordances |
+| **Lifecycle hooks** | `app.on_lifecycle("resume"/"pause"/"stop"/"destroy", cb)` |
+| **Error isolation** | An exception in one event handler is reported via `app.on_error(...)` instead of killing the app |
+| **Self-bootstrapping Gradle** | Generated projects build without a checked-in `gradle-wrapper.jar` — the launcher downloads Gradle once |
+| **Unique package names** | `pydrud init app1 --org com.acme` → `com.acme.app1` (apps no longer overwrite each other) |
+| **`pydrud watch` / `devices`** | Rebuild-reinstall-relaunch loop and device listing |
+| **FakeDevice test harness** | `tests/fake_device.py` emulates the Android bridge so whole apps can be tested in CI |
+
+---
+
 ## New in v1.0.1
 
 | Feature | Description |
@@ -180,7 +201,7 @@ The Android hardware back button sends a `"back"` event to Python's event loop. 
 
 ---
 
-## Hot Reload
+## Watch mode & Hot Reload
 
 ```python
 app = App(target=main)
@@ -188,17 +209,20 @@ app.enable_hot_reload()  # Watch src/ for .py changes
 app.run()
 ```
 
-Or via CLI:
+In-process hot reload (used when Python runs on the host, or inside a
+long-lived session) reloads the changed module, rebuilds the tree and sends
+incremental patches.
+
+Because Chaquopy embeds your Python *inside the APK*, host-side edits have to
+be shipped to the device. That is what watch mode does:
+
 ```bash
-pydrud run --watch
+pydrud run --watch      # build → install → launch, then rebuild on every save
+pydrud watch            # the same loop for an already-installed app
 ```
 
-When a Python file changes:
-1. The affected module is reloaded via `importlib.reload()`
-2. The widget tree is rebuilt
-3. Incremental patches are sent to the device
-
-**No APK recompilation needed.** Chaquopy serves Python files from the source directory at runtime.
+Each save triggers an incremental Gradle build plus `adb install -r`, which
+normally takes a couple of seconds.
 
 ---
 
@@ -240,8 +264,15 @@ pydrud build    # proxy forwarded to Gradle automatically
 | `Center` | Centres its child | `child`, `expand` |
 | `Spacer` | Flexible empty space | `expand` (default 1) |
 | `Divider` | Horizontal / vertical line | `color`, `thickness` |
-| **`Scaffold`** (v1.0.1) | Page layout with AppBar + body | `app_bar`, `body`, `bg_color` |
-| **`AppBar`** (v1.0.1) | Top app bar | `title`, `leading`, `actions`, `bg_color`, `elevation` |
+| **`Scaffold`** | Page layout: app bar + body + bottom bar + FAB | `app_bar`, `body`, `bottom_bar`, `floating_action_button`, `bg_color` |
+| **`AppBar`** | Top app bar | `title`, `leading`, `actions`, `bg_color`, `color`, `elevation`, `center_title` |
+| **`Stack`** (v1.1) | Overlays children | `children`, `alignment` |
+| **`Positioned`** (v1.1) | Absolute placement inside a Stack | `child`, `left`, `top`, `right`, `bottom` |
+| **`Card`** (v1.1) | Rounded elevated surface | `child`, `bg`, `elevation`, `border_radius`, `padding`, `margin` |
+| **`ListView`** (v1.1) | Scrollable list | `children`, `spacing`, `horizontal`, `padding` |
+| **`GridView`** (v1.1) | Fixed-column grid | `children`, `columns`, `spacing` |
+| **`SizedBox`** (v1.1) | Fixed-size gap / box | `width`, `height`, `child` |
+| **`Padding`** (v1.1) | Pads a single child | `padding`, `child` |
 
 ### Basic
 
@@ -254,16 +285,46 @@ pydrud build    # proxy forwarded to Gradle automatically
 | `Icon` | Material icon | `name` (star, home, search, ...), `size`, `color` |
 | `Checkbox` | Checkable box | `label`, `checked` |
 | `Switch` | Toggle switch | `label`, `active` |
+| **`ProgressBar`** (v1.1) | Determinate or spinning progress | `value` (0-1), `indeterminate`, `circular`, `color` |
+| **`Slider`** (v1.1) | Draggable value slider | `value`, `min`, `max`, `divisions`, `color` |
+| **`Dropdown`** (v1.1) | Option picker (spinner) | `options`, `value`, `hint` |
+| **`Radio`** (v1.1) | Radio button | `label`, `value`, `group`, `selected` |
 
 ### Events
 
 All interactive widgets support callback chaining:
 
 ```python
-widget.on_click(callback)      # callback(data) -> data is a dict
-widget.on_change(callback)     # TextField, Checkbox, Switch
+widget.on_click(callback)      # Any widget — callback(data) where data is a dict
+widget.on_long_press(callback) # Any widget
+widget.on_change(callback)     # TextField, Checkbox, Switch, Slider, Dropdown
 widget.on_submit(callback)     # TextField (IME action)
 widget.on_focus(callback)      # Focus gain / loss
+widget.on("scroll", callback)  # Any event name
+```
+
+### Theme, colours and icons (v1.1)
+
+```python
+from pydrud import Colors, Icons, Theme, Text, Icon
+
+Text("Hello", color=Colors.PRIMARY)
+Text("Dim",   color=Colors.with_opacity(Colors.TEXT, 0.5))
+Icon(Icons.SETTINGS)
+
+Theme.dark()            # switch the default palette
+Theme.apply(primary="#FF0EA5E9")
+```
+
+### Page commands (v1.1)
+
+```python
+page.toast("Saved!")
+page.snack_bar("Deleted", action="UNDO")
+page.set_title("Inbox")
+page.vibrate(30)                       # needs the VIBRATE permission
+page.set_system_ui(status_bar_color="#FF6366F1", icon_brightness="light")
+page.close()                           # finish the activity
 ```
 
 ### Styling
@@ -395,6 +456,8 @@ page.set_system_ui(status_bar_color="#FF6366F1", icon_brightness="light")
 {"type": "submit",  "key": "tf_xyz",  "data": {"value": "hello"}}
 {"type": "ready",   "key": "",        "data": {"width": 360, "height": 640, "density": 2.0}}
 {"type": "back",    "key": "",        "data": {}}            # Hardware back button
+{"type": "long_press", "key": "card_1", "data": {}}
+{"type": "lifecycle",  "key": "",       "data": {"state": "resume"}}
 ```
 
 **Python -> Android commands:**
@@ -404,7 +467,20 @@ page.set_system_ui(status_bar_color="#FF6366F1", icon_brightness="light")
 {"cmd": "toast",            "message": "Saved"}
 {"cmd": "set_title",        "title": "My App"}
 {"cmd": "set_system_ui",    "status_bar_color": "#...", "icon_brightness": "light"}
+{"cmd": "snackbar",         "message": "Deleted", "action": "UNDO"}
+{"cmd": "vibrate",          "duration": 40}
+{"cmd": "back_result",      "handled": true}                   # Answer to a back event
 {"cmd": "finish_activity"}                                     # Exit app
+```
+
+Patches carry `op`, `key`, `parent_key` and — for `create` / `move` / `replace` —
+the target child `index`, so the renderer inserts views in the right place:
+
+```
+{"op": "update",  "key": "counter", "props": {"value": "3"}}
+{"op": "create",  "key": "row-eggs", "parent_key": "list", "index": 2, "tree": {...}}
+{"op": "move",    "key": "row-milk", "parent_key": "list", "index": 0}
+{"op": "delete",  "key": "row-bread", "parent_key": "list"}
 ```
 
 ---
@@ -419,7 +495,9 @@ page.set_system_ui(status_bar_color="#FF6366F1", icon_brightness="light")
 | `pydrud build --release` | Build release APK |
 | `pydrud run` | Build + install + launch + live logcat |
 | `pydrud run --device <id>` | Target specific device |
-| `pydrud run --watch` | Enable hot-reload (file watcher) |
+| `pydrud run --watch` | Rebuild + reinstall + relaunch on every file change |
+| `pydrud watch` | Same loop without rebuilding first |
+| `pydrud devices` | List connected devices (`adb devices -l`) |
 | `pydrud analyze` | Static analysis (missing keys, invalid styles) |
 | `pydrud analyze --path src` | Custom source directory |
 | `pydrud analyze --json` | Machine-readable JSON output |
@@ -504,7 +582,20 @@ pip install -e ".[dev]"
 python -m pytest tests/ -v
 ```
 
-Current test count: **96 tests** (widgets, state, diffing, events, styling, bridge, responsive).
+Current test count: **179 tests**, covering:
+
+* unit tests — widgets, state, styling, responsive scaling, diffing, routing;
+* template tests — every generated Java file is rendered and parsed with
+  `javalang`, and the generated project is compiled with `compileall`;
+* **end-to-end tests** — `tests/fake_device.py` implements the Android side of
+  the bridge (including patch application), so a complete app is launched,
+  tapped, typed into and navigated exactly as it would be on a phone.
+
+```bash
+python -m pytest tests/ -v            # everything
+python -m pytest tests/test_integration.py       # app ⇄ bridge ⇄ renderer
+python -m pytest tests/test_starter_app_e2e.py   # the scaffolded starter app
+```
 
 ### Project Structure
 
@@ -588,8 +679,8 @@ pydrud/
 |---------|-------|
 | **v1.0.0** | Core widgets, state, diffing, CLI, APK generation, responsive scaling |
 | **v1.0.1** | Router, Scaffold, AppBar, FAB, MediaQuery, Hot Reload, incremental patches, WidgetRegistry, analyze CLI |
-| **v1.1** | Material theme, ListView / GridView, Animations, Snackbar / Dialog |
-| **v1.2** | Canvas / CustomPaint, Camera / GPS, Plugins, Database (SQLite) |
+| **v1.1.0** | Stable keys + keyed diffing, 10 new widgets, Colors/Icons/Theme, working back button, FAB overlays, toast/snackbar/vibrate, lifecycle hooks, self-bootstrapping Gradle, FakeDevice test harness |
+| **v1.2** | Animations, Dialogs, Canvas / CustomPaint, Camera / GPS, SQLite |
 | **v2.0** | iOS backend (SwiftUI), Web (WASM), macOS desktop |
 
 ---

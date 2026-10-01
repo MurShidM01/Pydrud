@@ -16,7 +16,20 @@ import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
+/**
+ * BridgeService — the NDJSON socket bridge between Python and Android.
+ *
+ * Python connects to 127.0.0.1:8595 and exchanges newline-delimited JSON:
+ *   Python → Android: render / full_render / toast / snackbar / set_title /
+ *                     set_system_ui / vibrate / finish_activity / back_result
+ *   Android → Python: ready / click / change / submit / focus / long_press /
+ *                     back / lifecycle
+ */
 public class BridgeService {
 
     private static final String TAG = "PydrudBridge";
@@ -26,12 +39,13 @@ public class BridgeService {
     private final FrameLayout rootView;
     private final ViewFactory viewFactory;
     private final EventDispatcher eventDispatcher;
+
     private ServerSocket serverSocket;
-    private Socket clientSocket;
+    private volatile Socket clientSocket;
+    private volatile OutputStreamWriter writer;
     private volatile boolean running = false;
-    private final java.util.concurrent.ExecutorService writeExecutor =
-        java.util.concurrent.Executors.newSingleThreadExecutor();
-    private OutputStreamWriter writer = null;
+    private final CountDownLatch listeningLatch = new CountDownLatch(1);
+    private final ExecutorService writeExecutor = Executors.newSingleThreadExecutor();
 
     public BridgeService({{ app_name }}Activity activity,
                          FrameLayout rootView,
@@ -44,42 +58,76 @@ public class BridgeService {
     }
 
     public void start() {
+        if (running) return;
         running = true;
-        new Thread(this::runServer).start();
+        new Thread(this::runServer, "pydrud-bridge").start();
+    }
+
+    /** Block until the server socket is accepting connections (or timeout). */
+    public boolean awaitListening(long millis) {
+        try {
+            return listeningLatch.await(millis, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    public boolean isConnected() {
+        Socket s = clientSocket;
+        return s != null && s.isConnected() && !s.isClosed();
     }
 
     public void stop() {
         running = false;
-        try { if (clientSocket != null) clientSocket.close(); } catch (Exception ignored) {}
+        closeClient();
         try { if (serverSocket != null) serverSocket.close(); } catch (Exception ignored) {}
+        writeExecutor.shutdownNow();
     }
+
+    private void closeClient() {
+        try { if (clientSocket != null) clientSocket.close(); } catch (Exception ignored) {}
+        clientSocket = null;
+        writer = null;
+    }
+
+    // ── Server loop ───────────────────────────────────────────────────────
 
     private void runServer() {
         try {
-            serverSocket = new ServerSocket(PORT, 1, java.net.InetAddress.getByName("127.0.0.1"));
+            serverSocket = new ServerSocket(
+                PORT, 4, java.net.InetAddress.getByName("127.0.0.1"));
+            serverSocket.setReuseAddress(true);
             Log.i(TAG, "Bridge listening on 127.0.0.1:" + PORT);
+            listeningLatch.countDown();
 
-            clientSocket = serverSocket.accept();
-            Log.i(TAG, "Python connected");
-
-            // Send ready event with screen dimensions
-            try {
-                DisplayMetrics dm = activity.getResources().getDisplayMetrics();
-                int widthDp = (int)(dm.widthPixels / dm.density);
-                int heightDp = (int)(dm.heightPixels / dm.density);
-                JSONObject data = new JSONObject();
-                data.put("width", widthDp);
-                data.put("height", heightDp);
-                data.put("density", dm.density);
-                sendEvent("ready", "", data);
-            } catch (Exception e) {
-                Log.e(TAG, "Failed to send ready event", e);
+            // Accept reconnections (hot restart re-runs the Python side).
+            while (running) {
+                Socket socket;
+                try {
+                    socket = serverSocket.accept();
+                } catch (Exception e) {
+                    if (running) Log.e(TAG, "accept failed", e);
+                    break;
+                }
+                clientSocket = socket;
+                writer = null;
+                Log.i(TAG, "Python connected");
+                sendReady();
+                serveClient(socket);
+                Log.i(TAG, "Python disconnected");
+                closeClient();
             }
+        } catch (Exception e) {
+            if (running) Log.e(TAG, "Bridge error", e);
+        } finally {
+            listeningLatch.countDown();
+        }
+    }
 
-            BufferedReader reader = new BufferedReader(
-                new InputStreamReader(clientSocket.getInputStream(), "UTF-8")
-            );
-
+    private void serveClient(Socket socket) {
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(socket.getInputStream(), "UTF-8"))) {
             String line;
             while (running && (line = reader.readLine()) != null) {
                 String msg = line.trim();
@@ -88,66 +136,112 @@ public class BridgeService {
         } catch (java.net.SocketException e) {
             Log.i(TAG, "Bridge socket closed");
         } catch (Exception e) {
-            if (running) Log.e(TAG, "Bridge error", e);
-        } finally {
-            stop();
+            if (running) Log.e(TAG, "Bridge read error", e);
         }
     }
+
+    private void sendReady() {
+        try {
+            DisplayMetrics dm = activity.getResources().getDisplayMetrics();
+            int widthDp = (int) (dm.widthPixels / dm.density);
+            int heightDp = (int) (dm.heightPixels / dm.density);
+
+            int statusBarPx = 0;
+            int statusId = activity.getResources()
+                .getIdentifier("status_bar_height", "dimen", "android");
+            if (statusId > 0) {
+                statusBarPx = activity.getResources().getDimensionPixelSize(statusId);
+            }
+            int navBarPx = 0;
+            int navId = activity.getResources()
+                .getIdentifier("navigation_bar_height", "dimen", "android");
+            if (navId > 0) {
+                navBarPx = activity.getResources().getDimensionPixelSize(navId);
+            }
+
+            JSONObject data = new JSONObject();
+            data.put("width", widthDp);
+            data.put("height", heightDp);
+            data.put("density", dm.density);
+            data.put("status_bar_height", (int) (statusBarPx / dm.density));
+            data.put("navigation_bar_height", (int) (navBarPx / dm.density));
+            data.put("text_scale", activity.getResources().getConfiguration().fontScale);
+            data.put("sdk", android.os.Build.VERSION.SDK_INT);
+            sendEvent("ready", "", data);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to send ready event", e);
+        }
+    }
+
+    // ── Message handling ──────────────────────────────────────────────────
 
     private void handleMessage(String message) {
         try {
             JSONObject json = new JSONObject(message);
-            switch (json.optString("cmd", "")) {
+            String cmd = json.optString("cmd", "");
+            switch (cmd) {
                 case "full_render":     handleFullRender(json); break;
                 case "render":          handleRender(json); break;
-                case "toast":           showToast(json.optString("message", "")); break;
+                case "toast":           showToast(json); break;
+                case "snackbar":        showSnackbar(json); break;
                 case "set_title":       setTitle(json.optString("title", "")); break;
                 case "finish_activity": handleFinishActivity(); break;
                 case "set_system_ui":   handleSystemUi(json); break;
-                default:                Log.d(TAG, "Unknown cmd: " + json.optString("cmd"));
+                case "vibrate":         handleVibrate(json); break;
+                case "back_result":     activity.onBackResult(json.optBoolean("handled", false)); break;
+                default:                Log.d(TAG, "Unknown cmd: " + cmd);
             }
         } catch (JSONException e) {
-            Log.e(TAG, "JSON error", e);
+            Log.e(TAG, "JSON error: " + message, e);
+        } catch (Exception e) {
+            Log.e(TAG, "Command failed", e);
         }
     }
 
     private void handleFullRender(JSONObject json) throws JSONException {
-        JSONObject tree = json.getJSONObject("tree");
+        final JSONObject tree = json.getJSONObject("tree");
         Log.i(TAG, "full_render received");
         activity.runOnUiThread(() -> {
-            rootView.removeAllViews();
-            viewFactory.buildTree(tree, rootView);
+            try {
+                viewFactory.buildTree(tree, rootView);
+            } catch (Exception e) {
+                Log.e(TAG, "full_render failed", e);
+            }
         });
     }
 
     private void handleRender(JSONObject json) throws JSONException {
-        JSONArray patches = json.getJSONArray("patches");
+        final JSONArray patches = json.getJSONArray("patches");
         Log.i(TAG, "render received, " + patches.length() + " patches");
         activity.runOnUiThread(() -> {
             for (int i = 0; i < patches.length(); i++) {
                 try {
                     viewFactory.applyPatch(patches.getJSONObject(i));
-                } catch (JSONException e) {
+                } catch (Exception e) {
                     Log.e(TAG, "Patch error", e);
                 }
             }
         });
     }
 
+    // ── Events → Python ───────────────────────────────────────────────────
+
     public void sendEvent(String type, String key) { sendEvent(type, key, null); }
 
     public void sendEvent(String type, String key, JSONObject data) {
-        if (clientSocket == null || !clientSocket.isConnected()) return;
+        final Socket socket = clientSocket;
+        if (socket == null || socket.isClosed()) return;
         writeExecutor.execute(() -> {
             try {
                 if (writer == null) {
-                    writer = new OutputStreamWriter(clientSocket.getOutputStream(), "UTF-8");
+                    writer = new OutputStreamWriter(socket.getOutputStream(), "UTF-8");
                 }
                 JSONObject event = new JSONObject();
                 event.put("type", type);
                 event.put("key", key);
-                if (data != null) event.put("data", data);
-                writer.write(event.toString() + "\n");
+                event.put("data", data != null ? data : new JSONObject());
+                writer.write(event.toString());
+                writer.write("\n");
                 writer.flush();
             } catch (Exception e) {
                 Log.e(TAG, "sendEvent error", e);
@@ -155,8 +249,31 @@ public class BridgeService {
         });
     }
 
-    private void showToast(String msg) {
-        activity.runOnUiThread(() -> Toast.makeText(activity, msg, Toast.LENGTH_LONG).show());
+    // ── Commands ──────────────────────────────────────────────────────────
+
+    private void showToast(JSONObject json) {
+        final String msg = json.optString("message", "");
+        final int length = json.optBoolean("long", false)
+            ? Toast.LENGTH_LONG : Toast.LENGTH_SHORT;
+        activity.runOnUiThread(() -> Toast.makeText(activity, msg, length).show());
+    }
+
+    private void showSnackbar(JSONObject json) {
+        final String msg = json.optString("message", "");
+        final String action = json.optString("action", "");
+        final int length = json.optBoolean("long", true)
+            ? com.google.android.material.snackbar.Snackbar.LENGTH_LONG
+            : com.google.android.material.snackbar.Snackbar.LENGTH_SHORT;
+        activity.runOnUiThread(() -> {
+            try {
+                com.google.android.material.snackbar.Snackbar bar =
+                    com.google.android.material.snackbar.Snackbar.make(rootView, msg, length);
+                if (!action.isEmpty()) bar.setAction(action, v -> {});
+                bar.show();
+            } catch (Throwable t) {
+                Toast.makeText(activity, msg, Toast.LENGTH_SHORT).show();
+            }
+        });
     }
 
     private void setTitle(String title) {
@@ -165,33 +282,44 @@ public class BridgeService {
 
     private void handleFinishActivity() {
         Log.i(TAG, "finish_activity received");
-        activity.runOnUiThread(() -> activity.finish());
+        activity.runOnUiThread(activity::finish);
     }
 
-    private void handleSystemUi(JSONObject json) throws JSONException {
-        Log.i(TAG, "set_system_ui received");
+    private void handleVibrate(JSONObject json) {
+        final int duration = Math.max(1, json.optInt("duration", 40));
+        try {
+            android.os.Vibrator vibrator =
+                (android.os.Vibrator) activity.getSystemService(android.content.Context.VIBRATOR_SERVICE);
+            if (vibrator == null || !vibrator.hasVibrator()) return;
+            if (android.os.Build.VERSION.SDK_INT >= 26) {
+                vibrator.vibrate(android.os.VibrationEffect.createOneShot(
+                    duration, android.os.VibrationEffect.DEFAULT_AMPLITUDE));
+            } else {
+                vibrator.vibrate(duration);
+            }
+        } catch (Exception e) {
+            Log.d(TAG, "Vibrate unavailable (missing permission?)");
+        }
+    }
+
+    private void handleSystemUi(JSONObject json) {
         activity.runOnUiThread(() -> {
             try {
                 if (json.has("status_bar_color")) {
-                    int color = Color.parseColor(json.optString("status_bar_color"));
-                    if (android.os.Build.VERSION.SDK_INT >= 21) {
-                        activity.getWindow().setStatusBarColor(color);
-                        Log.i(TAG, "Status bar color set to " + json.optString("status_bar_color"));
-                    }
+                    activity.getWindow().setStatusBarColor(
+                        Color.parseColor(json.optString("status_bar_color")));
+                }
+                if (json.has("navigation_bar_color")) {
+                    activity.getWindow().setNavigationBarColor(
+                        Color.parseColor(json.optString("navigation_bar_color")));
                 }
                 if (json.has("icon_brightness")) {
-                    boolean light = "light".equals(json.optString("icon_brightness"));
-                    View decor = activity.getWindow().getDecorView();
-                    if (android.os.Build.VERSION.SDK_INT >= 23) {
-                        int flags = decor.getSystemUiVisibility();
-                        if (light) {
-                            flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
-                        } else {
-                            flags &= ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
-                        }
-                        decor.setSystemUiVisibility(flags);
-                        Log.i(TAG, "Icon brightness set to " + json.optString("icon_brightness"));
-                    }
+                    boolean darkIcons = "dark".equals(json.optString("icon_brightness"));
+                    androidx.core.view.WindowInsetsControllerCompat controller =
+                        androidx.core.view.WindowCompat.getInsetsController(
+                            activity.getWindow(), activity.getWindow().getDecorView());
+                    controller.setAppearanceLightStatusBars(darkIcons);
+                    controller.setAppearanceLightNavigationBars(darkIcons);
                 }
             } catch (Exception e) {
                 Log.e(TAG, "System UI error", e);

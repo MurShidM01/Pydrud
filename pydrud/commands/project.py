@@ -36,22 +36,39 @@ def _write_template(template_name: str, dest: str, ctx: dict):
 
 
 def _bundle_pydrud_source(project_dir: str):
-    """Copy the pydrud framework source into the generated project's ``src/``
-    so Chaquopy can import it without pip or network access."""
+    """Copy the Pydrud *runtime* into the generated project's ``src/``.
+
+    Chaquopy imports the framework from the APK, so it has to be vendored.
+    Only the runtime packages are copied — the CLI, the project templates and
+    the launcher icons are build-time only and would otherwise add megabytes
+    of dead weight to every APK.
+    """
     import shutil
+
     src_dir = os.path.join(project_dir, "src")
-    pydrud_src = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "pydrud")
-    pydrud_src = os.path.normpath(pydrud_src)
+    pydrud_src = os.path.normpath(os.path.dirname(os.path.dirname(__file__)))
     dst = os.path.join(src_dir, "pydrud")
-    if os.path.isdir(pydrud_src):
-        if os.path.isdir(dst):
-            shutil.rmtree(dst)
-        shutil.copytree(
-            pydrud_src,
-            dst,
-            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".git"),
-        )
-        print(info(f"  Bundled pydrud core ({sum(len(files) for _, _, files in os.walk(dst))} files)"))
+    if not os.path.isdir(pydrud_src):
+        print(fail("Could not locate the pydrud package to bundle."))
+        return
+
+    if os.path.isdir(dst):
+        shutil.rmtree(dst)
+
+    ignore = shutil.ignore_patterns(
+        "__pycache__", "*.pyc", "*.pyo", ".git",
+        "android",     # Jinja templates + launcher icons (build-time only)
+        "commands",    # the CLI (build-time only)
+        "tests",
+    )
+    shutil.copytree(pydrud_src, dst, ignore=ignore)
+
+    files = sum(len(f) for _, _, f in os.walk(dst))
+    size_kb = sum(
+        os.path.getsize(os.path.join(root, f))
+        for root, _d, fs in os.walk(dst) for f in fs
+    ) / 1024
+    print(info(f"  Bundled pydrud runtime ({files} files, {size_kb:.0f} KB)"))
 
 
 def _copy_icon_resources(project_dir: str):
@@ -74,17 +91,44 @@ def _copy_icon_resources(project_dir: str):
                 shutil.copy2(src_item, dst_item)
 
 
-def _sanitize_package(org: str) -> str:
-    """Ensure the package name is a valid Java package identifier."""
+def _sanitize_package(org: str, app_slug: str = "") -> str:
+    """Build a valid Java package name from the org prefix and app name.
+
+    ``--org com.example`` + project ``my_app`` → ``com.example.my_app``.
+    The app segment is only appended when the org does not already end with
+    it, so ``--org com.example.my_app`` stays untouched. Without this, every
+    app generated under the same org would share one ``applicationId`` and
+    overwrite each other on the device.
+    """
     parts = org.strip().lower().split(".")
     clean = []
     for p in parts:
         p = re.sub(r"[^a-z0-9_]", "", p)
-        if p and p[0].isdigit():
+        if p and (p[0].isdigit() or p in _JAVA_KEYWORDS):
             p = "_" + p
         if p:
             clean.append(p)
-    return ".".join(clean) if clean else "com.example"
+    if not clean:
+        clean = ["com", "example"]
+
+    slug = re.sub(r"[^a-z0-9_]", "", (app_slug or "").lower())
+    if slug:
+        if slug[0].isdigit() or slug in _JAVA_KEYWORDS:
+            slug = "_" + slug
+        if clean[-1] != slug:
+            clean.append(slug)
+    return ".".join(clean)
+
+
+_JAVA_KEYWORDS = {
+    "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char",
+    "class", "const", "continue", "default", "do", "double", "else", "enum",
+    "extends", "final", "finally", "float", "for", "goto", "if", "implements",
+    "import", "instanceof", "int", "interface", "long", "native", "new",
+    "package", "private", "protected", "public", "return", "short", "static",
+    "strictfp", "super", "switch", "synchronized", "this", "throw", "throws",
+    "transient", "try", "void", "volatile", "while",
+}
 
 
 def _slugify(name: str) -> str:
@@ -152,8 +196,8 @@ def create_project(
         print(fail(f"Directory '{project_dir}' already exists."))
         sys.exit(1)
 
-    package = _sanitize_package(org)
     pydrud_app_name = _slugify(name)
+    package = _sanitize_package(org, pydrud_app_name)
     android_app_name = _camel(name)
     package_path = package.replace(".", "/")
 

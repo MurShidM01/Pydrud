@@ -10,6 +10,7 @@ def reset():
 
 def test_default_scale_factor():
     """Without calling init(), Responsive.text(16) returns 16 (factor=1)."""
+    Responsive.reset()
     val = Responsive.text(16)
     assert val == 16, f"Expected 16, got {val}"
 

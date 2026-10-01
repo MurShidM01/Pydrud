@@ -2,22 +2,35 @@ package {{ package }};
 
 import android.os.Bundle;
 import android.util.Log;
+import android.view.View;
+import android.view.ViewGroup;
 import android.widget.FrameLayout;
+
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
-import com.chaquo.python.Python;
+import androidx.core.view.WindowInsetsCompat;
+
 import com.chaquo.python.PyObject;
+import com.chaquo.python.Python;
 import com.chaquo.python.android.AndroidPlatform;
 
 public class {{ app_name }}Activity extends AppCompatActivity {
 
     private static final String TAG = "PydrudActivity";
 
+    /** How long to wait for Python to answer a back press before we handle it. */
+    private static final long BACK_TIMEOUT_MS = 700L;
+
     protected FrameLayout rootView;
     protected ViewFactory viewFactory;
     protected EventDispatcher eventDispatcher;
     protected BridgeService bridge;
+
     private volatile boolean pythonStarted = false;
+    private volatile boolean awaitingBackResult = false;
+    private Runnable pendingBack;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -26,16 +39,17 @@ public class {{ app_name }}Activity extends AppCompatActivity {
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
 
         rootView = new FrameLayout(this);
-        rootView.setLayoutParams(new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.MATCH_PARENT
-        ));
+        rootView.setLayoutParams(new ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(rootView);
 
-        rootView.setOnApplyWindowInsetsListener((v, insets) -> {
-            int top = insets.getSystemWindowInsetTop();
-            v.setPadding(0, top, 0, 0);
-            return insets.consumeSystemWindowInsets();
+        // Keep content clear of the status bar / navigation bar / IME.
+        ViewCompat.setOnApplyWindowInsetsListener(rootView, (v, windowInsets) -> {
+            Insets bars = windowInsets.getInsets(
+                WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.ime());
+            v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+            return WindowInsetsCompat.CONSUMED;
         });
 
         eventDispatcher = new EventDispatcher();
@@ -53,41 +67,104 @@ public class {{ app_name }}Activity extends AppCompatActivity {
                 pythonStarted = true;
                 Log.i(TAG, "Python interpreter started");
 
+                // Start listening *before* Python tries to connect.
                 bridge.start();
-
-                try { Thread.sleep(300); } catch (InterruptedException ignored) {}
+                bridge.awaitListening(5000);
 
                 Log.i(TAG, "Invoking Python app.main.start_app()");
                 PyObject module = Python.getInstance().getModule("app.main");
                 module.callAttr("start_app");
-
-            } catch (Exception e) {
-                Log.e(TAG, "Failed to start Python app", e);
+            } catch (Throwable t) {
+                Log.e(TAG, "Failed to start Python app", t);
+                runOnUiThread(() -> showFatal(t));
             }
-        }).start();
+        }, "pydrud-python").start();
     }
+
+    /** Render a readable error screen instead of a blank activity. */
+    private void showFatal(Throwable t) {
+        android.widget.TextView tv = new android.widget.TextView(this);
+        tv.setText("Pydrud failed to start:\n\n" + t);
+        tv.setTextColor(0xFFB91C1C);
+        tv.setPadding(48, 48, 48, 48);
+        rootView.removeAllViews();
+        rootView.addView(tv);
+    }
+
+    // ── Back button ───────────────────────────────────────────────────────
 
     @Override
     public void onBackPressed() {
-        // Send back event to Python Router for navigation stack.
-        // If Python doesn't respond with finish_activity within 1.5s,
-        // fall back to default back behavior.
-        if (bridge != null) {
-            bridge.sendEvent("back", "");
-            rootView.postDelayed(() -> {
-                if (!isFinishing()) {
-                    {{ app_name }}Activity.super.onBackPressed();
-                }
-            }, 1500);
-        } else {
+        // Ask Python first: the Router may want to pop a screen. Only fall
+        // back to the default behaviour if Python does not answer in time
+        // or reports that it did not handle the press.
+        if (bridge == null || !bridge.isConnected()) {
             super.onBackPressed();
+            return;
         }
+        if (awaitingBackResult) return;
+
+        awaitingBackResult = true;
+        pendingBack = () -> {
+            if (awaitingBackResult) {
+                awaitingBackResult = false;
+                defaultBack();
+            }
+        };
+        rootView.postDelayed(pendingBack, BACK_TIMEOUT_MS);
+        bridge.sendEvent("back", "");
+    }
+
+    /** Called by BridgeService when Python answers the back event. */
+    public void onBackResult(boolean handled) {
+        runOnUiThread(() -> {
+            awaitingBackResult = false;
+            if (pendingBack != null) {
+                rootView.removeCallbacks(pendingBack);
+                pendingBack = null;
+            }
+            if (!handled) defaultBack();
+        });
+    }
+
+    private void defaultBack() {
+        super.onBackPressed();
+    }
+
+    // ── Lifecycle → Python ────────────────────────────────────────────────
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        sendLifecycle("resume");
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        sendLifecycle("pause");
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        sendLifecycle("stop");
+    }
+
+    private void sendLifecycle(String state) {
+        if (bridge == null || !bridge.isConnected()) return;
+        try {
+            org.json.JSONObject data = new org.json.JSONObject();
+            data.put("state", state);
+            bridge.sendEvent("lifecycle", "", data);
+        } catch (org.json.JSONException ignored) {}
     }
 
     @Override
     protected void onDestroy() {
-        super.onDestroy();
+        sendLifecycle("destroy");
         if (bridge != null) bridge.stop();
         if (viewFactory != null) viewFactory.clear();
+        super.onDestroy();
     }
 }

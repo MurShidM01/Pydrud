@@ -13,7 +13,7 @@ class TestAppBuild(unittest.TestCase):
         app = App(target=lambda page: page.add(Text("Hello")))
         tree = app.build()
         self.assertIsNotNone(tree)
-        self.assertEqual(tree._widget_type, "Container")
+        self.assertEqual(tree._widget_type, "Stack")
 
     def test_app_build_with_multiple_controls(self):
         app = App(target=lambda page: page.add(
