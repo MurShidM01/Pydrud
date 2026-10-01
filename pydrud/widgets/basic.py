@@ -306,3 +306,182 @@ class Switch(Widget):
 
     def _serialise_props(self) -> dict:
         return {"label": self._label, "active": self._active}
+
+
+class ProgressBar(Widget):
+    """A determinate or indeterminate progress indicator."""
+
+    _widget_type = "ProgressBar"
+
+    def __init__(
+        self,
+        value: Optional[float] = None,
+        *,
+        indeterminate: Optional[bool] = None,
+        circular: bool = False,
+        color: Optional[str] = None,
+        key: Optional[str] = None,
+        style: Optional[dict] = None,
+        expand: Optional[int] = None,
+        visible: bool = True,
+        **kwargs,
+    ):
+        super().__init__(key=key, style=style, expand=expand, visible=visible, **kwargs)
+        self._value = 0.0 if value is None else float(value)
+        self._indeterminate = (value is None) if indeterminate is None else bool(indeterminate)
+        self.style["circular"] = circular
+        if color:
+            self.style["color"] = color
+
+    @property
+    def value(self) -> float:
+        return self._value
+
+    @value.setter
+    def value(self, v: float):
+        self._value = float(v)
+        self._indeterminate = False
+
+    def _serialise_props(self) -> dict:
+        return {"value": self._value, "indeterminate": self._indeterminate}
+
+
+class Slider(Widget):
+    """A draggable value slider."""
+
+    _widget_type = "Slider"
+
+    def __init__(
+        self,
+        value: float = 0,
+        *,
+        min: float = 0,          # noqa: A002
+        max: float = 100,        # noqa: A002
+        divisions: Optional[int] = None,
+        color: Optional[str] = None,
+        key: Optional[str] = None,
+        style: Optional[dict] = None,
+        expand: Optional[int] = None,
+        visible: bool = True,
+        **kwargs,
+    ):
+        super().__init__(key=key, style=style, expand=expand, visible=visible, **kwargs)
+        if max <= min:
+            raise ValueError("Slider max must be greater than min")
+        self._min = float(min)
+        self._max = float(max)
+        self._value = _clamp(float(value), self._min, self._max)
+        if divisions is not None:
+            self.style["divisions"] = int(divisions)
+        if color:
+            self.style["color"] = color
+        self.style.setdefault("width", "match")
+
+    @property
+    def value(self) -> float:
+        return self._value
+
+    @value.setter
+    def value(self, v: float):
+        self._value = _clamp(float(v), self._min, self._max)
+
+    def _serialise_props(self) -> dict:
+        return {"value": self._value, "min": self._min, "max": self._max}
+
+
+class Dropdown(Widget):
+    """A dropdown (spinner) that lets the user pick one of several options."""
+
+    _widget_type = "Dropdown"
+
+    def __init__(
+        self,
+        options: Optional[list[str]] = None,
+        *,
+        value: Optional[str] = None,
+        hint: Optional[str] = None,
+        key: Optional[str] = None,
+        style: Optional[dict] = None,
+        expand: Optional[int] = None,
+        visible: bool = True,
+        **kwargs,
+    ):
+        super().__init__(key=key, style=style, expand=expand, visible=visible, **kwargs)
+        self._options = [str(o) for o in (options or [])]
+        self._value = value if value in self._options else (self._options[0] if self._options else "")
+        self._hint = hint
+        self.style.setdefault("width", "match")
+
+    @property
+    def options(self) -> list:
+        return list(self._options)
+
+    @property
+    def value(self) -> str:
+        return self._value
+
+    @value.setter
+    def value(self, v: str):
+        self._value = str(v)
+
+    @property
+    def selected_index(self) -> int:
+        try:
+            return self._options.index(self._value)
+        except ValueError:
+            return -1
+
+    def _serialise_props(self) -> dict:
+        d = {
+            "options": list(self._options),
+            "value": self._value,
+            "index": self.selected_index,
+        }
+        if self._hint:
+            d["hint"] = self._hint
+        return d
+
+
+class Radio(Widget):
+    """A single radio button. Group several with the same ``group`` name."""
+
+    _widget_type = "Radio"
+
+    def __init__(
+        self,
+        label: str = "",
+        *,
+        value: Optional[str] = None,
+        group: str = "default",
+        selected: bool = False,
+        key: Optional[str] = None,
+        style: Optional[dict] = None,
+        expand: Optional[int] = None,
+        visible: bool = True,
+        **kwargs,
+    ):
+        super().__init__(key=key, style=style, expand=expand, visible=visible, **kwargs)
+        self._label = label
+        self._value = value if value is not None else label
+        self._group = group
+        self._selected = selected
+
+    @property
+    def selected(self) -> bool:
+        return self._selected
+
+    @selected.setter
+    def selected(self, v: bool):
+        self._selected = bool(v)
+
+    def _serialise_props(self) -> dict:
+        return {
+            "label": self._label,
+            "value": self._value,
+            "group": self._group,
+            "selected": self._selected,
+        }
+
+
+def _clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))

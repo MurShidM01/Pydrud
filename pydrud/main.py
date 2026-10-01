@@ -2,7 +2,7 @@
 Pydrud App — the top-level entry point.
 
 An ``App`` owns the widget-tree, state, event dispatcher, and bridge.
-It provides the familiar ``ft.app(target=...)`` developer experience.
+It provides the familiar ``App(target=main).run()`` developer experience.
 """
 
 from __future__ import annotations
@@ -14,13 +14,19 @@ import socket
 import sys
 import threading
 import time
+import traceback
 from typing import Any, Callable, Optional
 
 from pydrud.core.state import State
+from pydrud.core.results import Result
+from pydrud.core.tasks import TaskRunner
 from pydrud.core.diff import TreeDiff
 from pydrud.core.events import EventDispatcher
 from pydrud.core.bridge import BridgeProtocol
-from pydrud.widgets import Widget
+from pydrud.widgets import Widget, assign_stable_keys
+
+#: Above this many patches a full re-render is cheaper than patching.
+MAX_PATCHES = 60
 
 
 class App:
@@ -28,11 +34,10 @@ class App:
 
     Typical usage::
 
-        def main(page: Page):
+        def main(page):
             page.add(Text("Hello, World!"))
 
-        app = App(target=main)
-        app.run()
+        App(target=main).run()
     """
 
     def __init__(
@@ -43,6 +48,7 @@ class App:
         host: str = "127.0.0.1",
         port: int = 8595,
         assets_dir: str = "assets",
+        hot_reload: bool = False,
         **kwargs,
     ):
         self.target = target
@@ -54,6 +60,8 @@ class App:
         self._page = _Page(self)
         self._event_dispatcher = EventDispatcher()
         self._current_tree: Optional[Widget] = None
+        #: Clone of the tree as the device last saw it (for partial updates).
+        self._snapshot: Optional[Widget] = None
         self._bridge = BridgeProtocol()
         self._connected = False
         self._transport: Optional[socket.socket] = None
@@ -69,204 +77,519 @@ class App:
         self._watcher: Optional[Any] = None
         self._watch_dirs: list[str] = ["src"]
         self._project_root: str = self._find_root()
+        self._hot_reload_requested = hot_reload
+        # ── Lifecycle hooks ────────────────────────────────────────
+        self._lifecycle_handlers: dict[str, list[Callable]] = {}
+        #: Deep links / shortcuts / push messages / sensor streams.
+        self._deep_link_handlers: list[Callable] = []
+        self._push_handlers: list[Callable] = []
+        self._pending_deep_link: Optional[str] = None
+        #: Bound reactive objects — also used to carry values across reloads.
+        self._bound_states: list = []
+        self._bound_stores: list = []
+        self._preserve_state: bool = True
+        self._error_handler: Optional[Callable[[BaseException], None]] = None
+        # ── Native service calls (request/response) ────────────────
+        self._pending: dict[str, Result] = {}
+        self._request_seq = 0
+        self._tasks = TaskRunner(on_error=self._report_error)
+        # ── UI-thread marshalling ──────────────────────────────────
+        self._ui_queue: queue.Queue = queue.Queue()
 
     # ── public API ────────────────────────────────────────────────────────
 
     @property
-    def page(self):
+    def page(self) -> "_Page":
         return self._page
 
+    @property
+    def connected(self) -> bool:
+        return self._connected
+
     def run(self, *, retry: bool = True, retry_delay: float = 0.5, max_retries: int = 30):
-        """Start the app: build the tree, connect to Android bridge, enter event loop.
+        """Start the app: build the tree, connect to Android, enter the event loop.
 
         Args:
-            retry: If True, retry the TCP connection (for Chaquopy where the
-                   Android bridge server may not be ready yet).
+            retry: Retry the TCP connection (the Android bridge server may
+                not be listening yet when Chaquopy starts Python).
             retry_delay: Seconds between connection retries.
             max_retries: Maximum connection attempts before giving up.
         """
-        if self.target:
-            self.target(self._page)
+        self._build_tree()
 
-        self._current_tree = self._page.build()
-        self._event_dispatcher.register_tree(self._current_tree)
+        if self._hot_reload_requested:
+            self.enable_hot_reload()
 
         self._start_bridge(retry=retry, retry_delay=retry_delay, max_retries=max_retries)
 
     def build(self) -> Widget:
-        """Convenience: run the target and return the widget tree without
-        connecting the bridge.  Useful for testing."""
-        if self.target:
-            self.target(self._page)
-        self._current_tree = self._page.build()
-        self._event_dispatcher.register_tree(self._current_tree)
-        return self._current_tree
+        """Run the target and return the widget tree without connecting.
+
+        Useful for tests and for ``pydrud analyze``.
+        """
+        return self._build_tree()
 
     def update(self):
         """Rebuild the widget tree and send incremental patches via TreeDiff.
 
-        Compares the old tree against the newly built tree, computes
-        incremental patches (create/update/delete/replace) with proper
-        parent_key info, and sends only the patches over the bridge.
-        Falls back to full_render when the patch list is too large (>50).
+        This re-runs the ``target`` builder, so the UI is a pure function of
+        your state — the declarative model. If instead you hold on to a
+        widget, mutate it and want just that subtree refreshed, use
+        :meth:`update_widget` (``page.update(widget)``).
+
+        Falls back to a full render when there is no previous tree or when
+        the patch list grows beyond :data:`MAX_PATCHES`.
         """
-        # Clone the current tree for diff comparison before rebuilding.
-        old_clone = self._current_tree.clone() if self._current_tree else None
+        old_tree = self._current_tree
+        old_clone = old_tree.clone() if old_tree is not None else None
 
-        if self.target:
-            self._page.clear()
-            self.target(self._page)
-        new = self._page.build()
+        new = self._build_tree()
 
-        self._current_tree = new
-        self._event_dispatcher.unregister_all()
-        self._event_dispatcher.register_tree(new)
+        if not (self._connected and self._transport):
+            return
 
-        if self._connected and self._transport:
-            if old_clone is not None:
-                from pydrud.core.diff import TreeDiff as _TreeDiff
-                patches = _TreeDiff.diff(old_clone, new)
-                if patches and len(patches) <= 50:
-                    msg = self._bridge.encode_render([p.to_dict() for p in patches])
-                    self._send(msg)
-                else:
-                    msg = self._bridge.encode_full_render(new.to_dict())
-                    self._send(msg)
+        if old_clone is None:
+            self._send(self._bridge.encode_full_render(new.to_dict()))
+            return
+
+        try:
+            patches = TreeDiff.diff(old_clone, new)
+        except Exception as exc:  # pragma: no cover — defensive
+            self._report_error(exc)
+            self._send(self._bridge.encode_full_render(new.to_dict()))
+            return
+
+        if not patches:
+            return
+        if len(patches) <= MAX_PATCHES:
+            self._send(self._bridge.encode_render([p.to_dict() for p in patches]))
+        else:
+            self._send(self._bridge.encode_full_render(new.to_dict()))
+        self._snapshot = new.clone()
+
+    def update_widget(self, *widgets: Widget) -> None:
+        """Push changes for mutated widgets without re-running the builder.
+
+        This is the imperative counterpart of :meth:`update`::
+
+            label.value = "Saved"
+            page.update(label)
+
+        Only the affected subtree is diffed, so updating one row of a long
+        list costs one patch instead of a whole rebuild.
+        """
+        if not widgets:
+            return self.update()
+        if self._current_tree is None or self._snapshot is None:
+            return self.update()
+        if not (self._connected and self._transport):
+            # Keep the snapshot honest even while disconnected (tests).
+            self._snapshot = self._current_tree.clone()
+            return None
+
+        patches: list = []
+        for widget in widgets:
+            previous = self._snapshot.find_by_key(widget.key)
+            if previous is None:
+                return self.update()
+            try:
+                patches.extend(TreeDiff.diff(previous, widget))
+            except Exception as exc:  # pragma: no cover - defensive
+                self._report_error(exc)
+                return self.update()
+
+        if patches:
+            if len(patches) <= MAX_PATCHES:
+                self._send(self._bridge.encode_render(
+                    [p.to_dict() for p in patches]))
             else:
-                # First call to update() — full render.
-                msg = self._bridge.encode_full_render(new.to_dict())
-                self._send(msg)
+                self._send(self._bridge.encode_full_render(
+                    self._current_tree.to_dict()))
+        self._snapshot = self._current_tree.clone()
+        self._event_dispatcher.register_tree(self._current_tree)
+        return None
 
     def render(self):
         """Force a full re-render (send the entire tree)."""
-        if self.target:
-            self._page.clear()
-            self.target(self._page)
-        tree = self._page.build()
-        self._current_tree = tree
-        self._event_dispatcher.unregister_all()
-        self._event_dispatcher.register_tree(tree)
-
+        tree = self._build_tree()
+        self._snapshot = tree.clone()
         if self._connected and self._transport:
-            msg = self._bridge.encode_full_render(tree.to_dict())
-            self._send(msg)
+            self._send(self._bridge.encode_full_render(tree.to_dict()))
 
     def update_state(self, state: State):
         """Rebuild after a State change."""
         self.update()
 
+    def bind(self, *states) -> "App":
+        """Auto-update the UI whenever any bound object changes.
+
+        Accepts :class:`~pydrud.core.state.State` values as well as anything
+        observable (``Store``, ``ReactiveList``, ``Computed``) — i.e. objects
+        exposing ``watch()`` or ``subscribe()``.
+        """
+        for state in states:
+            if isinstance(state, State):
+                self._bound_states.append(state)
+                state.watch(lambda _old, _new: self.update())
+            elif hasattr(state, "subscribe"):
+                self._bound_stores.append(state)
+                state.subscribe(lambda *_args, **_kw: self.update())
+            else:
+                raise TypeError(
+                    f"App.bind() expects State or an observable store, "
+                    f"got {type(state).__name__}")
+        return self
+
+    def stop(self) -> None:
+        """Shut the app down: stop the watcher, reader thread, and socket."""
+        self._running = False
+        self._shutdown_event.set()
+        if self._watcher is not None:
+            try:
+                self._watcher.stop()
+            except Exception:
+                pass
+            self._watcher = None
+        self._event_queue.put(None)
+        self._cancel_pending("app stopped")
+        try:
+            self._tasks.shutdown()
+        except Exception:
+            pass
+        if self._transport is not None:
+            try:
+                self._transport.shutdown(socket.SHUT_RDWR)
+            except Exception:
+                pass
+            try:
+                self._transport.close()
+            except Exception:
+                pass
+        self._connected = False
+
+    # ── lifecycle & errors ────────────────────────────────────────────────
+
+    def on_lifecycle(self, event: str, callback: Callable) -> "App":
+        """Register a lifecycle callback (``resume``/``pause``/``stop``/``destroy``)."""
+        self._lifecycle_handlers.setdefault(event, []).append(callback)
+        return self
+
+    def on_deep_link(self, callback: Callable[[str], None]) -> "App":
+        """Handle ``myapp://`` / https links and launcher shortcuts.
+
+        The callback receives the raw URL.  When a router is attached, the
+        link is *also* resolved against its route table automatically.
+        """
+        self._deep_link_handlers.append(callback)
+        if self._pending_deep_link is not None:
+            link, self._pending_deep_link = self._pending_deep_link, None
+            self._handle_deep_link({"url": link})
+        return self
+
+    def on_push(self, callback: Callable[[dict], None]) -> "App":
+        """Handle an incoming FCM message (foreground or notification tap)."""
+        self._push_handlers.append(callback)
+        return self
+
+    def _handle_deep_link(self, data: dict) -> None:
+        url = data.get("url") or data.get("route") or ""
+        if not url:
+            return
+        if not self._deep_link_handlers and self._router is None:
+            self._pending_deep_link = url
+            return
+        for cb in list(self._deep_link_handlers):
+            try:
+                cb(url)
+            except Exception as exc:
+                self._report_error(exc)
+        if self._router is not None and hasattr(self._router, "handle_link"):
+            try:
+                self._router.handle_link(url)
+            except Exception as exc:
+                self._report_error(exc)
+
+    def on_error(self, callback: Callable[[BaseException], None]) -> "App":
+        """Register a handler called when an event callback raises."""
+        self._error_handler = callback
+        return self
+
+    def _report_error(self, exc: BaseException) -> None:
+        if self._error_handler is not None:
+            try:
+                self._error_handler(exc)
+                return
+            except Exception:
+                pass
+        print(f"[Pydrud] Error: {exc}")
+        traceback.print_exc()
+
+    # ── tree building ─────────────────────────────────────────────────────
+
+    def _build_tree(self) -> Widget:
+        """Run the target, build the page, stabilise keys, index handlers."""
+        if self.target:
+            self._page.clear()
+            try:
+                self.target(self._page)
+            except Exception as exc:
+                self._report_error(exc)
+        tree = self._page.build()
+        assign_stable_keys(tree, prefix="_page")
+        self._current_tree = tree
+        self._event_dispatcher.unregister_all()
+        self._event_dispatcher.register_tree(tree)
+        return tree
+
     # ── Hot Reload ─────────────────────────────────────────────────────────
 
     def enable_hot_reload(self, watch_dirs: list[str] | None = None) -> None:
-        """Start watching source files for changes and auto-rebuild the UI.
-
-        When a ``.py`` file changes, the affected module is reloaded,
-        the widget tree is rebuilt, and incremental patches are sent
-        to the device — no APK recompilation needed.
+        """Watch source files and rebuild the UI when they change.
 
         Args:
-            watch_dirs: Directories to watch (relative to project root).
-                        Defaults to ``["src"]``.
+            watch_dirs: Directories to watch (relative to the project root).
+                Defaults to ``["src"]``.
         """
         from pydrud.core.watcher import FileWatcher
-        dirs = [os.path.join(self._project_root, d) for d in (watch_dirs or self._watch_dirs)]
+
+        if self._watcher is not None:
+            return
+        names = watch_dirs or self._watch_dirs
+        dirs = [
+            d if os.path.isabs(d) else os.path.join(self._project_root, d)
+            for d in names
+        ]
+        dirs = [d for d in dirs if os.path.isdir(d)]
+        if not dirs:
+            print(f"[Pydrud] Hot Reload: no directories to watch ({names})")
+            return
         self._watcher = FileWatcher(dirs, self._on_hot_reload)
         self._watcher.start()
+        print(f"[Pydrud] Hot Reload watching: {', '.join(dirs)}")
+
+    def disable_hot_reload(self) -> None:
+        if self._watcher is not None:
+            self._watcher.stop()
+            self._watcher = None
+
+    # ── stateful hot reload ──────────────────────────────────────────────
+
+    def capture_state(self) -> dict:
+        """Snapshot every bound State/Store value before a reload."""
+        snapshot: dict = {"states": [], "stores": [], "route": None,
+                          "params": {}}
+        for state in self._bound_states:
+            try:
+                snapshot["states"].append(
+                    (getattr(state, "name", "") or "", state.value))
+            except Exception:
+                snapshot["states"].append(("", None))
+        for store in self._bound_stores:
+            try:
+                snapshot["stores"].append(
+                    dict(store.state) if hasattr(store, "state") else None)
+            except Exception:
+                snapshot["stores"].append(None)
+        if self._router is not None:
+            # Store the *pattern* (e.g. "/items/:id"), which is what the
+            # rebuilt router will know about, plus the resolved params.
+            snapshot["route"] = self._router.current_route
+            snapshot["params"] = dict(self._router.current_params)
+            snapshot["path"] = self._router.path()
+        return snapshot
+
+    def restore_state(self, snapshot: dict) -> None:
+        """Push a snapshot back into the reloaded module's objects.
+
+        Hot reload rebuilds module-level ``State`` objects, so values are
+        matched positionally (and by name when one was given) — the same
+        trade-off Flutter makes, and it keeps a counter or a half-typed form
+        intact while you edit the screen around it.
+        """
+        states = snapshot.get("states") or []
+        for index, state in enumerate(self._bound_states):
+            if index >= len(states):
+                break
+            name, value = states[index]
+            if name and getattr(state, "name", "") and name != state.name:
+                continue
+            try:
+                state.value = value
+            except Exception:
+                pass
+        stores = snapshot.get("stores") or []
+        for index, store in enumerate(self._bound_stores):
+            if index >= len(stores) or stores[index] is None:
+                continue
+            try:
+                store.replace(stores[index])
+            except AttributeError:
+                try:
+                    store.state.update(stores[index])
+                except Exception:
+                    pass
+        route = snapshot.get("route")
+        if not route or self._router is None:
+            return
+        try:
+            if self._router.has_route(route):
+                self._router.replace(route, **(snapshot.get("params") or {}))
+            elif snapshot.get("path"):
+                # The route pattern was renamed or removed; fall back to
+                # resolving the concrete URL path again.
+                self._router.go(snapshot["path"])
+        except Exception:
+            pass
+
+    def preserve_state(self, enabled: bool = True) -> "App":
+        """Keep State/Store values across hot reloads (default: on)."""
+        self._preserve_state = bool(enabled)
+        return self
 
     def _on_hot_reload(self, filepath: str) -> None:
         """Called by the file watcher when a source file changes."""
+        snapshot = self.capture_state() if self._preserve_state else None
         try:
-            rel = os.path.relpath(filepath, self._project_root)
-            mod_parts = rel.replace(os.sep, "/").replace(".py", "").split("/")
-            mod_name = ".".join(mod_parts)
-
-            # Reload the changed module.
-            if mod_name in sys.modules:
-                importlib.reload(sys.modules[mod_name])
-
-            # Rebuild the widget tree.
-            if self.target:
-                self._page.clear()
-                # Re-import the target if it was reloaded.
-                self.target(self._page)
-                self.render()
+            mod_name = _module_name_for(filepath, self._project_root)
+            if mod_name and mod_name in sys.modules:
+                module = importlib.reload(sys.modules[mod_name])
+                # Re-bind the target if it came from the reloaded module.
+                target_name = getattr(self.target, "__name__", None)
+                target_mod = getattr(self.target, "__module__", None)
+                if target_name and target_mod == mod_name:
+                    new_target = getattr(module, target_name, None)
+                    if callable(new_target):
+                        self.target = new_target
+            if snapshot is not None:
+                self.restore_state(snapshot)
+            kept = len(snapshot["states"]) + len(snapshot["stores"]) \
+                if snapshot else 0
+            print(f"[Pydrud] Hot Reload: {os.path.basename(filepath)}"
+                  + (f" (kept {kept} state object(s))" if kept else ""))
+            self.update()
         except Exception as exc:
             print(f"[Pydrud] Hot Reload error for {filepath}: {exc}")
 
     def hot_restart(self) -> None:
-        """Fully reset the app state and re-render from scratch.
-
-        Clears the navigation stack, resets the page, re-imports all
-        user modules, calls ``target(page)`` again, and sends a full
-        tree render. This is the Python equivalent of "restart app".
-        """
-        # Reset navigation.
+        """Reset all app state and re-render from scratch."""
         if self._router is not None:
             self._router.reset()
-            self._router.current_route = None
 
-        # Reset event handling.
         self._event_dispatcher.unregister_all()
+        self._current_tree = None
 
-        # Reload all user modules in src/ to pick up fresh code.
-        user_modules = _find_user_modules(self._project_root)
-        for mod_name in user_modules:
+        for mod_name in _find_user_modules(self._project_root):
             if mod_name in sys.modules:
                 try:
                     importlib.reload(sys.modules[mod_name])
                 except Exception as exc:
                     print(f"[Pydrud] Hot Restart reload error {mod_name}: {exc}")
 
-        # Rebuild from scratch.
-        self._page.clear()
-        if self.target:
-            self.target(self._page)
         self.render()
 
     @staticmethod
     def _find_root() -> str:
-        """Walk up from cwd to find the project root (has pydrud.yaml)."""
-        cwd = os.getcwd()
-        current = cwd
+        """Walk up from cwd to find the project root (containing pydrud.yaml)."""
+        current = os.getcwd()
         while True:
             if os.path.isfile(os.path.join(current, "pydrud.yaml")):
                 return current
             parent = os.path.dirname(current)
             if parent == current:
-                return cwd
+                return os.getcwd()
             current = parent
+
+    # ── native service calls ──────────────────────────────────────────────
+
+    def invoke(self, cmd: str, **data) -> Result:
+        """Send a command that expects an answer and return a :class:`Result`.
+
+        A ``request_id`` is attached so the Android side can correlate its
+        reply.  When the bridge is not connected (tests, ``pydrud analyze``)
+        the result fails immediately instead of hanging forever.
+        """
+        with self._lock:
+            self._request_seq += 1
+            request_id = f"r{self._request_seq}"
+        result = Result(request_id, cmd)
+        self._pending[request_id] = result
+        if not self._connected:
+            self._pending.pop(request_id, None)
+            result.fail("bridge not connected")
+            return result
+        payload = {k: v for k, v in data.items() if v is not None}
+        self._send(self._bridge.encode_command(cmd, request_id=request_id,
+                                               **payload))
+        return result
+
+    def _resolve_result(self, data: dict) -> None:
+        request_id = str(data.get("request_id", ""))
+        result = self._pending.pop(request_id, None)
+        if result is None:
+            return
+        if data.get("ok", True):
+            result.complete(data.get("value"))
+        else:
+            result.fail(str(data.get("error", "native call failed")))
+
+    def _cancel_pending(self, reason: str = "bridge closed") -> None:
+        pending, self._pending = self._pending, {}
+        for result in pending.values():
+            result.fail(reason)
+
+    # ── background work ───────────────────────────────────────────────────
+
+    @property
+    def tasks(self) -> TaskRunner:
+        return self._tasks
+
+    def run_task(self, fn: Callable, *args, **kwargs):
+        """Run *fn* on a worker thread (also accepts ``async def``)."""
+        return self._tasks.run(fn, *args, **kwargs)
+
+    def run_on_ui(self, fn: Callable, *args, **kwargs) -> None:
+        """Queue *fn* to run on the event-loop thread.
+
+        Widget mutations from a worker thread must go through this, exactly
+        like ``runOnUiThread`` on Android.
+        """
+        if not self._running:
+            # No event loop yet (tests, CLI, headless renders): run inline so
+            # callers never silently lose work.
+            fn(*args, **kwargs)
+            return
+        self._ui_queue.put((fn, args, kwargs))
+        self._event_queue.put("__ui__")
+
+    def _drain_ui_queue(self) -> None:
+        while True:
+            try:
+                fn, args, kwargs = self._ui_queue.get_nowait()
+            except queue.Empty:
+                return
+            try:
+                fn(*args, **kwargs)
+            except Exception as exc:
+                self._report_error(exc)
 
     # ── Router support ────────────────────────────────────────────────────
 
     def attach_router(self, router) -> None:
-        """Attach a Router for screen-based navigation.
-
-        The router receives back-button events from the Android hardware
-        back button.
-        """
+        """Attach a Router so the hardware back button pops screens."""
         self._router = router
         router.attach(self)
 
     # ── bridge internals ──────────────────────────────────────────────────
 
     def _start_bridge(self, *, retry=True, retry_delay=0.5, max_retries=30):
-        """Connect to the Android side via TCP socket.
-
-        In Chaquopy the Android BridgeService starts first and listens.
-        We retry until the server is accepting connections.
-
-        Once connected, a background daemon thread reads NDJSON events
-        from the socket and pushes them onto an internal queue. The main
-        thread processes events from the queue, keeping the event loop
-        responsive and allowing ``page.update()`` to be called safely
-        from event handlers without blocking the socket reader.
-        """
+        """Connect to the Android side via TCP and run the event loop."""
         self._running = True
         self._shutdown_event.clear()
         attempts = 0
-        last_error = None
+        last_error: Optional[BaseException] = None
 
-        while attempts < max_retries:
+        while attempts < max_retries and self._running:
+            sock = None
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(10.0)
@@ -274,13 +597,12 @@ class App:
                 sock.settimeout(None)
                 self._transport = sock
                 self._connected = True
-                self._buffer = b""
 
                 # Send the full initial tree.
-                msg = self._bridge.encode_full_render(self._current_tree.to_dict())
-                self._send(msg)
+                if self._current_tree is None:
+                    self._build_tree()
+                self._send(self._bridge.encode_full_render(self._current_tree.to_dict()))
 
-                # Start background reader thread.
                 self._reader_thread = threading.Thread(
                     target=self._reader_loop,
                     args=(sock,),
@@ -289,17 +611,24 @@ class App:
                 )
                 self._reader_thread.start()
 
-                # Enter event processing loop (main thread).
                 self._event_loop()
                 return
-            except ConnectionRefusedError as e:
-                last_error = e
+            except (ConnectionRefusedError, socket.timeout, OSError) as exc:
+                last_error = exc
+                if sock is not None:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
+                self._transport = None
+                self._connected = False
                 if not retry:
                     break
                 attempts += 1
                 time.sleep(retry_delay)
-            except Exception as exc:
-                print(f"[Pydrud] Bridge error: {exc}")
+            except Exception as exc:  # pragma: no cover — defensive
+                last_error = exc
+                self._report_error(exc)
                 if not retry:
                     break
                 attempts += 1
@@ -333,22 +662,16 @@ class App:
                 buffer += data
                 while b"\n" in buffer:
                     line, buffer = buffer.split(b"\n", 1)
-                    decoded = line.decode("utf-8").strip()
+                    decoded = line.decode("utf-8", errors="replace").strip()
                     if decoded:
                         self._event_queue.put(decoded)
         except (ConnectionResetError, BrokenPipeError, OSError):
             pass
         finally:
-            self._event_queue.put(None)  # Sentinel: signal the event loop to stop
+            self._event_queue.put(None)  # Sentinel: stop the event loop.
 
     def _event_loop(self):
-        """Process incoming events from the queue on the main thread.
-
-        This replaces the old blocking ``_listen_loop``. Events are
-        dequeued and dispatched to registered callbacks. The loop
-        exits when a ``None`` sentinel is received (connection lost)
-        or when ``_running`` is set to ``False``.
-        """
+        """Process incoming events from the queue on the main thread."""
         try:
             while self._running:
                 try:
@@ -356,51 +679,118 @@ class App:
                 except queue.Empty:
                     continue
                 if raw is None:
-                    # Sentinel — connection lost.
                     break
-                try:
-                    event = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
-
-                # Handle special events inline.
-                if event.get("type") == "ready":
-                    d = event.get("data", {})
-                    from pydrud.core.responsive import Responsive as _R
-                    from pydrud.core.responsive import MediaQuery as _MQ
-                    _R.init(
-                        width_dp=d.get("width", 360),
-                        height_dp=d.get("height", 640),
-                        density=d.get("density", 2.0),
-                    )
-                    _MQ.init(
-                        width_dp=d.get("width", 360),
-                        height_dp=d.get("height", 640),
-                        density=d.get("density", 2.0),
-                        status_bar_height=d.get("status_bar_height", 24),
-                    )
-                    continue
-
-                # Handle hardware back button via Router.
-                if event.get("type") == "back":
-                    if self._router is not None:
-                        handled = self._router.handle_back()
-                        if not handled:
-                            # No more screens to pop — tell Android to finish.
-                            self._send(
-                                self._bridge.encode_command("finish_activity")
-                            )
-                    continue
-
-                # Dispatch to registered event handlers.
-                self._event_dispatcher.dispatch(raw)
+                self._handle_raw_event(raw)
         finally:
             self._connected = False
+            self._cancel_pending()
             if self._transport:
                 try:
                     self._transport.close()
                 except Exception:
                     pass
+
+    def _handle_raw_event(self, raw: str) -> None:
+        """Decode and route a single NDJSON event line."""
+        if raw == "__ui__":
+            self._drain_ui_queue()
+            return
+        try:
+            event = json.loads(raw)
+        except json.JSONDecodeError:
+            return
+        if not isinstance(event, dict):
+            return
+
+        etype = event.get("type", "")
+        data = event.get("data") or {}
+
+        if etype == "result":
+            self._resolve_result(data)
+            return
+
+        if etype == "ready":
+            self._handle_ready(data)
+            return
+
+        if etype == "back":
+            handled = False
+            if self._router is not None:
+                try:
+                    handled = self._router.handle_back()
+                except Exception as exc:
+                    self._report_error(exc)
+            self._send(
+                self._bridge.encode_command("back_result", handled=bool(handled))
+            )
+            return
+
+        if etype == "deep_link":
+            self._handle_deep_link(data)
+            return
+
+        if etype == "push":
+            for cb in list(self._push_handlers):
+                try:
+                    cb(dict(data))
+                except Exception as exc:
+                    self._report_error(exc)
+            return
+
+        if etype == "sensor":
+            try:
+                self._page.sensors.dispatch(dict(data))
+            except Exception as exc:
+                self._report_error(exc)
+            return
+
+        if etype == "job":
+            # WorkManager asking Python to run a registered background job.
+            name = data.get("name", "")
+            try:
+                value = self._page.background.run_job(name, data.get("inputs"))
+                ok, payload = True, value
+            except Exception as exc:
+                self._report_error(exc)
+                ok, payload = False, str(exc)
+            self._send(self._bridge.encode_command(
+                "job_result", name=name, ok=ok,
+                value=payload if ok else None,
+                error=None if ok else payload))
+            return
+
+        if etype == "lifecycle":
+            state = data.get("state", "")
+            for cb in self._lifecycle_handlers.get(state, []):
+                try:
+                    cb(data)
+                except Exception as exc:
+                    self._report_error(exc)
+            return
+
+        try:
+            self._event_dispatcher.dispatch(raw)
+        except Exception as exc:
+            self._report_error(exc)
+
+    def _handle_ready(self, d: dict) -> None:
+        from pydrud.core.responsive import MediaQuery as _MQ
+        from pydrud.core.responsive import Responsive as _R
+
+        width = d.get("width", 360)
+        height = d.get("height", 640)
+        density = d.get("density", 2.0)
+        _R.init(width_dp=width, height_dp=height, density=density)
+        _MQ.init(
+            width_dp=width,
+            height_dp=height,
+            density=density,
+            status_bar_height=d.get("status_bar_height", 24),
+            text_scale=d.get("text_scale", 1.0),
+            navigation_bar_height=d.get("navigation_bar_height", 0),
+        )
+        # Device metrics may change the layout — re-render with real sizes.
+        self.render()
 
 
 class _Page:
@@ -409,93 +799,420 @@ class _Page:
     def __init__(self, app: App):
         self._app = app
         self.controls: list[Widget] = []
-        self.floating: list[Widget] = []  # Widgets rendered as overlay (e.g. FAB)
+        self.floating: list[Widget] = []  # Overlay widgets (e.g. FAB)
         self.title: str = app.title
         self.bgcolor: Optional[str] = None
         self.scroll: Optional[str] = None
         self.padding: Optional[Any] = None
-        self._built = False  # track if first build happened
+        self._built = False
+        self.theme_mode: str = "light"
+        self._services: Optional[Any] = None
+        self._http: Optional[Any] = None
+        self._cache: Optional[Any] = None
+        self._databases: dict = {}
+        self._app_dir: Optional[str] = None
+        self._overlays: dict[str, Widget] = {}
 
-    def add(self, *controls: Widget):
-        self.controls.extend(controls)
+    # ── content ───────────────────────────────────────────────────────────
 
-    def add_floating(self, widget: Widget):
-        """Add a widget that renders as an overlay (e.g. FAB).
+    def add(self, *controls: Widget) -> "_Page":
+        for control in controls:
+            if not isinstance(control, Widget):
+                raise TypeError(
+                    f"page.add() expects Widget instances, got {type(control).__name__}"
+                )
+            self.controls.append(control)
+        return self
 
-        Floating widgets become direct children of the root FrameLayout,
-        enabling absolute positioning via FrameLayout gravity.
-        """
+    def add_floating(self, widget: Widget) -> "_Page":
+        """Add an overlay widget (rendered above the page content)."""
+        if not isinstance(widget, Widget):
+            raise TypeError("page.add_floating() expects a Widget")
         self.floating.append(widget)
+        return self
 
-    def clear(self):
+    def clear(self) -> None:
         self.controls.clear()
         self.floating.clear()
 
-    def remove(self, key: str):
+    def remove(self, key: str) -> None:
         self.controls = [c for c in self.controls if c.key != key]
+        self.floating = [c for c in self.floating if c.key != key]
 
-    def update(self):
-        self._app.update()
+    def find(self, key: str) -> Optional[Widget]:
+        """Find a widget anywhere in the current page tree."""
+        for control in self.controls + self.floating:
+            found = control.find_by_key(key)
+            if found is not None:
+                return found
+        return None
+
+    # ── native services ───────────────────────────────────────────────────
+
+    @property
+    def services(self):
+        """All native services (dialogs, storage, permissions, …)."""
+        if self._services is None:
+            from pydrud.services.native import Services
+
+            self._services = Services(self._app.invoke)
+        return self._services
+
+    @property
+    def dialog(self):
+        """Alerts, confirms, prompts, sheets and pickers."""
+        return self.services.dialog
+
+    @property
+    def storage(self):
+        """Persistent key/value storage (SharedPreferences)."""
+        return self.services.storage
+
+    @property
+    def clipboard(self):
+        return self.services.clipboard
+
+    @property
+    def share(self):
+        return self.services.share
+
+    @property
+    def permissions(self):
+        return self.services.permissions
+
+    @property
+    def notifications(self):
+        return self.services.notifications
+
+    @property
+    def location(self):
+        return self.services.location
+
+    @property
+    def device(self):
+        return self.services.device
+
+    @property
+    def files(self):
+        return self.services.files
+
+    @property
+    def haptics(self):
+        return self.services.haptics
+
+    @property
+    def secure(self):
+        """Keystore-backed encrypted key/value storage."""
+        return self.services.secure
+
+    @property
+    def background(self):
+        """WorkManager jobs and foreground services."""
+        return self.services.background
+
+    @property
+    def push(self):
+        """Firebase Cloud Messaging tokens and topics."""
+        return self.services.push
+
+    @property
+    def shortcuts(self):
+        """Launcher shortcuts and home-screen widgets."""
+        return self.services.shortcuts
+
+    @property
+    def camera(self):
+        """Live camera control (pairs with the CameraPreview widget)."""
+        return self.services.camera
+
+    @property
+    def sensors(self):
+        """Accelerometer, gyroscope, light, proximity, step counter, …"""
+        return self.services.sensors
+
+    @property
+    def bluetooth(self):
+        """Bluetooth Low Energy scanning and GATT access."""
+        return self.services.bluetooth
+
+    @property
+    def nfc(self):
+        """NFC tag reading and NDEF writing."""
+        return self.services.nfc
+
+    @property
+    def biometrics(self):
+        """Fingerprint / face authentication."""
+        return self.services.biometrics
+
+    @property
+    def audio(self):
+        """Recording, playback, text-to-speech and speech-to-text."""
+        return self.services.audio
+
+    def database(self, name: str = "app.db", **kwargs):
+        """Open (once) a SQLite database inside the app's private storage.
+
+        ``page.database()`` works on the device *and* on a laptop: when there
+        is no bridge, the file lands in ``.pydrud/`` next to the project.
+        """
+        from pydrud.data.database import Database
+
+        if name in self._databases:
+            return self._databases[name]
+        path = name if os.path.isabs(name) else os.path.join(
+            self._storage_dir("databases"), name)
+        database = Database(path, **kwargs)
+        self._databases[name] = database
+        return database
+
+    @property
+    def cache(self):
+        """A persistent TTL + LRU cache in the app's cache directory."""
+        if self._cache is None:
+            from pydrud.data.cache import Cache
+
+            self._cache = Cache(self._storage_dir("cache"))
+        return self._cache
+
+    def _storage_dir(self, kind: str) -> str:
+        """Resolve a writable directory, on-device or on a dev machine."""
+        base = self._app_dir
+        if base is None:
+            base = os.environ.get("PYDRUD_APP_DIR") or os.path.join(
+                getattr(self._app, "_project_root", ".") or ".", ".pydrud")
+            self._app_dir = base
+        path = os.path.join(base, kind)
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    @property
+    def http(self):
+        """A non-blocking HTTP client bound to this page's task runner."""
+        if self._http is None:
+            from pydrud.services.http import Http
+
+            self._http = Http(self._app.run_task)
+        return self._http
+
+    def invoke(self, cmd: str, **data):
+        """Low-level escape hatch: call any native command and await a Result."""
+        return self._app.invoke(cmd, **data)
+
+    # ── concurrency ───────────────────────────────────────────────────────
+
+    def run_task(self, fn: Callable, *args, **kwargs):
+        """Run slow work off the UI thread (``async def`` is supported)."""
+        return self._app.run_task(fn, *args, **kwargs)
+
+    def run_on_ui(self, fn: Callable, *args, **kwargs) -> None:
+        """Hop back onto the UI thread before touching widgets."""
+        self._app.run_on_ui(fn, *args, **kwargs)
+
+    def after(self, delay: float, fn: Callable, *args, **kwargs):
+        """Run *fn* once after *delay* seconds."""
+        return self._app.tasks.after(delay, fn, *args, **kwargs)
+
+    def every(self, interval: float, fn: Callable, *args, **kwargs):
+        """Run *fn* every *interval* seconds until the timer is cancelled."""
+        return self._app.tasks.every(interval, fn, *args, **kwargs)
+
+    # ── app commands ──────────────────────────────────────────────────────
+
+    def update(self, *controls: Widget) -> None:
+        """Refresh the UI.
+
+        ``page.update()`` re-runs your builder and diffs the whole page;
+        ``page.update(widget)`` pushes just that widget's subtree, which is
+        what you want after mutating a control you kept a reference to.
+        """
+        if controls:
+            self._app.update_widget(*controls)
+        else:
+            self._app.update()
+
+    def toast(self, message: str, *, long: bool = False) -> None:
+        """Show an Android toast."""
+        self._send("toast", message=str(message), long=bool(long))
+
+    def snack_bar(self, message: str, *, action: str = "", long: bool = True) -> None:
+        """Show a Material snackbar at the bottom of the screen."""
+        self._send("snackbar", message=str(message), action=action, long=bool(long))
+
+    def set_title(self, title: str) -> None:
+        self.title = title
+        self._send("set_title", title=title)
+
+    def vibrate(self, duration_ms: int = 40) -> None:
+        """Short haptic feedback (requires the VIBRATE permission)."""
+        self._send("vibrate", duration=int(duration_ms))
+
+    def close(self) -> None:
+        """Finish the Android activity (closes the app)."""
+        self._send("finish_activity")
 
     def set_system_ui(
         self,
         *,
         status_bar_color: str | None = None,
         icon_brightness: str | None = None,
-    ):
-        """Send system UI styling command to Android.
+        navigation_bar_color: str | None = None,
+    ) -> None:
+        """Set status/navigation bar colour and icon brightness.
 
         Args:
-            status_bar_color: Hex color string, e.g. ``"#FF1A73E8"``.
-            icon_brightness: ``"light"`` (white icons) or ``"dark"``
-                             (dark icons, for light status bars).
+            status_bar_color: Hex colour string, e.g. ``"#FF1A73E8"``.
+            icon_brightness: ``"light"`` (white icons) or ``"dark"``.
+            navigation_bar_color: Hex colour for the nav bar.
         """
-        cmd = {"cmd": "set_system_ui"}
+        if icon_brightness not in (None, "light", "dark"):
+            raise ValueError("icon_brightness must be 'light' or 'dark'")
+        extras: dict = {}
         if status_bar_color:
-            cmd["status_bar_color"] = status_bar_color
+            extras["status_bar_color"] = status_bar_color
         if icon_brightness:
-            cmd["icon_brightness"] = icon_brightness
-        self._app._send(self._app._bridge.encode_command(**cmd))
+            extras["icon_brightness"] = icon_brightness
+        if navigation_bar_color:
+            extras["navigation_bar_color"] = navigation_bar_color
+        self._send("set_system_ui", **extras)
+
+    # ── UI commands ───────────────────────────────────────────────────────
+
+    def open_drawer(self, side: str = "start") -> None:
+        """Open the navigation drawer declared on the Scaffold."""
+        if side not in ("start", "end"):
+            raise ValueError("side must be 'start' or 'end'")
+        self._send("drawer", open=True, side=side)
+
+    def close_drawer(self, side: str = "start") -> None:
+        self._send("drawer", open=False, side=side)
+
+    def end_refresh(self) -> None:
+        """Stop the pull-to-refresh spinner."""
+        self._send("end_refresh")
+
+    def scroll_to(self, key: str, *, animate: bool = True) -> None:
+        """Scroll the nearest scrollable ancestor to the widget *key*."""
+        self._send("scroll_to", key=str(key), animate=bool(animate))
+
+    def focus(self, key: str, *, keyboard: bool = True) -> None:
+        """Move focus to an input and optionally raise the soft keyboard."""
+        self._send("focus", key=str(key), keyboard=bool(keyboard))
+
+    def hide_keyboard(self) -> None:
+        self._send("keyboard", show=False)
+
+    def show_keyboard(self) -> None:
+        self._send("keyboard", show=True)
+
+    def keep_awake(self, enabled: bool = True) -> None:
+        """Keep the screen on (video players, recipes, navigation)."""
+        self._send("keep_awake", enabled=bool(enabled))
+
+    def set_orientation(self, orientation: str) -> None:
+        """Lock the orientation: ``portrait``, ``landscape`` or ``auto``."""
+        if orientation not in ("portrait", "landscape", "auto"):
+            raise ValueError("orientation must be portrait/landscape/auto")
+        self._send("orientation", value=orientation)
+
+    def fullscreen(self, enabled: bool = True) -> None:
+        """Immersive mode: hide the status and navigation bars."""
+        self._send("fullscreen", enabled=bool(enabled))
+
+    def route_transition(self, transition: str = "fade",
+                         *, duration: int = 220) -> None:
+        """Animate the *next* screen swap (used by Router transitions)."""
+        from pydrud.navigation import TRANSITIONS
+
+        if transition not in TRANSITIONS:
+            raise ValueError(f"transition must be one of {TRANSITIONS}")
+        self._send("route_transition", transition=transition,
+                   duration=int(duration))
+
+    def animation(self, duration: float = 0.3, *, curve: str = "ease_in_out",
+                  fps: int = 60):
+        """Create an :class:`AnimationController` driven by this page.
+
+        Ticks run on the task runner and listeners are marshalled back onto
+        the UI thread, so a listener may safely mutate widgets.
+        """
+        from pydrud.core.controllers import AnimationController
+
+        return AnimationController(duration, curve=curve, fps=fps,
+                                   runner=self._app.tasks,
+                                   on_ui=self._app.run_on_ui)
+
+    def set_theme_mode(self, mode: str) -> None:
+        """Switch between ``"light"``, ``"dark"`` and ``"system"``."""
+        if mode not in ("light", "dark", "system"):
+            raise ValueError("theme mode must be light/dark/system")
+        from pydrud.widgets.theme import Theme
+
+        self.theme_mode = mode
+        if mode == "dark":
+            Theme.dark()
+        elif mode == "light":
+            Theme.light()
+        self._send("theme_mode", mode=mode)
+
+    def _send(self, cmd: str, **data) -> None:
+        self._app._send(self._app._bridge.encode_command(cmd, **data))
+
+    # ── build ─────────────────────────────────────────────────────────────
 
     def build(self) -> Widget:
-        from pydrud.widgets.layout import Container, Column
+        from pydrud.widgets.layout import Column, Container, Stack
+        from pydrud.widgets.styling import EdgeInsets
 
-        style = {}
+        style: dict = {"width": "match", "height": "match"}
         if self.bgcolor:
             style["bg"] = self.bgcolor
-        if self.scroll:
-            style["scroll"] = True
         if self.padding is not None:
-            from pydrud.widgets.styling import EdgeInsets
-            if isinstance(self.padding, (int, float)):
-                padding = EdgeInsets.all(self.padding)
-            else:
-                padding = self.padding
+            padding = (
+                EdgeInsets.all(self.padding)
+                if isinstance(self.padding, (int, float))
+                else self.padding
+            )
             style["padding"] = padding.to_dict()
 
         self._built = True
-        # Build the root Container with the main Column as first child.
-        # NOTE: Column must have height="match" because parent is a FrameLayout
-        # (from Container), which ignores expand/weight. Without explicit
-        # height="match", the Column gets WRAP_CONTENT height = 0 for children.
-        root = Container(
-            key="_page",
-            style={**style, "width": "match", "height": "match"},
+
+        content = Column(
+            key="_page_content",
             expand=1,
-            child=Column(
-                expand=1,
-                style={"height": "match"},
-                children=list(self.controls),
-            ),
+            style={"width": "match", "height": "match", "scroll": bool(self.scroll)},
+            children=list(self.controls),
         )
-        # Add floating widgets as direct siblings of the Column inside
-        # the root FrameLayout (for absolute positioning).
-        for f in self.floating:
-            root.children.append(f)
-        return root
+
+        # A Stack keeps floating widgets (FABs, overlays) above the content.
+        return Stack(
+            key="_page",
+            style=style,
+            expand=1,
+            children=[content, *self.floating],
+        )
 
 
-# ── Helper: find user modules for hot restart ─────────────────────────────────
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+def _module_name_for(filepath: str, project_root: str) -> str:
+    """Map ``<root>/src/app/main.py`` to the module name ``app.main``."""
+    try:
+        rel = os.path.relpath(os.path.abspath(filepath), os.path.abspath(project_root))
+    except ValueError:  # pragma: no cover — different drives on Windows
+        return ""
+    if rel.startswith(".."):
+        return ""
+    # Sources live under src/, which is the import root on the device.
+    rel = rel.replace(os.sep, "/")
+    if rel.startswith("src/"):
+        rel = rel[len("src/"):]
+    rel = rel[:-3] if rel.endswith(".py") else rel
+    parts = [p for p in rel.split("/") if p]
+    if parts and parts[-1] == "__init__":
+        parts.pop()
+    return ".".join(parts)
 
 
 def _find_user_modules(project_root: str) -> list[str]:
@@ -504,11 +1221,11 @@ def _find_user_modules(project_root: str) -> list[str]:
     modules: list[str] = []
     if not os.path.isdir(src_dir):
         return modules
-    for root, _dirs, files in os.walk(src_dir):
+    for root, dirs, files in os.walk(src_dir):
+        dirs[:] = [d for d in dirs if d not in ("__pycache__", "pydrud")]
         for fname in files:
-            if fname.endswith(".py") and fname != "__init__.py":
-                rel = os.path.relpath(os.path.join(root, fname), src_dir)
-                mod = rel.replace(os.sep, ".").replace(".py", "")
+            if fname.endswith(".py"):
+                mod = _module_name_for(os.path.join(root, fname), project_root)
                 if mod:
                     modules.append(mod)
     return modules
@@ -520,11 +1237,10 @@ def _find_user_modules(project_root: str) -> list[str]:
 def start_app():
     """Entry point called by MainActivity after the bridge server is ready.
 
-    This function is loaded by Chaquopy's Python runtime and invoked from
-    Java via::
+    Invoked from Java via::
 
         Python.getInstance().getModule("app.main").callAttr("start_app")
     """
     from app.main import main
-    app = App(target=main)
-    app.run()
+
+    App(target=main).run()

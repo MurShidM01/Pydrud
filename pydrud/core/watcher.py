@@ -25,15 +25,18 @@ except ImportError:
 
 _EXTENSIONS = (".py",)
 
+#: Directories that never need watching.
+_IGNORED_DIRS = {"__pycache__", ".git", ".venv", "venv", "build", "dist", ".idea"}
+
 
 class _ReloadHandler(FileSystemEventHandler if _HAS_WATCHDOG else object):
     """Watchdog event handler that triggers on .py file changes."""
 
-    def __init__(self, callback: Callable[[str], None]):
+    def __init__(self, callback: Callable[[str], None], debounce: float = 0.4):
         super().__init__()
         self.callback = callback
         self._debounce: dict[str, float] = {}
-        self._debounce_sec = 0.5
+        self._debounce_sec = debounce
 
     def on_modified(self, event):
         if not event.is_directory and event.src_path.endswith(_EXTENSIONS):
@@ -41,7 +44,10 @@ class _ReloadHandler(FileSystemEventHandler if _HAS_WATCHDOG else object):
             last = self._debounce.get(event.src_path, 0)
             if now - last > self._debounce_sec:
                 self._debounce[event.src_path] = now
-                self.callback(event.src_path)
+                try:
+                    self.callback(event.src_path)
+                except Exception as exc:
+                    print(f"[Pydrud] Watcher callback error: {exc}")
 
 
 class FileWatcher:
@@ -59,6 +65,7 @@ class FileWatcher:
         callback: Callable[[str], None],
         *,
         poll_interval: float = 0.5,
+        debounce: float = 0.4,
     ):
         self.paths = [os.path.abspath(p) for p in paths]
         self.callback = callback
@@ -67,6 +74,8 @@ class FileWatcher:
         self._thread: Optional[threading.Thread] = None
         self._running = False
         self._mtimes: dict[str, float] = {}
+        self._last_fired: dict[str, float] = {}
+        self.debounce = debounce
 
     def start(self) -> None:
         """Start watching for file changes."""
@@ -79,7 +88,7 @@ class FileWatcher:
     def _start_watchdog(self) -> None:
         """Start watchdog-based file watching."""
         self._observer = Observer()
-        handler = _ReloadHandler(self.callback)
+        handler = _ReloadHandler(self.callback, debounce=self.debounce)
         for path in self.paths:
             if os.path.isdir(path):
                 self._observer.schedule(handler, path, recursive=True)
@@ -104,7 +113,8 @@ class FileWatcher:
     def _walk_and_check(self, directory: str) -> None:
         """Walk a directory and check for modified .py files."""
         try:
-            for root, _dirs, files in os.walk(directory):
+            for root, dirs, files in os.walk(directory):
+                dirs[:] = [d for d in dirs if d not in _IGNORED_DIRS]
                 for fname in files:
                     if not fname.endswith(_EXTENSIONS):
                         continue
@@ -115,7 +125,13 @@ class FileWatcher:
                         continue
                     last = self._mtimes.get(fpath, 0)
                     if last > 0 and mtime > last:
-                        self.callback(fpath)
+                        now = time.time()
+                        if now - self._last_fired.get(fpath, 0) > self.debounce:
+                            self._last_fired[fpath] = now
+                            try:
+                                self.callback(fpath)
+                            except Exception as exc:
+                                print(f"[Pydrud] Watcher callback error: {exc}")
                     self._mtimes[fpath] = mtime
         except Exception:
             pass
@@ -123,6 +139,9 @@ class FileWatcher:
     def stop(self) -> None:
         """Stop watching."""
         self._running = False
+        if self._thread is not None:
+            self._thread.join(timeout=self.poll_interval * 3)
+            self._thread = None
         if self._observer is not None:
             self._observer.stop()
             self._observer.join(timeout=2)

@@ -1,0 +1,697 @@
+package {{ package }};
+
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.app.ProgressDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.net.ConnectivityManager;
+import android.net.NetworkCapabilities;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
+import android.util.Log;
+import android.widget.EditText;
+
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * NativeServices — executes the request/response bridge commands that back
+ * {@code page.dialog}, {@code page.storage}, {@code page.clipboard},
+ * {@code page.share}, {@code page.permissions}, {@code page.files},
+ * {@code page.device} and friends.
+ *
+ * Every command carries a {@code request_id}; this class guarantees exactly
+ * one {@code result} event per request, success or failure, so the Python
+ * {@code Result} future always settles instead of hanging.
+ */
+public class NativeServices {
+
+    private static final String TAG = "PydrudServices";
+    private static final String PREFS = "pydrud_prefs";
+
+    private final {{ app_name }}Activity activity;
+    private final BridgeService bridge;
+
+    /** request_id of in-flight activity results, keyed by request code. */
+    private final Map<Integer, String> pendingActivity = new HashMap<>();
+    private final Map<Integer, String> pendingPermission = new HashMap<>();
+    private int requestCode = 9000;
+    private ProgressDialog progressDialog;
+
+    public NativeServices({{ app_name }}Activity activity, BridgeService bridge) {
+        this.activity = activity;
+        this.bridge = bridge;
+    }
+
+    /**
+     * Handle one command. Returns true when the command was recognised.
+     */
+    public boolean handle(final String cmd, final JSONObject msg) {
+        final String requestId = msg.optString("request_id", "");
+        try {
+            switch (cmd) {
+                case "dialog":           showDialog(requestId, msg); return true;
+                case "bottom_sheet":     showBottomSheet(requestId, msg); return true;
+                case "date_picker":      showDatePicker(requestId, msg); return true;
+                case "time_picker":      showTimePicker(requestId, msg); return true;
+                case "progress_dialog":  showProgress(requestId, msg); return true;
+                case "prefs_get":        prefsGet(requestId, msg); return true;
+                case "prefs_set":        prefsSet(requestId, msg); return true;
+                case "prefs_remove":     prefsRemove(requestId, msg); return true;
+                case "prefs_keys":       prefsKeys(requestId); return true;
+                case "prefs_clear":      prefsClear(requestId); return true;
+                case "clipboard_set":    clipboardSet(requestId, msg); return true;
+                case "clipboard_get":    clipboardGet(requestId); return true;
+                case "share":            share(requestId, msg); return true;
+                case "open_url":         openUrl(requestId, msg); return true;
+                case "open_app_settings": openAppSettings(requestId); return true;
+                case "permission_check": permissionCheck(requestId, msg); return true;
+                case "permission_request": permissionRequest(requestId, msg); return true;
+                case "pick_file":        pickFile(requestId, msg); return true;
+                case "pick_image":       pickImage(requestId, msg); return true;
+                case "save_file":        saveFile(requestId, msg); return true;
+                case "read_file":        readFile(requestId, msg); return true;
+                case "app_dir":          appDir(requestId, msg); return true;
+                case "device_info":      deviceInfo(requestId); return true;
+                case "battery_info":     batteryInfo(requestId); return true;
+                case "network_info":     networkInfo(requestId); return true;
+                case "notify":           notify(requestId, msg); return true;
+                case "notify_cancel":    notifyCancel(requestId, msg); return true;
+                case "location_get":     locationGet(requestId, msg); return true;
+                default:
+                    return false;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "command " + cmd + " failed", e);
+            fail(requestId, e.getMessage() == null ? "error" : e.getMessage());
+            return true;
+        }
+    }
+
+    // ── replies ──────────────────────────────────────────────────────────
+
+    private void reply(String requestId, Object value) {
+        if (requestId == null || requestId.isEmpty() || bridge == null) return;
+        JSONObject data = new JSONObject();
+        try {
+            data.put("request_id", requestId);
+            data.put("ok", true);
+            data.put("value", value == null ? JSONObject.NULL : value);
+        } catch (Exception ignored) {}
+        bridge.sendEvent("result", "", data);
+    }
+
+    private void fail(String requestId, String error) {
+        if (requestId == null || requestId.isEmpty() || bridge == null) return;
+        JSONObject data = new JSONObject();
+        try {
+            data.put("request_id", requestId);
+            data.put("ok", false);
+            data.put("error", error);
+        } catch (Exception ignored) {}
+        bridge.sendEvent("result", "", data);
+    }
+
+    // ── dialogs ──────────────────────────────────────────────────────────
+
+    private void showDialog(final String requestId, final JSONObject msg) {
+        final String kind = msg.optString("kind", "alert");
+        activity.runOnUiThread(new Runnable() {
+            @Override public void run() {
+                AlertDialog.Builder builder = new AlertDialog.Builder(activity);
+                String title = msg.optString("title", "");
+                if (!title.isEmpty()) builder.setTitle(title);
+
+                if ("prompt".equals(kind)) {
+                    final EditText input = new EditText(activity);
+                    input.setText(msg.optString("value", ""));
+                    input.setHint(msg.optString("hint", ""));
+                    if (msg.optBoolean("obscure", false)) {
+                        input.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                            | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+                    }
+                    builder.setMessage(msg.optString("message", ""));
+                    builder.setView(input);
+                    builder.setPositiveButton(msg.optString("ok", "OK"),
+                        (dialog, which) -> reply(requestId, input.getText().toString()));
+                    builder.setNegativeButton(msg.optString("cancel", "Cancel"),
+                        (dialog, which) -> reply(requestId, null));
+                } else if ("choose".equals(kind)) {
+                    JSONArray options = msg.optJSONArray("options");
+                    final String[] items = toStringArray(options);
+                    if (msg.optBoolean("multi", false)) {
+                        final boolean[] checked = new boolean[items.length];
+                        builder.setMultiChoiceItems(items, checked,
+                            (dialog, which, isChecked) -> checked[which] = isChecked);
+                        builder.setPositiveButton("OK", (dialog, which) -> {
+                            JSONArray selected = new JSONArray();
+                            for (int i = 0; i < checked.length; i++) {
+                                if (checked[i]) selected.put(i);
+                            }
+                            reply(requestId, selected);
+                        });
+                        builder.setNegativeButton("Cancel",
+                            (dialog, which) -> reply(requestId, null));
+                    } else {
+                        builder.setItems(items,
+                            (dialog, which) -> reply(requestId, which));
+                        builder.setOnCancelListener(
+                            dialog -> reply(requestId, -1));
+                    }
+                } else if ("confirm".equals(kind)) {
+                    builder.setMessage(msg.optString("message", ""));
+                    builder.setPositiveButton(msg.optString("ok", "OK"),
+                        (dialog, which) -> reply(requestId, true));
+                    builder.setNegativeButton(msg.optString("cancel", "Cancel"),
+                        (dialog, which) -> reply(requestId, false));
+                    builder.setOnCancelListener(dialog -> reply(requestId, false));
+                } else {
+                    builder.setMessage(msg.optString("message", ""));
+                    builder.setPositiveButton(msg.optString("ok", "OK"),
+                        (dialog, which) -> reply(requestId, true));
+                    builder.setOnCancelListener(dialog -> reply(requestId, true));
+                }
+                builder.show();
+            }
+        });
+    }
+
+    private void showBottomSheet(final String requestId, final JSONObject msg) {
+        activity.runOnUiThread(new Runnable() {
+            @Override public void run() {
+                final String[] items = toStringArray(msg.optJSONArray("options"));
+                com.google.android.material.bottomsheet.BottomSheetDialog sheet =
+                    new com.google.android.material.bottomsheet.BottomSheetDialog(activity);
+                android.widget.LinearLayout column =
+                    new android.widget.LinearLayout(activity);
+                column.setOrientation(android.widget.LinearLayout.VERTICAL);
+                int pad = Math.round(16 * activity.getResources()
+                    .getDisplayMetrics().density);
+                column.setPadding(pad, pad, pad, pad);
+
+                String title = msg.optString("title", "");
+                if (!title.isEmpty()) {
+                    android.widget.TextView header =
+                        new android.widget.TextView(activity);
+                    header.setText(title);
+                    header.setTextSize(18);
+                    header.setPadding(0, 0, 0, pad);
+                    column.addView(header);
+                }
+                for (int i = 0; i < items.length; i++) {
+                    final int index = i;
+                    android.widget.TextView row =
+                        new android.widget.TextView(activity);
+                    row.setText(items[i]);
+                    row.setTextSize(16);
+                    row.setPadding(0, pad / 2, 0, pad / 2);
+                    row.setOnClickListener(v -> {
+                        reply(requestId, index);
+                        sheet.dismiss();
+                    });
+                    column.addView(row);
+                }
+                sheet.setContentView(column);
+                sheet.setOnCancelListener(dialog -> reply(requestId, -1));
+                sheet.show();
+            }
+        });
+    }
+
+    private void showDatePicker(final String requestId, final JSONObject msg) {
+        activity.runOnUiThread(new Runnable() {
+            @Override public void run() {
+                java.util.Calendar now = java.util.Calendar.getInstance();
+                String initial = msg.optString("initial", "");
+                if (initial.length() == 10) {
+                    try {
+                        now.set(Integer.parseInt(initial.substring(0, 4)),
+                                Integer.parseInt(initial.substring(5, 7)) - 1,
+                                Integer.parseInt(initial.substring(8, 10)));
+                    } catch (NumberFormatException ignored) {}
+                }
+                android.app.DatePickerDialog dialog = new android.app.DatePickerDialog(
+                    activity,
+                    (view, year, month, day) -> reply(requestId,
+                        String.format(java.util.Locale.US, "%04d-%02d-%02d",
+                                      year, month + 1, day)),
+                    now.get(java.util.Calendar.YEAR),
+                    now.get(java.util.Calendar.MONTH),
+                    now.get(java.util.Calendar.DAY_OF_MONTH));
+                dialog.setOnCancelListener(d -> reply(requestId, null));
+                dialog.show();
+            }
+        });
+    }
+
+    private void showTimePicker(final String requestId, final JSONObject msg) {
+        activity.runOnUiThread(new Runnable() {
+            @Override public void run() {
+                java.util.Calendar now = java.util.Calendar.getInstance();
+                android.app.TimePickerDialog dialog = new android.app.TimePickerDialog(
+                    activity,
+                    (view, hour, minute) -> reply(requestId,
+                        String.format(java.util.Locale.US, "%02d:%02d", hour, minute)),
+                    now.get(java.util.Calendar.HOUR_OF_DAY),
+                    now.get(java.util.Calendar.MINUTE),
+                    msg.optBoolean("use24h", true));
+                dialog.setOnCancelListener(d -> reply(requestId, null));
+                dialog.show();
+            }
+        });
+    }
+
+    @SuppressWarnings("deprecation")
+    private void showProgress(final String requestId, final JSONObject msg) {
+        activity.runOnUiThread(new Runnable() {
+            @Override public void run() {
+                if (msg.optBoolean("show", true)) {
+                    if (progressDialog == null) {
+                        progressDialog = new ProgressDialog(activity);
+                    }
+                    progressDialog.setMessage(msg.optString("message", "Please wait…"));
+                    progressDialog.setCancelable(msg.optBoolean("cancellable", false));
+                    progressDialog.show();
+                } else if (progressDialog != null) {
+                    progressDialog.dismiss();
+                }
+                reply(requestId, true);
+            }
+        });
+    }
+
+    // ── preferences ──────────────────────────────────────────────────────
+
+    private SharedPreferences prefs() {
+        return activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    private void prefsGet(String requestId, JSONObject msg) {
+        String key = msg.optString("key", "");
+        String raw = prefs().getString(key, null);
+        if (raw == null) {
+            reply(requestId, msg.opt("default"));
+            return;
+        }
+        reply(requestId, decode(raw));
+    }
+
+    private void prefsSet(String requestId, JSONObject msg) {
+        String key = msg.optString("key", "");
+        Object value = msg.opt("value");
+        prefs().edit().putString(key, encode(value)).apply();
+        reply(requestId, true);
+    }
+
+    private void prefsRemove(String requestId, JSONObject msg) {
+        prefs().edit().remove(msg.optString("key", "")).apply();
+        reply(requestId, true);
+    }
+
+    private void prefsKeys(String requestId) {
+        JSONArray keys = new JSONArray();
+        for (String key : prefs().getAll().keySet()) keys.put(key);
+        reply(requestId, keys);
+    }
+
+    private void prefsClear(String requestId) {
+        prefs().edit().clear().apply();
+        reply(requestId, true);
+    }
+
+    /** Values round-trip as JSON so lists and dicts survive storage. */
+    private String encode(Object value) {
+        try {
+            JSONObject wrapper = new JSONObject();
+            wrapper.put("v", value == null ? JSONObject.NULL : value);
+            return wrapper.toString();
+        } catch (Exception e) {
+            return String.valueOf(value);
+        }
+    }
+
+    private Object decode(String raw) {
+        try {
+            return new JSONObject(raw).opt("v");
+        } catch (Exception e) {
+            return raw;
+        }
+    }
+
+    // ── clipboard / share / intents ──────────────────────────────────────
+
+    private void clipboardSet(String requestId, JSONObject msg) {
+        ClipboardManager manager =
+            (ClipboardManager) activity.getSystemService(Context.CLIPBOARD_SERVICE);
+        manager.setPrimaryClip(ClipData.newPlainText(
+            msg.optString("label", "pydrud"), msg.optString("text", "")));
+        reply(requestId, true);
+    }
+
+    private void clipboardGet(String requestId) {
+        ClipboardManager manager =
+            (ClipboardManager) activity.getSystemService(Context.CLIPBOARD_SERVICE);
+        ClipData clip = manager.getPrimaryClip();
+        if (clip == null || clip.getItemCount() == 0) {
+            reply(requestId, "");
+            return;
+        }
+        CharSequence text = clip.getItemAt(0).coerceToText(activity);
+        reply(requestId, text == null ? "" : text.toString());
+    }
+
+    private void share(String requestId, JSONObject msg) {
+        Intent intent = new Intent(Intent.ACTION_SEND);
+        if ("file".equals(msg.optString("kind", "text"))) {
+            intent.setType(msg.optString("mime", "*/*"));
+            intent.putExtra(Intent.EXTRA_STREAM,
+                Uri.parse("file://" + msg.optString("path", "")));
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } else {
+            intent.setType("text/plain");
+            intent.putExtra(Intent.EXTRA_TEXT, msg.optString("text", ""));
+            String subject = msg.optString("subject", "");
+            if (!subject.isEmpty()) intent.putExtra(Intent.EXTRA_SUBJECT, subject);
+        }
+        activity.startActivity(Intent.createChooser(intent,
+            msg.optString("title", "Share")));
+        reply(requestId, true);
+    }
+
+    private void openUrl(String requestId, JSONObject msg) {
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW,
+                Uri.parse(msg.optString("url", "")));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            activity.startActivity(intent);
+            reply(requestId, true);
+        } catch (Exception e) {
+            fail(requestId, "no app can open this URL");
+        }
+    }
+
+    private void openAppSettings(String requestId) {
+        Intent intent = new Intent(
+            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.fromParts("package", activity.getPackageName(), null));
+        activity.startActivity(intent);
+        reply(requestId, true);
+    }
+
+    // ── permissions ──────────────────────────────────────────────────────
+
+    private void permissionCheck(String requestId, JSONObject msg) {
+        String permission = msg.optString("permission", "");
+        boolean granted = ContextCompat.checkSelfPermission(activity, permission)
+            == PackageManager.PERMISSION_GRANTED;
+        reply(requestId, granted);
+    }
+
+    private void permissionRequest(String requestId, JSONObject msg) {
+        JSONArray array = msg.optJSONArray("permissions");
+        String[] permissions = toStringArray(array);
+        if (permissions.length == 0) {
+            fail(requestId, "no permissions requested");
+            return;
+        }
+        int code = ++requestCode;
+        pendingPermission.put(code, requestId);
+        ActivityCompat.requestPermissions(activity, permissions, code);
+    }
+
+    /** Called by the Activity from onRequestPermissionsResult. */
+    public boolean onPermissionResult(int code, String[] permissions, int[] results) {
+        String requestId = pendingPermission.remove(code);
+        if (requestId == null) return false;
+        JSONObject value = new JSONObject();
+        try {
+            for (int i = 0; i < permissions.length; i++) {
+                value.put(permissions[i],
+                    i < results.length && results[i] == PackageManager.PERMISSION_GRANTED);
+            }
+        } catch (Exception ignored) {}
+        reply(requestId, value);
+        return true;
+    }
+
+    // ── files ────────────────────────────────────────────────────────────
+
+    private void pickFile(String requestId, JSONObject msg) {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType(msg.optString("mime", "*/*"));
+        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, msg.optBoolean("multiple", false));
+        startForResult(intent, requestId);
+    }
+
+    private void pickImage(String requestId, JSONObject msg) {
+        Intent intent;
+        if (msg.optBoolean("camera", false)) {
+            intent = new Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE);
+        } else {
+            intent = new Intent(Intent.ACTION_PICK,
+                android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,
+                msg.optBoolean("multiple", false));
+        }
+        startForResult(intent, requestId);
+    }
+
+    private void saveFile(String requestId, JSONObject msg) {
+        try {
+            java.io.File file = new java.io.File(activity.getFilesDir(),
+                msg.optString("filename", "file.txt"));
+            java.io.FileWriter writer = new java.io.FileWriter(file);
+            writer.write(msg.optString("content", ""));
+            writer.close();
+            reply(requestId, file.getAbsolutePath());
+        } catch (Exception e) {
+            fail(requestId, "write failed: " + e.getMessage());
+        }
+    }
+
+    private void readFile(String requestId, JSONObject msg) {
+        try {
+            String path = msg.optString("path", "");
+            StringBuilder out = new StringBuilder();
+            java.io.InputStream stream;
+            if (path.startsWith("content://")) {
+                stream = activity.getContentResolver().openInputStream(Uri.parse(path));
+            } else {
+                stream = new java.io.FileInputStream(path);
+            }
+            java.io.BufferedReader reader = new java.io.BufferedReader(
+                new java.io.InputStreamReader(stream));
+            String line;
+            while ((line = reader.readLine()) != null) out.append(line).append('\n');
+            reader.close();
+            reply(requestId, out.toString());
+        } catch (Exception e) {
+            fail(requestId, "read failed: " + e.getMessage());
+        }
+    }
+
+    private void appDir(String requestId, JSONObject msg) {
+        java.io.File dir = "cache".equals(msg.optString("kind", "documents"))
+            ? activity.getCacheDir() : activity.getFilesDir();
+        reply(requestId, dir.getAbsolutePath());
+    }
+
+    private void startForResult(Intent intent, String requestId) {
+        int code = ++requestCode;
+        pendingActivity.put(code, requestId);
+        try {
+            activity.startActivityForResult(intent, code);
+        } catch (Exception e) {
+            pendingActivity.remove(code);
+            fail(requestId, "no app available for this action");
+        }
+    }
+
+    /** Called by the Activity from onActivityResult. */
+    public boolean onActivityResult(int code, int resultCode, Intent data) {
+        String requestId = pendingActivity.remove(code);
+        if (requestId == null) return false;
+        if (resultCode != Activity.RESULT_OK || data == null) {
+            reply(requestId, null);
+            return true;
+        }
+        if (data.getClipData() != null) {
+            JSONArray paths = new JSONArray();
+            ClipData clip = data.getClipData();
+            for (int i = 0; i < clip.getItemCount(); i++) {
+                paths.put(clip.getItemAt(i).getUri().toString());
+            }
+            reply(requestId, paths);
+        } else if (data.getData() != null) {
+            reply(requestId, data.getData().toString());
+        } else {
+            reply(requestId, null);
+        }
+        return true;
+    }
+
+    // ── device ───────────────────────────────────────────────────────────
+
+    private void deviceInfo(String requestId) {
+        JSONObject info = new JSONObject();
+        try {
+            info.put("model", Build.MODEL);
+            info.put("manufacturer", Build.MANUFACTURER);
+            info.put("brand", Build.BRAND);
+            info.put("sdk", Build.VERSION.SDK_INT);
+            info.put("release", Build.VERSION.RELEASE);
+            info.put("package", activity.getPackageName());
+            info.put("locale", java.util.Locale.getDefault().toString());
+            int mode = activity.getResources().getConfiguration().uiMode
+                & android.content.res.Configuration.UI_MODE_NIGHT_MASK;
+            info.put("dark_mode",
+                mode == android.content.res.Configuration.UI_MODE_NIGHT_YES);
+            android.content.pm.PackageInfo pkg = activity.getPackageManager()
+                .getPackageInfo(activity.getPackageName(), 0);
+            info.put("version", pkg.versionName);
+        } catch (Exception e) {
+            Log.w(TAG, "device info partially unavailable", e);
+        }
+        reply(requestId, info);
+    }
+
+    private void batteryInfo(String requestId) {
+        JSONObject info = new JSONObject();
+        try {
+            android.os.BatteryManager manager = (android.os.BatteryManager)
+                activity.getSystemService(Context.BATTERY_SERVICE);
+            info.put("level", manager.getIntProperty(
+                android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY));
+            info.put("charging", manager.isCharging());
+        } catch (Exception e) {
+            Log.w(TAG, "battery unavailable", e);
+        }
+        reply(requestId, info);
+    }
+
+    private void networkInfo(String requestId) {
+        JSONObject info = new JSONObject();
+        try {
+            ConnectivityManager manager = (ConnectivityManager)
+                activity.getSystemService(Context.CONNECTIVITY_SERVICE);
+            NetworkCapabilities caps =
+                manager.getNetworkCapabilities(manager.getActiveNetwork());
+            boolean online = caps != null
+                && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+            String type = "none";
+            if (caps != null) {
+                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) type = "wifi";
+                else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) type = "cellular";
+                else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) type = "ethernet";
+            }
+            info.put("online", online);
+            info.put("type", type);
+        } catch (Exception e) {
+            Log.w(TAG, "network unavailable", e);
+        }
+        reply(requestId, info);
+    }
+
+    // ── notifications ────────────────────────────────────────────────────
+
+    private void notify(String requestId, JSONObject msg) {
+        try {
+            String channelId = msg.optString("channel", "default");
+            android.app.NotificationManager manager = (android.app.NotificationManager)
+                activity.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                android.app.NotificationChannel channel =
+                    new android.app.NotificationChannel(channelId, channelId,
+                        android.app.NotificationManager.IMPORTANCE_DEFAULT);
+                manager.createNotificationChannel(channel);
+            }
+            Intent intent = new Intent(activity, activity.getClass());
+            String route = msg.optString("route", "");
+            if (!route.isEmpty()) intent.putExtra("pydrud_route", route);
+            android.app.PendingIntent pending = android.app.PendingIntent.getActivity(
+                activity, 0, intent,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT
+                    | android.app.PendingIntent.FLAG_IMMUTABLE);
+
+            androidx.core.app.NotificationCompat.Builder builder =
+                new androidx.core.app.NotificationCompat.Builder(activity, channelId)
+                    .setContentTitle(msg.optString("title", ""))
+                    .setContentText(msg.optString("body", ""))
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setOngoing(msg.optBoolean("ongoing", false))
+                    .setAutoCancel(true)
+                    .setContentIntent(pending);
+            manager.notify(msg.optInt("id", 1), builder.build());
+            reply(requestId, true);
+        } catch (Exception e) {
+            fail(requestId, "notification failed: " + e.getMessage());
+        }
+    }
+
+    private void notifyCancel(String requestId, JSONObject msg) {
+        android.app.NotificationManager manager = (android.app.NotificationManager)
+            activity.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (msg.optBoolean("all", false)) manager.cancelAll();
+        else manager.cancel(msg.optInt("id", 1));
+        reply(requestId, true);
+    }
+
+    // ── location ─────────────────────────────────────────────────────────
+
+    private void locationGet(final String requestId, JSONObject msg) {
+        if (ContextCompat.checkSelfPermission(activity,
+                android.Manifest.permission.ACCESS_FINE_LOCATION)
+                != PackageManager.PERMISSION_GRANTED) {
+            fail(requestId, "location permission not granted");
+            return;
+        }
+        try {
+            android.location.LocationManager manager =
+                (android.location.LocationManager)
+                    activity.getSystemService(Context.LOCATION_SERVICE);
+            String provider = msg.optBoolean("highAccuracy", true)
+                ? android.location.LocationManager.GPS_PROVIDER
+                : android.location.LocationManager.NETWORK_PROVIDER;
+            if (!manager.isProviderEnabled(provider)) {
+                provider = android.location.LocationManager.NETWORK_PROVIDER;
+            }
+            android.location.Location last = manager.getLastKnownLocation(provider);
+            if (last == null) {
+                fail(requestId, "location unavailable");
+                return;
+            }
+            JSONObject value = new JSONObject();
+            value.put("lat", last.getLatitude());
+            value.put("lon", last.getLongitude());
+            value.put("accuracy", last.getAccuracy());
+            value.put("time", last.getTime());
+            reply(requestId, value);
+        } catch (SecurityException e) {
+            fail(requestId, "location permission denied");
+        } catch (Exception e) {
+            fail(requestId, "location failed: " + e.getMessage());
+        }
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────
+
+    private String[] toStringArray(JSONArray array) {
+        if (array == null) return new String[0];
+        String[] out = new String[array.length()];
+        for (int i = 0; i < array.length(); i++) out[i] = array.optString(i, "");
+        return out;
+    }
+}

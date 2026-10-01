@@ -1,23 +1,45 @@
 package {{ package }};
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.View;
+import android.view.ViewGroup;
 import android.widget.FrameLayout;
+
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
-import com.chaquo.python.Python;
+import androidx.core.view.WindowInsetsCompat;
+
 import com.chaquo.python.PyObject;
+import com.chaquo.python.Python;
 import com.chaquo.python.android.AndroidPlatform;
 
 public class {{ app_name }}Activity extends AppCompatActivity {
 
     private static final String TAG = "PydrudActivity";
 
+    /** How long to wait for Python to answer a back press before we handle it. */
+    private static final long BACK_TIMEOUT_MS = 700L;
+
     protected FrameLayout rootView;
     protected ViewFactory viewFactory;
     protected EventDispatcher eventDispatcher;
     protected BridgeService bridge;
+
     private volatile boolean pythonStarted = false;
+    private volatile boolean awaitingBackResult = false;
+    private Runnable pendingBack;
+    private volatile boolean drawerOpen = false;
+
+    /** Live CameraX previews, keyed by widget key. */
+    private final java.util.Map<String, androidx.camera.view.PreviewView>
+        cameraPreviews = new java.util.HashMap<>();
+    private androidx.camera.core.ImageCapture imageCapture;
+    private androidx.camera.lifecycle.ProcessCameraProvider cameraProvider;
+    private String cameraFacing = "back";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -26,17 +48,22 @@ public class {{ app_name }}Activity extends AppCompatActivity {
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
 
         rootView = new FrameLayout(this);
-        rootView.setLayoutParams(new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT,
-            FrameLayout.LayoutParams.MATCH_PARENT
-        ));
+        rootView.setLayoutParams(new ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(rootView);
 
-        rootView.setOnApplyWindowInsetsListener((v, insets) -> {
-            int top = insets.getSystemWindowInsetTop();
-            v.setPadding(0, top, 0, 0);
-            return insets.consumeSystemWindowInsets();
+        // Keep content clear of the status bar / navigation bar / IME.
+        ViewCompat.setOnApplyWindowInsetsListener(rootView, (v, windowInsets) -> {
+            Insets bars = windowInsets.getInsets(
+                WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.ime());
+            v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+            return WindowInsetsCompat.CONSUMED;
         });
+
+        // A deep link (myapp://route), launcher shortcut or notification tap
+        // may have started us — forward it once Python is listening.
+        handleDeepLinkIntent(getIntent());
 
         eventDispatcher = new EventDispatcher();
         viewFactory = new ViewFactory(this);
@@ -53,41 +80,443 @@ public class {{ app_name }}Activity extends AppCompatActivity {
                 pythonStarted = true;
                 Log.i(TAG, "Python interpreter started");
 
+                // Start listening *before* Python tries to connect.
                 bridge.start();
-
-                try { Thread.sleep(300); } catch (InterruptedException ignored) {}
+                bridge.awaitListening(5000);
 
                 Log.i(TAG, "Invoking Python app.main.start_app()");
                 PyObject module = Python.getInstance().getModule("app.main");
                 module.callAttr("start_app");
-
-            } catch (Exception e) {
-                Log.e(TAG, "Failed to start Python app", e);
+            } catch (Throwable t) {
+                Log.e(TAG, "Failed to start Python app", t);
+                runOnUiThread(() -> showFatal(t));
             }
-        }).start();
+        }, "pydrud-python").start();
+    }
+
+    /** Render a readable error screen instead of a blank activity. */
+    private void showFatal(Throwable t) {
+        android.widget.TextView tv = new android.widget.TextView(this);
+        tv.setText("Pydrud failed to start:\n\n" + t);
+        tv.setTextColor(0xFFB91C1C);
+        tv.setPadding(48, 48, 48, 48);
+        rootView.removeAllViews();
+        rootView.addView(tv);
+    }
+
+    // ── Platform results ──────────────────────────────────────────────────
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (bridge != null && bridge.services().onActivityResult(
+                requestCode, resultCode, data)) {
+            return;
+        }
+        Log.d(TAG, "unhandled activity result " + requestCode);
     }
 
     @Override
-    public void onBackPressed() {
-        // Send back event to Python Router for navigation stack.
-        // If Python doesn't respond with finish_activity within 1.5s,
-        // fall back to default back behavior.
+    public void onRequestPermissionsResult(int requestCode, String[] permissions,
+                                           int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (bridge != null) {
-            bridge.sendEvent("back", "");
-            rootView.postDelayed(() -> {
-                if (!isFinishing()) {
-                    {{ app_name }}Activity.super.onBackPressed();
-                }
-            }, 1500);
-        } else {
-            super.onBackPressed();
+            bridge.services().onPermissionResult(requestCode, permissions, grantResults);
         }
+    }
+
+    // ── UI commands from Python ───────────────────────────────────────────
+
+    /** Slide the Drawer widget in or out. */
+    public void setDrawerOpen(final boolean open, final String side) {
+        runOnUiThread(() -> {
+            android.view.View drawer = findDrawer(side);
+            if (drawer == null) {
+                Log.d(TAG, "no drawer declared for side " + side);
+                return;
+            }
+            float width = drawer.getWidth() > 0 ? drawer.getWidth() : 600f;
+            boolean fromEnd = "end".equals(side);
+            if (open) {
+                drawer.setTranslationX(fromEnd ? width : -width);
+                drawer.setVisibility(android.view.View.VISIBLE);
+                drawer.animate().translationX(0f).setDuration(220).start();
+            } else {
+                drawer.animate().translationX(fromEnd ? width : -width)
+                      .setDuration(200)
+                      .withEndAction(() -> drawer.setVisibility(android.view.View.GONE))
+                      .start();
+            }
+            drawerOpen = open;
+        });
+    }
+
+    public boolean isDrawerOpen() { return drawerOpen; }
+
+    private android.view.View findDrawer(String side) {
+        return findDrawerIn(rootView, side);
+    }
+
+    private android.view.View findDrawerIn(android.view.ViewGroup group, String side) {
+        for (int i = 0; i < group.getChildCount(); i++) {
+            android.view.View child = group.getChildAt(i);
+            Object tag = child.getTag();
+            if (tag instanceof String && viewFactory != null) {
+                org.json.JSONObject node = viewFactory.getNode((String) tag);
+                if (node != null && "Drawer".equals(node.optString("type", ""))) {
+                    org.json.JSONObject props = node.optJSONObject("props");
+                    String nodeSide = props != null
+                        ? props.optString("side", "start") : "start";
+                    if (nodeSide.equals(side)) return child;
+                }
+            }
+            if (child instanceof android.view.ViewGroup) {
+                android.view.View found =
+                    findDrawerIn((android.view.ViewGroup) child, side);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    /** Stop every SwipeRefreshLayout spinner in the tree. */
+    public void endRefresh() {
+        endRefreshIn(rootView);
+    }
+
+    private void endRefreshIn(android.view.ViewGroup group) {
+        for (int i = 0; i < group.getChildCount(); i++) {
+            android.view.View child = group.getChildAt(i);
+            if (child instanceof androidx.swiperefreshlayout.widget.SwipeRefreshLayout) {
+                ((androidx.swiperefreshlayout.widget.SwipeRefreshLayout) child)
+                    .setRefreshing(false);
+            }
+            if (child instanceof android.view.ViewGroup) {
+                endRefreshIn((android.view.ViewGroup) child);
+            }
+        }
+    }
+
+    public void setKeyboardVisible(final boolean show) {
+        runOnUiThread(() -> {
+            android.view.inputmethod.InputMethodManager imm =
+                (android.view.inputmethod.InputMethodManager)
+                    getSystemService(INPUT_METHOD_SERVICE);
+            if (imm == null) return;
+            android.view.View focused = getCurrentFocus();
+            if (show) {
+                if (focused != null) {
+                    imm.showSoftInput(focused,
+                        android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+                }
+            } else {
+                android.view.View target = focused != null ? focused : rootView;
+                imm.hideSoftInputFromWindow(target.getWindowToken(), 0);
+            }
+        });
+    }
+
+    public void setKeepAwake(final boolean enabled) {
+        runOnUiThread(() -> {
+            if (enabled) {
+                getWindow().addFlags(
+                    android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            } else {
+                getWindow().clearFlags(
+                    android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            }
+        });
+    }
+
+    public void setOrientationLock(final String orientation) {
+        runOnUiThread(() -> {
+            switch (orientation) {
+                case "portrait":
+                    setRequestedOrientation(
+                        android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+                    break;
+                case "landscape":
+                    setRequestedOrientation(
+                        android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+                    break;
+                default:
+                    setRequestedOrientation(
+                        android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+            }
+        });
+    }
+
+    public void setFullscreen(final boolean enabled) {
+        runOnUiThread(() -> {
+            androidx.core.view.WindowInsetsControllerCompat controller =
+                WindowCompat.getInsetsController(getWindow(), rootView);
+            if (controller == null) return;
+            if (enabled) {
+                controller.hide(WindowInsetsCompat.Type.systemBars());
+                controller.setSystemBarsBehavior(
+                    androidx.core.view.WindowInsetsControllerCompat
+                        .BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            } else {
+                controller.show(WindowInsetsCompat.Type.systemBars());
+            }
+        });
+    }
+
+    public void setThemeMode(final String mode) {
+        runOnUiThread(() -> {
+            switch (mode) {
+                case "dark":
+                    androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(
+                        androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_YES);
+                    break;
+                case "light":
+                    androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(
+                        androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_NO);
+                    break;
+                default:
+                    androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(
+                        androidx.appcompat.app.AppCompatDelegate
+                            .MODE_NIGHT_FOLLOW_SYSTEM);
+            }
+        });
+    }
+
+    // ── Back button ───────────────────────────────────────────────────────
+
+    @Override
+    public void onBackPressed() {
+        // Ask Python first: the Router may want to pop a screen. Only fall
+        // back to the default behaviour if Python does not answer in time
+        // or reports that it did not handle the press.
+        if (bridge == null || !bridge.isConnected()) {
+            super.onBackPressed();
+            return;
+        }
+        if (awaitingBackResult) return;
+
+        awaitingBackResult = true;
+        pendingBack = () -> {
+            if (awaitingBackResult) {
+                awaitingBackResult = false;
+                defaultBack();
+            }
+        };
+        rootView.postDelayed(pendingBack, BACK_TIMEOUT_MS);
+        bridge.sendEvent("back", "");
+    }
+
+    /** Called by BridgeService when Python answers the back event. */
+    public void onBackResult(boolean handled) {
+        runOnUiThread(() -> {
+            awaitingBackResult = false;
+            if (pendingBack != null) {
+                rootView.removeCallbacks(pendingBack);
+                pendingBack = null;
+            }
+            if (!handled) defaultBack();
+        });
+    }
+
+    private void defaultBack() {
+        super.onBackPressed();
+    }
+
+    // ── Lifecycle → Python ────────────────────────────────────────────────
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        sendLifecycle("resume");
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        sendLifecycle("pause");
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        sendLifecycle("stop");
+    }
+
+    private void sendLifecycle(String state) {
+        if (bridge == null || !bridge.isConnected()) return;
+        try {
+            org.json.JSONObject data = new org.json.JSONObject();
+            data.put("state", state);
+            bridge.sendEvent("lifecycle", "", data);
+        } catch (org.json.JSONException ignored) {}
+    }
+
+    // ── deep links ───────────────────────────────────────────────────────
+
+    private String pendingDeepLink = null;
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleDeepLinkIntent(intent);
+        flushDeepLink();
+    }
+
+    /** Remember the launching URL so it can be delivered when Python is up. */
+    public void handleDeepLinkIntent(Intent intent) {
+        if (intent == null) return;
+        String url = null;
+        if (intent.getData() != null) {
+            url = intent.getData().toString();
+        } else if (intent.hasExtra("pydrud_route")) {
+            url = intent.getStringExtra("pydrud_route");
+        }
+        if (url != null && !url.isEmpty()) pendingDeepLink = url;
+    }
+
+    /** Called once the bridge is connected (and after onNewIntent). */
+    public void flushDeepLink() {
+        if (pendingDeepLink == null || bridge == null) return;
+        org.json.JSONObject data = new org.json.JSONObject();
+        try {
+            data.put("url", pendingDeepLink);
+        } catch (Exception ignored) { }
+        bridge.sendEvent("deep_link", "", data);
+        pendingDeepLink = null;
+    }
+
+    // ── camera ───────────────────────────────────────────────────────────
+
+    /** Register a preview surface created by ViewFactory. */
+    public void bindCameraPreview(final String key,
+                                  final androidx.camera.view.PreviewView preview,
+                                  final org.json.JSONObject props) {
+        cameraPreviews.put(key, preview);
+        cameraFacing = props.optString("facing", "back");
+        startCamera(key, cameraFacing);
+    }
+
+    /** Bind (or rebind) CameraX to the lifecycle for a preview widget. */
+    public void startCamera(final String key, final String facing) {
+        final androidx.camera.view.PreviewView preview =
+            cameraPreviews.isEmpty() ? null
+            : (key == null || key.isEmpty()
+                ? cameraPreviews.values().iterator().next()
+                : cameraPreviews.get(key));
+        if (preview == null) return;
+        cameraFacing = facing;
+
+        final com.google.common.util.concurrent.ListenableFuture<
+            androidx.camera.lifecycle.ProcessCameraProvider> future =
+            androidx.camera.lifecycle.ProcessCameraProvider.getInstance(this);
+        future.addListener(new Runnable() {
+            @Override public void run() {
+                try {
+                    cameraProvider = future.get();
+                    androidx.camera.core.Preview previewUseCase =
+                        new androidx.camera.core.Preview.Builder().build();
+                    previewUseCase.setSurfaceProvider(preview.getSurfaceProvider());
+                    imageCapture = new androidx.camera.core.ImageCapture.Builder()
+                        .build();
+                    androidx.camera.core.CameraSelector selector =
+                        "front".equals(cameraFacing)
+                        ? androidx.camera.core.CameraSelector.DEFAULT_FRONT_CAMERA
+                        : androidx.camera.core.CameraSelector.DEFAULT_BACK_CAMERA;
+                    cameraProvider.unbindAll();
+                    cameraProvider.bindToLifecycle(
+                        {{ app_name }}Activity.this, selector,
+                        previewUseCase, imageCapture);
+                    org.json.JSONObject data = new org.json.JSONObject();
+                    data.put("facing", cameraFacing);
+                    eventDispatcher.dispatch("ready", key, data);
+                } catch (Exception e) {
+                    Log.e(TAG, "camera bind failed", e);
+                    org.json.JSONObject data = new org.json.JSONObject();
+                    try { data.put("error", String.valueOf(e.getMessage())); }
+                    catch (Exception ignored) { }
+                    eventDispatcher.dispatch("error", key, data);
+                }
+            }
+        }, androidx.core.content.ContextCompat.getMainExecutor(this));
+    }
+
+    public void stopCamera() {
+        if (cameraProvider != null) cameraProvider.unbindAll();
+    }
+
+    /** Take a photo; the callback receives the saved path or null. */
+    public void capturePhoto(final String path,
+                             final androidx.core.util.Consumer<String> callback) {
+        if (imageCapture == null) {
+            callback.accept(null);
+            return;
+        }
+        final java.io.File file = new java.io.File(
+            path == null || path.isEmpty()
+                ? new java.io.File(getCacheDir(),
+                    "photo_" + System.currentTimeMillis() + ".jpg").getAbsolutePath()
+                : path);
+        androidx.camera.core.ImageCapture.OutputFileOptions options =
+            new androidx.camera.core.ImageCapture.OutputFileOptions.Builder(file)
+                .build();
+        imageCapture.takePicture(options,
+            androidx.core.content.ContextCompat.getMainExecutor(this),
+            new androidx.camera.core.ImageCapture.OnImageSavedCallback() {
+                @Override
+                public void onImageSaved(
+                        androidx.camera.core.ImageCapture.OutputFileResults results) {
+                    callback.accept(file.getAbsolutePath());
+                }
+
+                @Override
+                public void onError(androidx.camera.core.ImageCaptureException e) {
+                    Log.e(TAG, "capture failed", e);
+                    callback.accept(null);
+                }
+            });
+    }
+
+    /** Animate the next full render (Router transitions). */
+    public void setRouteTransition(final String transition, final int duration) {
+        if (rootView == null || "none".equals(transition)) return;
+        runOnUiThread(new Runnable() {
+            @Override public void run() {
+                android.view.animation.Animation anim;
+                if (transition.startsWith("slide")) {
+                    float fromX = "slide_right".equals(transition) ? -1f
+                        : "slide_left".equals(transition) ? 1f : 0f;
+                    float fromY = "slide_up".equals(transition) ? 1f
+                        : "slide_down".equals(transition) ? -1f : 0f;
+                    anim = new android.view.animation.TranslateAnimation(
+                        android.view.animation.Animation.RELATIVE_TO_PARENT, fromX,
+                        android.view.animation.Animation.RELATIVE_TO_PARENT, 0f,
+                        android.view.animation.Animation.RELATIVE_TO_PARENT, fromY,
+                        android.view.animation.Animation.RELATIVE_TO_PARENT, 0f);
+                } else if ("scale".equals(transition)) {
+                    anim = new android.view.animation.ScaleAnimation(0.92f, 1f,
+                        0.92f, 1f,
+                        android.view.animation.Animation.RELATIVE_TO_SELF, 0.5f,
+                        android.view.animation.Animation.RELATIVE_TO_SELF, 0.5f);
+                } else {
+                    anim = new android.view.animation.AlphaAnimation(0f, 1f);
+                }
+                anim.setDuration(duration);
+                anim.setInterpolator(
+                    new android.view.animation.DecelerateInterpolator());
+                rootView.startAnimation(anim);
+            }
+        });
     }
 
     @Override
     protected void onDestroy() {
-        super.onDestroy();
+        sendLifecycle("destroy");
         if (bridge != null) bridge.stop();
         if (viewFactory != null) viewFactory.clear();
+        stopCamera();
+        if (bridge != null && bridge.platform() != null) {
+            bridge.platform().dispose();
+        }
+        super.onDestroy();
     }
 }

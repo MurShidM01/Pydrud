@@ -3,9 +3,14 @@ Virtual-tree diff engine.
 
 Produces a list of ``Patch`` operations that the Android renderer applies
 to update the native view tree efficiently.
+
+The children diff is *keyed*: widgets are matched by key rather than by
+index, so inserting or removing an item in the middle of a list only
+patches that item instead of re-creating everything after it.
 """
 
 from __future__ import annotations
+import json
 from typing import Any, Optional
 
 from pydrud.widgets.base import Widget
@@ -17,17 +22,44 @@ from pydrud.widgets.base import Widget
 class Patch:
     """A single mutation to apply to the native view tree."""
 
+    #: Valid operations.
+    OPS = ("create", "update", "delete", "move", "replace")
+
     def __init__(self, op: str, key: str, *, parent_key: str = "", **data: Any):
-        # op: "create" | "update" | "delete" | "move" | "replace"
+        if op not in self.OPS:
+            raise ValueError(f"Unknown patch op: {op!r}")
         self.op = op
         self.key = key
         self.parent_key = parent_key
         self.data = data
 
+    @property
+    def props(self) -> dict:
+        """Changed widget properties (empty for non-update patches)."""
+        return self.data.get("props", {})
+
+    @property
+    def style(self) -> dict:
+        """Changed style entries (empty for non-update patches)."""
+        return self.data.get("style", {})
+
+    @property
+    def index(self) -> int:
+        """Target child index for create/move/replace patches (-1 if n/a)."""
+        return self.data.get("index", -1)
+
+    @property
+    def tree(self) -> dict:
+        """The serialised subtree for create/replace patches."""
+        return self.data.get("tree", {})
+
     def to_dict(self) -> dict:
         d = {"op": self.op, "key": self.key, "parent_key": self.parent_key}
         d.update(self.data)
         return d
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, Patch) and self.to_dict() == other.to_dict()
 
     def __repr__(self) -> str:
         return f"Patch({self.op}, {self.key})"
@@ -40,35 +72,53 @@ class TreeDiff:
     """Compares two widget trees and produces a minimal patch list."""
 
     @staticmethod
-    def diff(old: Widget, new: Widget) -> list[Patch]:
-        """Return patches to transform *old* into *new*."""
+    def diff(old: Optional[Widget], new: Optional[Widget]) -> list[Patch]:
+        """Return patches that transform *old* into *new*."""
         patches: list[Patch] = []
-        _diff_node(old, new, patches, parent_key=new.key if new else "")
+        if new is None:
+            if old is not None:
+                patches.append(Patch("delete", old.unwrap().key))
+            return patches
+        _diff_node(old, new, patches, parent_key="", index=0)
         return patches
 
     @staticmethod
     def patches_to_json(patches: list[Patch]) -> str:
         """Serialise patches to JSON for the Android bridge."""
-        import json
         return json.dumps([p.to_dict() for p in patches], default=str)
 
 
 # ── Internal helpers ─────────────────────────────────────────────────────────
 
 
-def _diff_node(old: Optional[Widget], new: Widget, patches: list[Patch], *, parent_key: str = ""):
+def _diff_node(
+    old: Optional[Widget],
+    new: Widget,
+    patches: list[Patch],
+    *,
+    parent_key: str = "",
+    index: int = 0,
+):
     """Compute patches for a single node."""
+    new = new.unwrap()
+    if old is not None:
+        old = old.unwrap()
     if old is None:
         # Entirely new subtree — include the full JSON tree.
-        patches.append(Patch("create", new.key, parent_key=parent_key, tree=new.to_dict()))
+        patches.append(
+            Patch("create", new.key, parent_key=parent_key, index=index, tree=new.to_dict())
+        )
         return
 
-    if old._widget_type != new._widget_type:
-        # Different widget types — replace the whole subtree.
-        patches.append(Patch("replace", new.key, parent_key=parent_key, tree=new.to_dict()))
+    if old._widget_type != new._widget_type or old.key != new.key:
+        # Different widget identity — replace the whole subtree.
+        patches.append(
+            Patch("replace", old.key, parent_key=parent_key, index=index,
+                  new_key=new.key, tree=new.to_dict())
+        )
         return
 
-    # Same type: check for property changes.
+    # Same type and key: check for property changes.
     changed_props = _changed_props(old, new)
     changed_style = _changed_dict(old.style, new.style)
 
@@ -84,37 +134,46 @@ def _diff_node(old: Optional[Widget], new: Widget, patches: list[Patch], *, pare
     _diff_children(old.children, new.children, patches, parent_key=new.key)
 
 
-def _diff_children(old_list: list[Widget], new_list: list[Widget], patches: list[Patch], *, parent_key: str = ""):
-    """Simple index-based children diff.
+def _diff_children(
+    old_list: list[Widget],
+    new_list: list[Widget],
+    patches: list[Patch],
+    *,
+    parent_key: str = "",
+):
+    """Keyed children diff.
 
-    For V1 we use a straightforward approach: match by index.
-    A future version can implement a keyed diff (longest-common-subsequence)
-    for better performance with reordered children.
+    Children present in both trees (matched by key) are diffed in place and
+    emitted as ``move`` patches when their index changed. Children only in
+    the old tree are deleted; children only in the new tree are created at
+    their target index.
     """
-    old_by_idx = {i: w for i, w in enumerate(old_list)}
-    max_len = max(len(old_list), len(new_list))
+    old_list = [w.unwrap() for w in old_list]
+    new_list = [w.unwrap() for w in new_list]
+    old_by_key = {w.key: w for w in old_list}
+    new_by_key = {w.key: w for w in new_list}
+    old_index = {w.key: i for i, w in enumerate(old_list)}
 
-    for i in range(max_len):
-        old_w = old_by_idx.get(i)
-        if i >= len(new_list):
-            # Child was removed.
-            if old_w is not None:
-                patches.append(Patch("delete", old_w.key, parent_key=parent_key))
+    # 1. Deletions (old children that disappeared).
+    for widget in old_list:
+        if widget.key not in new_by_key:
+            patches.append(Patch("delete", widget.key, parent_key=parent_key))
+
+    # 2. Creations / updates / moves.
+    for index, new_w in enumerate(new_list):
+        old_w = old_by_key.get(new_w.key)
+        if old_w is None:
+            patches.append(
+                Patch("create", new_w.key, parent_key=parent_key,
+                      index=index, tree=new_w.to_dict())
+            )
             continue
 
-        new_w = new_list[i]
-
-        # If both exist and have different keys, treat as replace.
-        if old_w is not None and old_w.key != new_w.key:
-            patches.append(Patch("delete", old_w.key, parent_key=parent_key))
-            patches.append(Patch("create", new_w.key, parent_key=parent_key, tree=new_w.to_dict()))
-            continue
-
-        if old_w is not None:
-            _diff_node(old_w, new_w, patches, parent_key=parent_key)
-        else:
-            # Brand-new child.
-            patches.append(Patch("create", new_w.key, parent_key=parent_key, tree=new_w.to_dict()))
+        if old_index.get(new_w.key) != index:
+            patches.append(
+                Patch("move", new_w.key, parent_key=parent_key, index=index)
+            )
+        _diff_node(old_w, new_w, patches, parent_key=parent_key, index=index)
 
 
 def _changed_props(old: Widget, new: Widget) -> dict:
@@ -128,9 +187,12 @@ def _changed_props(old: Widget, new: Widget) -> dict:
         if old_p.get(k) != new_p.get(k):
             changed[k] = new_p.get(k)
 
-    # Event handler presence.
-    if bool(old.event_handlers) != bool(new.event_handlers):
-        changed["_has_events"] = new.event_handlers.keys()
+    # Event handler presence (names only — callables are not serialisable).
+    old_events = sorted(old.event_handlers.keys())
+    new_events = sorted(new.event_handlers.keys())
+    if old_events != new_events:
+        changed["_events"] = new_events
+        changed["_has_events"] = bool(new_events)
 
     if old.expand != new.expand:
         changed["_expand"] = new.expand
@@ -145,7 +207,7 @@ def _changed_props(old: Widget, new: Widget) -> dict:
 
 
 def _changed_dict(old: dict, new: dict) -> dict:
-    """Return entries in *new* that differ from *old*."""
+    """Return entries in *new* that differ from *old* (removals become None)."""
     changed: dict = {}
     all_keys = set(old.keys()) | set(new.keys())
     for k in all_keys:
