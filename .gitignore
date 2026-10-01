@@ -38,8 +38,9 @@ local.properties
 *.yml.bak
 pydrud.log
 .claude
-docs
+docs/
 CLAUDE.md
+*.zip
 
 # Testing
 .pytest_cache/

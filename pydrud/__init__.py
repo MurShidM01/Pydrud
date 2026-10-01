@@ -6,12 +6,13 @@ Python widget tree into native Android Views at runtime. No XML layouts,
 no Kotlin UI code — just Python.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 __app_name__ = "Pydrud"
 
 from pydrud.main import App
 from pydrud.core.state import State, ReactiveDict
-from pydrud.core.responsive import Responsive
+from pydrud.core.responsive import Responsive, MediaQuery
+from pydrud.navigation import Router, NavigationStack, Route
 from pydrud.widgets import (
     Widget,
     Container,
@@ -19,6 +20,7 @@ from pydrud.widgets import (
     Row,
     Center,
     Spacer,
+    Divider,
     Text,
     Button,
     TextField,
@@ -26,6 +28,9 @@ from pydrud.widgets import (
     Icon,
     Checkbox,
     Switch,
+    AppBar,
+    Scaffold,
+    FloatingActionButton,
     Style,
     EdgeInsets,
     Alignment,
@@ -37,6 +42,10 @@ from pydrud.widgets import (
 __all__ = [
     "App",
     "Responsive",
+    "MediaQuery",
+    "Router",
+    "NavigationStack",
+    "Route",
     "State",
     "ReactiveDict",
     "Widget",
@@ -45,6 +54,7 @@ __all__ = [
     "Row",
     "Center",
     "Spacer",
+    "Divider",
     "Text",
     "Button",
     "TextField",
@@ -52,6 +62,9 @@ __all__ = [
     "Icon",
     "Checkbox",
     "Switch",
+    "AppBar",
+    "Scaffold",
+    "FloatingActionButton",
     "Style",
     "EdgeInsets",
     "Alignment",

@@ -73,7 +73,7 @@ def init(name, org, min_sdk, target_sdk):
 @main.command()
 @click.option("--device", default=None, help="Target device ID (adb).")
 @click.option("--release", is_flag=True, default=False, help="Build in release mode.")
-@click.option("--watch", is_flag=True, default=False, help="Enable hot-reload polling (future).")
+@click.option("--watch", is_flag=True, default=False, help="Enable hot-reload: rebuild UI on file changes without APK recompile.")
 def run(device, release, watch):
     """Build the APK, install and launch on a connected device."""
     from pydrud.commands.builder import Builder
@@ -129,3 +129,13 @@ def doctor():
     """Check the development environment for required tools."""
     from pydrud.commands.doctor import run_doctor
     run_doctor()
+
+
+@main.command()
+@click.option("--path", default="src", help="Source directory to analyze.")
+@click.option("--json", "json_output", is_flag=True, help="Output as JSON.")
+def analyze(path, json_output):
+    """Statically analyze Pydrud Python code for common issues."""
+    from pydrud.commands.analyzer import run_analysis, format_report
+    issues = run_analysis(path)
+    click.echo(format_report(issues, json_output=json_output))

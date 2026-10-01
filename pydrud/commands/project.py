@@ -213,6 +213,10 @@ def create_project(
                     f"{project_dir}/android/app/src/main/java/{java_package_path}/ViewFactory.java", ctx)
     _write_template("android/EventDispatcher.java.j2",
                     f"{project_dir}/android/app/src/main/java/{java_package_path}/EventDispatcher.java", ctx)
+    _write_template("android/WidgetRegistry.java.j2",
+                    f"{project_dir}/android/app/src/main/java/{java_package_path}/WidgetRegistry.java", ctx)
+    _write_template("android/ViewCreator.java.j2",
+                    f"{project_dir}/android/app/src/main/java/{java_package_path}/ViewCreator.java", ctx)
 
     # AndroidManifest.xml
     _ensure_dir(f"{project_dir}/android/app/src/main")

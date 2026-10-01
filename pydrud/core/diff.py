@@ -17,14 +17,17 @@ from pydrud.widgets.base import Widget
 class Patch:
     """A single mutation to apply to the native view tree."""
 
-    def __init__(self, op: str, key: str, **data: Any):
+    def __init__(self, op: str, key: str, *, parent_key: str = "", **data: Any):
         # op: "create" | "update" | "delete" | "move" | "replace"
         self.op = op
         self.key = key
+        self.parent_key = parent_key
         self.data = data
 
     def to_dict(self) -> dict:
-        return {"op": self.op, "key": self.key, **self.data}
+        d = {"op": self.op, "key": self.key, "parent_key": self.parent_key}
+        d.update(self.data)
+        return d
 
     def __repr__(self) -> str:
         return f"Patch({self.op}, {self.key})"
@@ -40,7 +43,7 @@ class TreeDiff:
     def diff(old: Widget, new: Widget) -> list[Patch]:
         """Return patches to transform *old* into *new*."""
         patches: list[Patch] = []
-        _diff_node(old, new, patches)
+        _diff_node(old, new, patches, parent_key=new.key if new else "")
         return patches
 
     @staticmethod
@@ -53,16 +56,16 @@ class TreeDiff:
 # ── Internal helpers ─────────────────────────────────────────────────────────
 
 
-def _diff_node(old: Optional[Widget], new: Widget, patches: list[Patch]):
+def _diff_node(old: Optional[Widget], new: Widget, patches: list[Patch], *, parent_key: str = ""):
     """Compute patches for a single node."""
     if old is None:
         # Entirely new subtree — include the full JSON tree.
-        patches.append(Patch("create", new.key, tree=new.to_dict()))
+        patches.append(Patch("create", new.key, parent_key=parent_key, tree=new.to_dict()))
         return
 
     if old._widget_type != new._widget_type:
         # Different widget types — replace the whole subtree.
-        patches.append(Patch("replace", new.key, tree=new.to_dict()))
+        patches.append(Patch("replace", new.key, parent_key=parent_key, tree=new.to_dict()))
         return
 
     # Same type: check for property changes.
@@ -75,13 +78,13 @@ def _diff_node(old: Optional[Widget], new: Widget, patches: list[Patch]):
             patch_data["props"] = changed_props
         if changed_style:
             patch_data["style"] = changed_style
-        patches.append(Patch("update", new.key, **patch_data))
+        patches.append(Patch("update", new.key, parent_key=parent_key, **patch_data))
 
     # Walk children.
-    _diff_children(old.children, new.children, patches)
+    _diff_children(old.children, new.children, patches, parent_key=new.key)
 
 
-def _diff_children(old_list: list[Widget], new_list: list[Widget], patches: list[Patch]):
+def _diff_children(old_list: list[Widget], new_list: list[Widget], patches: list[Patch], *, parent_key: str = ""):
     """Simple index-based children diff.
 
     For V1 we use a straightforward approach: match by index.
@@ -96,22 +99,22 @@ def _diff_children(old_list: list[Widget], new_list: list[Widget], patches: list
         if i >= len(new_list):
             # Child was removed.
             if old_w is not None:
-                patches.append(Patch("delete", old_w.key))
+                patches.append(Patch("delete", old_w.key, parent_key=parent_key))
             continue
 
         new_w = new_list[i]
 
         # If both exist and have different keys, treat as replace.
         if old_w is not None and old_w.key != new_w.key:
-            patches.append(Patch("delete", old_w.key))
-            patches.append(Patch("create", new_w.key, tree=new_w.to_dict()))
+            patches.append(Patch("delete", old_w.key, parent_key=parent_key))
+            patches.append(Patch("create", new_w.key, parent_key=parent_key, tree=new_w.to_dict()))
             continue
 
         if old_w is not None:
-            _diff_node(old_w, new_w, patches)
+            _diff_node(old_w, new_w, patches, parent_key=parent_key)
         else:
             # Brand-new child.
-            patches.append(Patch("create", new_w.key, tree=new_w.to_dict()))
+            patches.append(Patch("create", new_w.key, parent_key=parent_key, tree=new_w.to_dict()))
 
 
 def _changed_props(old: Widget, new: Widget) -> dict:
