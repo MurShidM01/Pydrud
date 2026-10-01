@@ -125,6 +125,29 @@ class Border:
         self.right = right or BorderSide(color, width)
         self.bottom = bottom or BorderSide(color, width)
 
+    @classmethod
+    def only(
+        cls,
+        *,
+        color: str = "#FFE5E7EB",
+        width: float = 1.0,
+        left: bool = False,
+        top: bool = False,
+        right: bool = False,
+        bottom: bool = False,
+    ) -> "Border":
+        """A border on selected edges only — e.g. a bottom hairline::
+
+            Border.only(bottom=True, color=Colors.OUTLINE)
+        """
+        none = BorderSide(color, 0)
+        border = cls(color, width)
+        border.left = BorderSide(color, width) if left else none
+        border.top = BorderSide(color, width) if top else none
+        border.right = BorderSide(color, width) if right else none
+        border.bottom = BorderSide(color, width) if bottom else none
+        return border
+
     def to_dict(self) -> dict:
         return {
             "left": self.left.to_dict(),

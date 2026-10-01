@@ -1,20 +1,24 @@
 """
 {{ project_name }} — built with Pydrud.
 
-This starter app is a working tour of the framework: Scaffold + AppBar,
-reactive State, a counter, a to-do list with keyed rows, input widgets and
-multi-screen navigation with hardware back-button support.
+A small, complete app you can edit: a counter, a to-do list, a settings
+screen with live theming, and a component gallery. It is written the way
+a real Pydrud app should be written — design tokens instead of magic
+numbers, Theme colours instead of hardcoded hex, and layouts that adapt
+from a small phone to a tablet.
 
-Edit this file, then run `pydrud run` (or `pydrud run --watch`).
+Edit this file, then run `pydrud run` (or `pydrud run --watch` for
+hot reload).
 """
 
 from pydrud import (
-    Animation, App, AppBar, Avatar, Badge, Button, Card, Center, Chart,
-    Checkbox, Chip, Colors, Column, Container, Dismissible, Divider,
-    EdgeInsets, FadeIn, FloatingActionButton, GestureDetector, Icon, Icons,
-    ListTile, ListView, ProgressBar, Rating, Responsive, Router, Row,
-    Scaffold, SearchBar, SegmentedButton, SizedBox, Slider, State, Switch,
-    Tab, Tabs, Text, TextField,
+    Animation, App, AppBar, Avatar, Badge, BottomNavigationBar, Button, Card,
+    Center, Chart, Checkbox, Chip, Colors, Column, Container, Dismissible,
+    Divider, EdgeInsets, Elevation, FadeIn, FloatingActionButton,
+    GestureDetector, Icon, Icons, ListTile, NavItem, NavigationRail,
+    ProgressBar, Radius, Rating, Responsive, Router, Row, Scaffold, SearchBar,
+    SegmentedButton, SizedBox, Slider, Spacing, State, Switch, Tab, Tabs,
+    Text, TextField, Theme,
 )
 
 # ── State ───────────────────────────────────────────────────────────────────
@@ -23,12 +27,40 @@ counter = State(0)
 todos = State([])          # list[str]
 new_todo = State("")
 dark_mode = State(False)
+accent = State("{{ seed_color | default("#FF6366F1") }}")
 volume = State(40.0)
 agreed = State(False)
+corners = State("Rounded")
+text_size = State("Normal")
 tab_index = State(0)
 interests = State({"Python", "Android"})
 rating = State(4.0)
 query = State("")
+
+ROUTES = ("home", "showcase", "settings")
+
+DESTINATIONS = [
+    NavItem("Home", icon=Icons.HOME, route="home"),
+    NavItem("Gallery", icon=Icons.DASHBOARD, route="showcase"),
+    NavItem("Settings", icon=Icons.SETTINGS, route="settings"),
+]
+
+ACCENTS = [
+    ("Brand", "{{ seed_color | default("#FF6366F1") }}"),
+    ("Teal", Colors.SECONDARY),
+    ("Rose", Colors.ERROR),
+    ("Amber", Colors.ACCENT),
+]
+
+# Design tokens are plain Python values. Changing one restyles every
+# widget — on the Python side *and* in the native renderer.
+CORNERS = {
+    "Sharp":   {"radius_card": 4,  "radius_button": 4,  "radius_input": 6},
+    "Rounded": {"radius_card": 16, "radius_button": 14, "radius_input": 14},
+    "Soft":    {"radius_card": 28, "radius_button": 24, "radius_input": 22},
+}
+
+TEXT_SIZES = {"Small": 0.92, "Normal": 1.0, "Large": 1.12}
 
 router = Router()
 app: App | None = None
@@ -40,109 +72,244 @@ def refresh():
         app.update()
 
 
-# ── Screens ─────────────────────────────────────────────────────────────────
+# ── Building blocks ─────────────────────────────────────────────────────────
+#
+# Small helpers keep every screen consistent: one page shell, one section
+# header, one card style. That consistency is most of what makes a UI
+# feel designed rather than assembled.
+
+
+def shell(page, *, title, body, key, actions=None, fab=None):
+    """A page: app bar, scrolling body with a readable gutter, navigation.
+
+    On a phone the destinations sit in a bottom bar; on a tablet they move
+    into a side rail and the content is centred at a comfortable width.
+    """
+    page.bgcolor = Theme.background
+    index = ROUTES.index(key)
+    gutter = Responsive.value(phone=Spacing.GUTTER, tablet=Spacing.XXL)
+
+    content = Column(
+        key=f"{key}_scroll",
+        scroll=True,
+        spacing=Spacing.LG,
+        style={"padding": EdgeInsets(
+            left=gutter, right=gutter, top=Spacing.LG,
+            bottom=Spacing.HUGE + Spacing.XXL).to_dict()},
+        children=body,
+    )
+
+    # Phones use the full width; wide screens centre the content so lines
+    # stay readable instead of stretching edge to edge.
+    body = content if not Responsive.is_tablet() else Center(
+        key=f"{key}_center",
+        child=Container(key=f"{key}_wrap", width=640, height="match",
+                        child=content),
+    )
+
+    return Scaffold(
+        key=key,
+        app_bar=AppBar(title=title, key=f"{key}_bar", actions=actions or []),
+        body=body,
+        bottom_navigation=None if Responsive.is_tablet() else BottomNavigationBar(
+            DESTINATIONS, key=f"{key}_nav", selected=index, on_change=_navigate),
+        navigation_rail=NavigationRail(
+            DESTINATIONS, key=f"{key}_rail", selected=index,
+            on_change=_navigate) if Responsive.is_tablet() else None,
+        floating_action_button=fab,
+    )
+
+
+def _navigate(event):
+    """Move between destinations the way Android expects.
+
+    Home is the start destination, so back always returns there instead
+    of walking through every tab you visited.
+    """
+    index = int(event.value or 0)
+    if not 0 <= index < len(ROUTES):
+        return
+    target = ROUTES[index]
+    current = router.current_route
+    if target == current:
+        return
+    if target == "home":
+        router.pop_to_root()
+    elif current == "home":
+        router.push(target)
+    else:
+        router.replace(target)
+
+
+def section(title, key, *, action=None):
+    """A quiet, all-caps section label — the spine of a tidy settings page."""
+    children = [Text(title.upper(), key=f"{key}_label", size=12, weight=700,
+                     color=Theme.text_secondary,
+                     style={"font": {"letterSpacing": 0.08}})]
+    if action is not None:
+        children.extend([Container(key=f"{key}_spacer", expand=1), action])
+    return Container(
+        key=key,
+        padding=EdgeInsets(left=Spacing.XS, top=Spacing.SM, bottom=Spacing.XXS),
+        child=Row(key=f"{key}_row", vertical_alignment="center",
+                  children=children),
+    )
+
+
+def stat(label, value, icon, key, color=None):
+    """One compact metric tile."""
+    tint = color or Theme.primary
+    return Card(
+        key=key,
+        expand=1,
+        padding=Spacing.LG,
+        child=Column(key=f"{key}_body", spacing=Spacing.XS, children=[
+            Container(
+                key=f"{key}_chip",
+                bg=Colors.with_opacity(tint, 0.14),
+                border_radius=Radius.SM,
+                padding=Spacing.SM,
+                child=Icon(icon, key=f"{key}_icon", size=18, color=tint),
+            ),
+            SizedBox(height=Spacing.XS),
+            Text(value, key=f"{key}_value", size=22, weight=700,
+                 color=Theme.text),
+            Text(label, key=f"{key}_label", size=12,
+                 color=Theme.text_secondary),
+        ]),
+    )
+
+
+def empty_state(title, subtitle, icon, key):
+    """What the user sees before they have any data — never a blank box."""
+    return Container(
+        key=key,
+        padding=EdgeInsets(top=Spacing.XL, bottom=Spacing.XL),
+        child=Column(key=f"{key}_body", spacing=Spacing.XS,
+                     horizontal_alignment="center", children=[
+                         Container(
+                             key=f"{key}_badge",
+                             bg=Theme.surface_variant,
+                             border_radius=Radius.PILL,
+                             padding=Spacing.LG,
+                             child=Icon(icon, key=f"{key}_icon", size=24,
+                                        color=Theme.text_secondary),
+                         ),
+                         SizedBox(height=Spacing.SM),
+                         Text(title, key=f"{key}_title", size=15, weight=600,
+                              color=Theme.text),
+                         Text(subtitle, key=f"{key}_sub", size=13,
+                              color=Theme.text_secondary,
+                              text_align="center"),
+                     ]),
+    )
+
+
+# ── Home ────────────────────────────────────────────────────────────────────
 
 
 def home_screen(page):
-    page.bgcolor = Colors.BACKGROUND if not dark_mode.value else "#FF111827"
-    text_color = Colors.TEXT if not dark_mode.value else Colors.WHITE
-
     def increment(_event):
         counter.value += 1
+        page.haptics.selection()
         refresh()
 
     def reset(_event):
         counter.value = 0
-        page.toast("Counter reset")
+        page.snack_bar("Counter reset", action="Undo")
         refresh()
 
-    page.add(
-        Scaffold(
-            key="home",
-            app_bar=AppBar(
-                title="{{ project_name }}",
-                key="home_bar",
-                bg_color=Colors.PRIMARY,
-                actions=[
-                    Icon(Icons.DASHBOARD, key="to_showcase", color=Colors.WHITE)
-                    .on_click(lambda _e: router.push("showcase")),
-                    Icon(Icons.SETTINGS, key="to_settings", color=Colors.WHITE)
-                    .on_click(lambda _e: router.push("settings")),
-                ],
-            ),
-            body=Column(
-                scroll=True,
-                spacing=12,
-                children=[
-                    SizedBox(height=16),
-
-                    Center(child=Text(
-                        str(counter.value),
-                        key="counter_value",
-                        size=Responsive.text(64),
-                        weight=700,
-                        color=Colors.PRIMARY,
-                    )),
-                    Center(child=Text(
-                        "taps so far",
-                        size=Responsive.text(14),
-                        color=Colors.TEXT_SECONDARY,
-                    )),
-
-                    Center(child=Row(spacing=12, children=[
-                        Button("Reset", key="reset_btn", variant="outlined",
-                               bg_color=Colors.PRIMARY).on_click(reset),
-                        Button("Tap me", key="tap_btn",
-                               bg_color=Colors.PRIMARY).on_click(increment),
-                    ])),
-
-                    Divider(),
-
-                    Card(child=Column(spacing=8, children=[
-                        Text("To-do", size=18, weight=700, color=text_color),
-                        Row(spacing=8, children=[
-                            TextField(
-                                new_todo.value,
-                                key="todo_input",
-                                hint="What needs doing?",
-                                expand=1,
-                            ).on_change(_set_new_todo),
-                            Button("Add", key="todo_add",
-                                   bg_color=Colors.SUCCESS).on_click(_add_todo),
-                        ]),
-                        _todo_list(),
-                    ])),
-
-                    SizedBox(height=80),
-                ],
-            ),
-            floating_action_button=FloatingActionButton(
-                "+", key="fab", bg_color=Colors.PRIMARY, on_click=increment,
-            ),
-        )
+    hero = Container(
+        key="hero",
+        width="match",
+        border_radius=Radius.XL,
+        padding=Spacing.XL,
+        style={"gradient": {
+            "colors": [Theme.primary, Colors.mix(Theme.primary, Theme.secondary, 0.55)],
+            "direction": "diagonal",
+        }, "elevation": Elevation.CARD},
+        child=Column(key="hero_body", spacing=Spacing.XS,
+                     horizontal_alignment="center", children=[
+                         Text("TAPS TODAY", key="hero_caption", size=11,
+                              weight=700, color=Colors.with_opacity(Colors.WHITE, 0.75),
+                              style={"font": {"letterSpacing": 0.12}}),
+                         Text(str(counter.value), key="counter_value", size=56,
+                              weight=700, color=Colors.WHITE),
+                         SizedBox(height=Spacing.SM),
+                         Row(key="hero_actions", spacing=Spacing.SM, children=[
+                             Button("Reset", key="reset_btn", variant="outlined",
+                                    bg_color=Colors.WHITE, size="sm",
+                                    color=Colors.WHITE).on_click(reset),
+                             Button("Tap me", key="tap_btn", icon=Icons.ADD,
+                                    bg_color=Colors.WHITE, size="sm",
+                                    color=Theme.primary).on_click(increment),
+                         ]),
+                     ]),
     )
+
+    done = len(todos.value)
+    stats = Row(key="stats", spacing=Spacing.MD, children=[
+        stat("Open tasks", str(done), Icons.CHECK_CIRCLE, "stat_tasks"),
+        stat("Daily goal", f"{min(counter.value, 10)}/10", Icons.STAR,
+             "stat_goal", color=Theme.secondary),
+    ])
+
+    todo_card = Card(key="todo_card", padding=Spacing.LG, child=Column(
+        key="todo_body", spacing=Spacing.MD, children=[
+            Row(key="todo_head", vertical_alignment="center", children=[
+                Text("To-do", key="todo_title", size=17, weight=600,
+                     color=Theme.text),
+                Container(key="todo_head_gap", expand=1),
+                Badge(done, key="todo_count",
+                      child=Icon(Icons.LIST, key="todo_count_icon", size=20,
+                                 color=Theme.text_secondary)),
+            ]),
+            Row(key="todo_entry", spacing=Spacing.SM, vertical_alignment="center",
+                children=[
+                    TextField(new_todo.value, key="todo_input",
+                              hint="What needs doing?", icon=Icons.EDIT,
+                              expand=1).on_change(_set_new_todo),
+                    Button("Add", key="todo_add", variant="tonal",
+                           size="md").on_click(_add_todo),
+                ]),
+            _todo_list(),
+        ]),
+    )
+
+    page.add(shell(
+        page,
+        key="home",
+        title="{{ project_name }}",
+        actions=[Icon(Icons.SEARCH, key="home_search", size=22,
+                      color=Theme.text_secondary)
+                 .on_click(lambda _e: router.push("showcase"))],
+        fab=FloatingActionButton(icon=Icons.ADD, key="fab", on_click=increment),
+        body=[hero, stats, todo_card],
+    ))
 
 
 def _todo_list():
     if not todos.value:
-        return Text("Nothing yet — add your first task.",
-                    key="todo_empty", size=13, color=Colors.TEXT_DISABLED)
+        return empty_state("Nothing yet", "Add your first task above.",
+                           Icons.CHECK, "todo_empty")
 
     rows = []
     for index, item in enumerate(todos.value):
-        rows.append(
-            Container(
+        if index:
+            rows.append(Divider(key=f"todo_div_{item}", indent=Spacing.XXL))
+        rows.append(Dismissible(
+            key=f"todo_swipe_{item}",
+            background=Theme.error,
+            on_dismiss=_remove_todo(item),
+            child=ListTile(
+                item,
                 key=f"todo_row_{item}",
-                padding=EdgeInsets.symmetric(vertical=6),
-                child=Row(key=f"todo_rowbody_{item}", spacing=8, children=[
-                    Text(f"{index + 1}.", key=f"todo_num_{item}",
-                         size=14, color=Colors.TEXT_DISABLED),
-                    Text(item, key=f"todo_text_{item}", size=15, expand=1),
-                    Icon(Icons.DELETE, key=f"todo_del_{item}", size=20,
-                         color=Colors.ERROR).on_click(_remove_todo(item)),
-                ]),
-            )
-        )
+                leading=Icons.CHECK_CIRCLE,
+                trailing=Icons.DELETE,
+                dense=True,
+                on_click=_remove_todo(item),
+            ),
+        ))
     return Column(key="todo_list", children=rows)
 
 
@@ -166,16 +333,23 @@ def _remove_todo(item):
     return handler
 
 
-def settings_screen(page):
-    page.bgcolor = Colors.BACKGROUND if not dark_mode.value else "#FF111827"
+# ── Settings ────────────────────────────────────────────────────────────────
 
+
+def settings_screen(page):
     def toggle_dark(event):
         dark_mode.value = bool(event.get("value"))
-        page.set_system_ui(
-            status_bar_color="#FF111827" if dark_mode.value else Colors.PRIMARY,
-            icon_brightness="light",
-        )
+        # One call re-themes Python widgets *and* the native layer
+        # (ripples, inputs, system bars).
+        page.set_theme_mode("dark" if dark_mode.value else "light")
         refresh()
+
+    def pick_accent(color):
+        def handler(_event):
+            accent.value = color
+            page.set_theme(color, dark=dark_mode.value)
+            refresh()
+        return handler
 
     def set_volume(event):
         volume.value = float(event.get("value", 0))
@@ -185,40 +359,124 @@ def settings_screen(page):
         agreed.value = bool(event.get("value"))
         refresh()
 
-    page.add(
-        Scaffold(
-            key="settings",
-            app_bar=AppBar(
-                title="Settings",
-                key="settings_bar",
-                bg_color=Colors.PRIMARY,
-                leading=Icon(Icons.BACK, key="settings_back", color=Colors.WHITE)
-                .on_click(lambda _e: router.pop()),
-            ),
-            body=Column(scroll=True, spacing=8, children=[
-                SizedBox(height=12),
-                Card(child=Column(spacing=12, children=[
-                    Switch("Dark mode", key="dark_switch",
-                           active=dark_mode.value).on_change(toggle_dark),
-                    Divider(),
-                    Text(f"Volume: {int(volume.value)}", key="volume_label", size=14),
-                    Slider(volume.value, key="volume_slider",
-                           min=0, max=100).on_change(set_volume),
-                    Divider(),
-                    Checkbox("I agree to the terms", key="agree_box",
-                             checked=agreed.value).on_change(set_agreed),
+    def set_corners(event):
+        name = list(CORNERS)[int(event.value or 0)]
+        corners.value = name
+        # One Python call restyles the whole app, natively.
+        page.configure(**CORNERS[name])
+
+    def set_text_size(event):
+        name = list(TEXT_SIZES)[int(event.value or 0)]
+        text_size.value = name
+        page.configure(font_scale=TEXT_SIZES[name])
+
+    appearance = Card(key="appearance_card", padding=0, child=Column(
+        key="appearance_body", children=[
+            ListTile("Dark mode", key="dark_tile",
+                     subtitle="Follow the night, not the sun",
+                     leading=Icons.DARK_MODE,
+                     trailing=Switch("", key="dark_switch",
+                                     active=dark_mode.value)
+                     .on_change(toggle_dark)),
+            Divider(key="appearance_div", indent=Spacing.HUGE),
+            Container(key="accent_row", padding=EdgeInsets(
+                left=Spacing.LG, right=Spacing.LG,
+                top=Spacing.MD, bottom=Spacing.LG),
+                child=Column(key="accent_body", spacing=Spacing.SM, children=[
+                    Text("Accent colour", key="accent_title", size=15,
+                         weight=500, color=Theme.text),
+                    Row(key="accent_swatches", spacing=Spacing.SM, children=[
+                        Container(
+                            key=f"accent_{name}",
+                            width=40, height=40,
+                            bg=color,
+                            border_radius=Radius.PILL,
+                            alignment="center",
+                            style={"feedback": True,
+                                   "elevation": Elevation.HAIRLINE},
+                            child=Icon(Icons.CHECK, key=f"accent_{name}_tick",
+                                       size=18, color=Colors.on(color))
+                            if accent.value == color else None,
+                        ).on_click(pick_accent(color))
+                        for name, color in ACCENTS
+                    ]),
                 ])),
-                Center(child=Button(
-                    "Show snackbar", key="snack_btn", bg_color=Colors.SECONDARY,
-                ).on_click(lambda _e: page.snack_bar("Settings saved", action="OK"))),
-            ]),
-        )
+        ]),
     )
+
+    style_card = Card(key="style_card", padding=Spacing.LG, child=Column(
+        key="style_body", spacing=Spacing.MD, children=[
+            Text("Corners", key="corners_title", size=15, weight=500,
+                 color=Theme.text),
+            SegmentedButton(list(CORNERS), key="corners_picker",
+                            selected=list(CORNERS).index(corners.value))
+            .on_change(set_corners),
+            Text("Text size", key="text_size_title", size=15, weight=500,
+                 color=Theme.text),
+            SegmentedButton(list(TEXT_SIZES), key="text_size_picker",
+                            selected=list(TEXT_SIZES).index(text_size.value))
+            .on_change(set_text_size),
+            Text("Design tokens live in Python — Theme.configure() pushes "
+                 "them to the native renderer.",
+                 key="style_hint", size=12, color=Theme.text_secondary),
+        ]),
+    )
+
+    preferences = Card(key="prefs_card", padding=Spacing.LG, child=Column(
+        key="prefs_body", spacing=Spacing.MD, children=[
+            Row(key="volume_head", vertical_alignment="center", children=[
+                Text("Volume", key="volume_title", size=15, weight=500,
+                     color=Theme.text),
+                Container(key="volume_gap", expand=1),
+                Text(f"{int(volume.value)}%", key="volume_label", size=14,
+                     weight=600, color=Theme.primary),
+            ]),
+            Slider(volume.value, key="volume_slider", min=0, max=100)
+            .on_change(set_volume),
+            Divider(key="prefs_div"),
+            Checkbox("I agree to the terms", key="agree_box",
+                     checked=agreed.value).on_change(set_agreed),
+        ]),
+    )
+
+    about = Card(key="about_card", padding=0, child=Column(
+        key="about_body", children=[
+            ListTile("Version", key="about_version", subtitle="{{ project_name }} 1.0.0",
+                     leading=Icons.INFO),
+            Divider(key="about_div", indent=Spacing.HUGE),
+            ListTile("Built with Pydrud", key="about_pydrud",
+                     subtitle="Native Android UI, written in Python",
+                     leading=Icons.CODE, trailing=Icons.CHEVRON_RIGHT,
+                     on_click=lambda _e: page.share.text(
+                         "I built this with Pydrud!")),
+        ]),
+    )
+
+    page.add(shell(
+        page,
+        key="settings",
+        title="Settings",
+        body=[
+            section("Appearance", "sec_appearance"),
+            appearance,
+            section("Style", "sec_style"),
+            style_card,
+            section("Preferences", "sec_prefs"),
+            preferences,
+            section("About", "sec_about"),
+            about,
+            Button("Save changes", key="save_btn", full_width=True,
+                   size="lg").on_click(
+                       lambda _e: page.snack_bar("Settings saved", action="OK")),
+        ],
+    ))
+
+
+# ── Gallery ─────────────────────────────────────────────────────────────────
 
 
 def showcase_screen(page):
-    """A tour of the Pydrud 1.2 component library."""
-    page.bgcolor = Colors.BACKGROUND if not dark_mode.value else "#FF111827"
+    """A tour of the component library."""
 
     def select_tab(event):
         tab_index.value = int(event.value or 0)
@@ -253,100 +511,118 @@ def showcase_screen(page):
         page.haptics.impact("light")
         page.snack_bar("Saved to device storage", action="OK")
 
-    components_tab = Column(spacing=12, children=[
-        SizedBox(height=8),
-        Row(key="showcase_people", spacing=8, children=[
-            Avatar(initials="AD", key="avatar_ad"),
-            Avatar(icon=Icons.PERSON, key="avatar_icon", bg=Colors.TEAL),
-            Badge(3, key="avatar_badge",
-                  child=Icon(Icons.NOTIFICATIONS, key="bell", size=28)),
-        ]),
+    components_tab = Column(key="tab_components", spacing=Spacing.LG, children=[
+        SizedBox(height=Spacing.MD),
         SearchBar(query.value, key="showcase_search",
                   hint="Search components").on_change(search),
-        Row(key="showcase_chips", spacing=8, children=[
+        Row(key="showcase_people", spacing=Spacing.MD,
+            vertical_alignment="center", children=[
+                Avatar(initials="AD", key="avatar_ad"),
+                Avatar(icon=Icons.PERSON, key="avatar_icon",
+                       bg=Theme.secondary),
+                Badge(3, key="avatar_badge",
+                      child=Icon(Icons.NOTIFICATIONS, key="bell", size=26,
+                                 color=Theme.text_secondary)),
+                Container(key="people_gap", expand=1),
+                Rating(rating.value, key="showcase_rating",
+                       size=22).on_change(set_rating),
+            ]),
+        Row(key="showcase_chips", spacing=Spacing.SM, scroll=True, children=[
             Chip(name, key=f"chip_{name}", variant="filter",
                  selected=name in interests.value).on_change(
                      toggle_interest(name))
-            for name in ("Python", "Android", "Flutter")
+            for name in ("Python", "Android", "Flutter", "Kotlin")
         ]),
-        Card(key="showcase_list", child=Column(children=[
-            ListTile("Profile", key="tile_profile", subtitle="Name and photo",
-                     leading=Icons.PERSON, trailing=Icons.CHEVRON_RIGHT),
-            Divider(key="tile_divider"),
-            ListTile("Notifications", key="tile_notify",
-                     subtitle="Sounds and badges", leading=Icons.NOTIFICATIONS,
-                     trailing=Icons.CHEVRON_RIGHT),
-        ])),
-        Dismissible(key="swipe_row", background=Colors.ERROR,
-                    child=Card(key="swipe_card", child=Text(
-                        "Swipe me away", key="swipe_text")),
+        Card(key="showcase_list", padding=0, child=Column(
+            key="showcase_list_body", children=[
+                ListTile("Profile", key="tile_profile",
+                         subtitle="Name and photo", leading=Icons.PERSON,
+                         trailing=Icons.CHEVRON_RIGHT),
+                Divider(key="tile_divider", indent=Spacing.HUGE),
+                ListTile("Notifications", key="tile_notify",
+                         subtitle="Sounds and badges",
+                         leading=Icons.NOTIFICATIONS,
+                         trailing=Icons.CHEVRON_RIGHT),
+            ])),
+        Dismissible(key="swipe_row", background=Theme.error,
+                    child=Card(key="swipe_card", child=Row(
+                        key="swipe_body", spacing=Spacing.MD,
+                        vertical_alignment="center", children=[
+                            Icon(Icons.DRAG, key="swipe_icon", size=20,
+                                 color=Theme.text_secondary),
+                            Text("Swipe me away", key="swipe_text", size=15,
+                                 color=Theme.text),
+                        ])),
                     on_dismiss=lambda _e: page.toast("Dismissed")),
-        Rating(rating.value, key="showcase_rating").on_change(set_rating),
-        Text(f"You rated this {rating.value:g}/5", key="rating_label", size=13,
-             color=Colors.TEXT_SECONDARY),
     ])
 
-    data_tab = Column(spacing=12, children=[
-        SizedBox(height=8),
-        Text("Weekly taps", key="chart_title", size=16, weight=600),
-        Chart([counter.value, 3, 7, 4, 9, 6, 8], key="showcase_chart",
-              kind="bar", labels=["M", "T", "W", "T", "F", "S", "S"]),
-        ProgressBar(min(counter.value / 10, 1.0), key="goal_bar"),
-        Text(f"Daily goal: {min(counter.value, 10)}/10", key="goal_label",
-             size=13, color=Colors.TEXT_SECONDARY),
+    data_tab = Column(key="tab_data", spacing=Spacing.LG, children=[
+        SizedBox(height=Spacing.MD),
+        Card(key="chart_card", padding=Spacing.LG, child=Column(
+            key="chart_body", spacing=Spacing.MD, children=[
+                Text("Weekly taps", key="chart_title", size=16, weight=600,
+                     color=Theme.text),
+                Chart([counter.value, 3, 7, 4, 9, 6, 8], key="showcase_chart",
+                      kind="bar", labels=["M", "T", "W", "T", "F", "S", "S"]),
+            ])),
+        Card(key="goal_card", padding=Spacing.LG, child=Column(
+            key="goal_body", spacing=Spacing.SM, children=[
+                Row(key="goal_head", vertical_alignment="center", children=[
+                    Text("Daily goal", key="goal_title", size=15, weight=500,
+                         color=Theme.text),
+                    Container(key="goal_gap", expand=1),
+                    Text(f"{min(counter.value, 10)}/10", key="goal_label",
+                         size=14, weight=600, color=Theme.primary),
+                ]),
+                ProgressBar(min(counter.value / 10, 1.0), key="goal_bar"),
+            ])),
         SegmentedButton(["Day", "Week", "Month"], key="range_picker",
                         selected=1),
     ])
 
-    actions_tab = Column(spacing=12, children=[
-        SizedBox(height=8),
+    actions_tab = Column(key="tab_actions", spacing=Spacing.MD, children=[
+        SizedBox(height=Spacing.MD),
         FadeIn(key="actions_intro", animation=Animation.normal(),
                child=Text("Native power, from Python.", key="actions_text",
-                          size=16, weight=600)),
-        Button("Confirm dialog", key="dialog_btn").on_click(confirm_delete),
-        Button("Save to storage", key="storage_btn",
-               bg_color=Colors.SECONDARY).on_click(save_note),
-        Button("Share this app", key="share_btn", variant="outlined").on_click(
-            lambda _e: page.share.text("Built with Pydrud!")),
+                          size=16, weight=600, color=Theme.text)),
+        Button("Confirm dialog", key="dialog_btn", full_width=True,
+               variant="tonal").on_click(confirm_delete),
+        Button("Save to storage", key="storage_btn", full_width=True,
+               variant="tonal").on_click(save_note),
+        Button("Share this app", key="share_btn", full_width=True,
+               variant="outlined").on_click(
+                   lambda _e: page.share.text("Built with Pydrud!")),
         GestureDetector(
             key="gesture_box",
-            child=Container(key="gesture_card", bg=Colors.SURFACE,
-                            padding=24, border_radius=12,
+            child=Container(key="gesture_card", bg=Theme.surface_variant,
+                            padding=Spacing.XL, border_radius=Radius.LG,
+                            alignment="center",
                             child=Text("Double-tap or swipe me",
-                                       key="gesture_text")),
+                                       key="gesture_text", size=14,
+                                       color=Theme.text_secondary)),
             on_double_tap=lambda _e: page.toast("Double tap!"),
             on_swipe_left=lambda _e: page.toast("Swiped left"),
             on_swipe_right=lambda _e: page.toast("Swiped right"),
         ),
     ])
 
-    page.add(
-        Scaffold(
-            key="showcase",
-            app_bar=AppBar(
-                title="Showcase",
-                key="showcase_bar",
-                bg_color=Colors.PRIMARY,
-                leading=Icon(Icons.BACK, key="showcase_back",
-                             color=Colors.WHITE).on_click(
-                                 lambda _e: router.pop()),
-            ),
-            body=Column(scroll=True, children=[
-                Tabs(
-                    [
-                        Tab("Components", content=components_tab),
-                        Tab("Data", content=data_tab),
-                        Tab("Actions", content=actions_tab),
-                    ],
-                    key="showcase_tabs",
-                    selected=tab_index.value,
-                ).on_change(select_tab),
-            ]),
-        )
-    )
+    page.add(shell(
+        page,
+        key="showcase",
+        title="Gallery",
+        body=[Tabs(
+            [
+                Tab("Components", content=components_tab),
+                Tab("Data", content=data_tab),
+                Tab("Actions", content=actions_tab),
+            ],
+            key="showcase_tabs",
+            selected=tab_index.value,
+        ).on_change(select_tab)],
+    ))
 
 
-# ── Entry Point ─────────────────────────────────────────────────────────────
+# ── Entry point ─────────────────────────────────────────────────────────────
 
 router.define("home", home_screen)
 router.define("showcase", showcase_screen)
@@ -362,6 +638,7 @@ def main(page):
 def start_app():
     """Called by MainActivity via Chaquopy."""
     global app
+    Theme.seed(accent.value)
     app = App(target=router.build_root(), title="{{ project_name }}")
     app.attach_router(router)
     # Deep links ({{ scheme }}://showcase), launcher shortcuts and push

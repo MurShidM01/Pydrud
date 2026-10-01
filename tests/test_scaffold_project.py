@@ -143,7 +143,8 @@ class TestGeneratedProject(unittest.TestCase):
                 for w in widgets
                 if w._widget_type == "Text"
             ]
-            self.assertIn("taps so far", texts)
+            self.assertIn("TAPS TODAY", texts)
+            self.assertIn("To-do", texts)
         finally:
             sys.path.remove(self.path("src"))
             for mod in [m for m in list(sys.modules) if m.startswith("app")]:

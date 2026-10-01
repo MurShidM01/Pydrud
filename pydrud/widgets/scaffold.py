@@ -125,14 +125,28 @@ class Scaffold(Widget):
             )
         ]
         if self.floating_action_button is not None:
-            self.floating_action_button.style.setdefault(
-                "fabPosition", self.fab_position)
-            stack_children.append(self.floating_action_button)
+            fab = self.floating_action_button
+            fab.style.setdefault("fabPosition", self.fab_position)
+            # Lift the FAB above a bottom bar instead of letting it sit on
+            # top of the navigation items.
+            bar = self.bottom_navigation or self.bottom_bar
+            if bar is not None and not fab.style.get("_fabLifted"):
+                from pydrud.widgets.tokens import Tokens
+
+                base = fab.style.get("bottom", 24)
+                fab.style["bottom"] = base + Tokens.nav_height
+                fab.style["_fabLifted"] = True
+                # The bar already clears the gesture inset.
+                fab.style.setdefault("safeAreaBottom", False)
+            stack_children.append(fab)
 
         for drawer, side in ((self.drawer, "start"), (self.end_drawer, "end")):
             if drawer is not None:
                 drawer.style["drawerSide"] = side
                 stack_children.append(drawer)
+
+        if self.safe_area:
+            self._absorb_insets(column_children, body_container)
 
         stack_style: dict = {"width": "match", "height": "match",
                              "safeArea": self.safe_area,
@@ -147,6 +161,20 @@ class Scaffold(Widget):
             expand=self.expand if self.expand is not None else 1,
             children=stack_children,
         )
+
+    def _absorb_insets(self, column_children: list, body_container) -> None:
+        """Let the widgets at the screen edges pad themselves.
+
+        Pydrud draws edge to edge, so instead of inseting the whole page
+        (which leaves grey strips behind the system bars) the top-most and
+        bottom-most widgets extend their own background under the bars.
+        """
+        top = column_children[0] if column_children else body_container
+        bottom = (self.bottom_navigation or self.bottom_bar
+                  or (body_container if top is not body_container else None)
+                  or body_container)
+        top.style["safeAreaTop"] = True
+        bottom.style["safeAreaBottom"] = True
 
     def rebuild(self) -> None:
         """Re-create the internal layout (after mutating body/app_bar/…)."""

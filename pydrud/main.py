@@ -598,6 +598,10 @@ class App:
                 self._transport = sock
                 self._connected = True
 
+                # Push the palette first so the very first frame is drawn
+                # with the app's colours (no white flash, no stock blue).
+                self._send_theme()
+
                 # Send the full initial tree.
                 if self._current_tree is None:
                     self._build_tree()
@@ -645,6 +649,32 @@ class App:
                     self._transport.sendall(msg.encode("utf-8"))
             except Exception:
                 self._connected = False
+
+    def _send_theme(self) -> None:
+        """Hand the current palette to the native renderer.
+
+        Native widgets (ripples, switches, inputs, the status bar) read
+        their colours from ``PydrudTheme`` on the Java side; this keeps
+        that in step with :class:`pydrud.widgets.theme.Theme`.
+        """
+        try:
+            from pydrud.widgets.theme import Theme as _Theme
+
+            payload = _Theme.payload()
+        except Exception:  # pragma: no cover - defensive
+            return
+        self._send(json.dumps({"cmd": "theme", **payload}) + "\n")
+
+    def apply_theme(self) -> None:
+        """Re-send the palette and repaint after changing :class:`Theme`.
+
+        ::
+
+            Theme.dark()
+            app.apply_theme()
+        """
+        self._send_theme()
+        self.render()
 
     def _reader_loop(self, sock):
         """Background thread: read NDJSON lines from the socket and enqueue them."""
@@ -780,7 +810,8 @@ class App:
         width = d.get("width", 360)
         height = d.get("height", 640)
         density = d.get("density", 2.0)
-        _R.init(width_dp=width, height_dp=height, density=density)
+        _R.init(width_dp=width, height_dp=height, density=density,
+                text_scale=d.get("text_scale", 1.0))
         _MQ.init(
             width_dp=width,
             height_dp=height,
@@ -1154,6 +1185,41 @@ class _Page:
         elif mode == "light":
             Theme.light()
         self._send("theme_mode", mode=mode)
+        if mode in ("dark", "light"):
+            # Repaint natively-styled widgets with the new palette.
+            self._app.apply_theme()
+
+    def set_theme(self, seed: str, *, dark: Optional[bool] = None) -> None:
+        """Rebuild the palette from a brand colour and repaint.
+
+        ::
+
+            page.set_theme(Colors.TEAL)
+            page.set_theme("#FFEF4444", dark=True)
+        """
+        from pydrud.widgets.theme import Theme
+
+        if dark is not None:
+            self.theme_mode = "dark" if dark else "light"
+            Theme.dark_mode = bool(dark)
+        Theme.seed(seed)
+        self._app.apply_theme()
+
+    def configure(self, **values) -> None:
+        """Restyle the running app from Python — colours *and* metrics.
+
+        Accepts any colour role or design token and repaints immediately::
+
+            page.configure(primary="#FF0EA5E9")        # brand colour
+            page.configure(radius_card=24, font_scale=1.1)
+            page.configure(app_bar_height=64, nav_height=72)
+
+        See :class:`pydrud.Tokens` for the full list.
+        """
+        from pydrud.widgets.theme import Theme
+
+        Theme.configure(**values)
+        self._app.apply_theme()
 
     def _send(self, cmd: str, **data) -> None:
         self._app._send(self._app._bridge.encode_command(cmd, **data))

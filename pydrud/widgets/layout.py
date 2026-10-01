@@ -163,23 +163,40 @@ class Spacer(Widget):
 
 
 class Divider(Widget):
-    """A horizontal or vertical dividing line."""
+    """A hairline rule.
+
+    Defaults to the theme outline colour and a true 1-pixel line, with
+    optional ``indent`` so it starts where the text starts (the Material
+    inset-divider look)::
+
+        Divider()                  # full width hairline
+        Divider(indent=56)         # aligned with list-tile text
+    """
 
     _widget_type = "Divider"
 
     def __init__(
         self,
         *,
-        color: str = "#FFCCCCCC",
-        thickness: float = 1.0,
+        color: Optional[str] = None,
+        thickness: Optional[float] = None,
+        indent: float = 0,
+        end_indent: float = 0,
         key: Optional[str] = None,
         style: Optional[dict] = None,
         visible: bool = True,
         **kwargs,
     ):
         super().__init__(key=key, style=style, visible=visible, **kwargs)
-        self.style["color"] = color
-        self.style["thickness"] = thickness
+        from pydrud.widgets.theme import Theme
+        from pydrud.widgets.tokens import Tokens
+
+        self.style["color"] = color or Theme.outline
+        self.style["thickness"] = (Tokens.divider_thickness
+                                   if thickness is None else thickness)
+        if indent or end_indent:
+            self.style["margin"] = EdgeInsets(
+                left=indent, right=end_indent).to_dict()
 
 
 class Stack(Widget):
@@ -297,7 +314,15 @@ class Padding(Widget):
 
 
 class Card(Widget):
-    """A rounded, elevated surface — Material card."""
+    """A rounded surface — Material 3 card.
+
+    Defaults to the *filled/outlined* look modern Material uses (a soft
+    hairline instead of a heavy drop shadow).  Pass ``elevation`` for the
+    classic raised card, or ``outlined=False`` to drop the hairline::
+
+        Card(child=Text("Hello"))                  # flat, outlined
+        Card(child=Text("Hi"), elevation=3)        # raised
+    """
 
     _widget_type = "Card"
 
@@ -306,11 +331,13 @@ class Card(Widget):
         *,
         child: Optional[Widget] = None,
         content: Optional[Widget] = None,
-        bg: str = "#FFFFFFFF",
-        elevation: float = 2,
-        border_radius: float = 12,
-        padding: Union[EdgeInsets, float, int, dict] = 16,
-        margin: Union[EdgeInsets, float, int, dict] = 8,
+        bg: Optional[str] = None,
+        elevation: Optional[float] = None,
+        border_radius: Optional[float] = None,
+        padding: Union[EdgeInsets, float, int, dict, None] = None,
+        margin: Union[EdgeInsets, float, int, dict] = 0,
+        outlined: Optional[bool] = None,
+        on_click=None,
         key: Optional[str] = None,
         style: Optional[dict] = None,
         expand: Optional[int] = None,
@@ -318,17 +345,39 @@ class Card(Widget):
         **kwargs,
     ):
         super().__init__(key=key, style=style, expand=expand, visible=visible, **kwargs)
+        from pydrud.widgets.styling import Border
+        from pydrud.widgets.theme import Theme
+
+        from pydrud.widgets.tokens import Tokens
+
         actual_child = child if child is not None else content
         if actual_child is not None:
             self.children = [actual_child]
+        # Defaults come from the design tokens, so Theme.configure(
+        # radius_card=…) restyles every card in the app.
+        if elevation is None:
+            elevation = Tokens.elevation_card
+        if border_radius is None:
+            border_radius = Tokens.radius_card
+        if padding is None:
+            padding = Tokens.card_padding
         base = {
-            "bg": bg,
+            "bg": bg or Theme.surface,
             "elevation": elevation,
             "borderRadius": border_radius,
             "padding": _edge_dict(padding),
             "margin": _edge_dict(margin),
             "width": "match",
         }
+        # A hairline reads as "card" without the muddy shadow; skip it
+        # when the card is deliberately raised.
+        if outlined is None:
+            outlined = elevation <= 0
+        if outlined:
+            base["border"] = Border(Theme.outline, 1).to_dict()
+        if on_click is not None:
+            self.event_handlers["click"] = on_click
+            base.setdefault("feedback", True)
         base.update(self.style)
         self.style = base
 

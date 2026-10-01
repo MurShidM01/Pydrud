@@ -47,17 +47,33 @@ public class {{ app_name }}Activity extends AppCompatActivity {
 
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
 
+        // Design tokens have to exist before the first view is built.
+        PydrudTheme.init(this);
+
         rootView = new FrameLayout(this);
         rootView.setLayoutParams(new ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT));
+        rootView.setBackgroundColor(PydrudTheme.background);
         setContentView(rootView);
 
-        // Keep content clear of the status bar / navigation bar / IME.
+        // Edge-to-edge with readable system bars, and no white flash while
+        // Python boots.
+        getWindow().setBackgroundDrawable(
+            new android.graphics.drawable.ColorDrawable(PydrudTheme.background));
+        applySystemBarAppearance();
+
+        // Edge-to-edge: the window extends behind the system bars and the
+        // widgets that touch an edge (app bar, bottom navigation) pad
+        // themselves, so their surface continues under the bars instead of
+        // leaving a grey strip. Side insets and the keyboard are handled
+        // here because they affect every screen.
         ViewCompat.setOnApplyWindowInsetsListener(rootView, (v, windowInsets) -> {
-            Insets bars = windowInsets.getInsets(
-                WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.ime());
-            v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+            Insets bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars());
+            Insets ime = windowInsets.getInsets(WindowInsetsCompat.Type.ime());
+            PydrudTheme.setInsets(bars.left, bars.top, bars.right, bars.bottom);
+            v.setPadding(bars.left, 0, bars.right, Math.max(0, ime.bottom - bars.bottom));
+            if (viewFactory != null) viewFactory.refreshInsets();
             return WindowInsetsCompat.CONSUMED;
         });
 
@@ -98,10 +114,40 @@ public class {{ app_name }}Activity extends AppCompatActivity {
     private void showFatal(Throwable t) {
         android.widget.TextView tv = new android.widget.TextView(this);
         tv.setText("Pydrud failed to start:\n\n" + t);
-        tv.setTextColor(0xFFB91C1C);
-        tv.setPadding(48, 48, 48, 48);
+        PydrudTheme.applyTextDefaults(tv, 14f, 500, 0xFFB91C1C);
+        tv.setPadding(PydrudTheme.dp(24), PydrudTheme.dp(24),
+                      PydrudTheme.dp(24), PydrudTheme.dp(24));
         rootView.removeAllViews();
         rootView.addView(tv);
+    }
+
+    /**
+     * Keep the status/navigation bar icons readable against the app
+     * background, and let the content draw behind them.
+     */
+    public void applySystemBarAppearance() {
+        try {
+            getWindow().setStatusBarColor(android.graphics.Color.TRANSPARENT);
+            getWindow().setNavigationBarColor(android.graphics.Color.TRANSPARENT);
+            androidx.core.view.WindowInsetsControllerCompat controller =
+                WindowCompat.getInsetsController(getWindow(), rootView);
+            if (controller != null) {
+                boolean lightBars = !PydrudTheme.dark;
+                controller.setAppearanceLightStatusBars(lightBars);
+                controller.setAppearanceLightNavigationBars(lightBars);
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    /** Adopt a palette pushed from Python and repaint the shell. */
+    public void applyTheme(final org.json.JSONObject scheme) {
+        runOnUiThread(() -> {
+            PydrudTheme.apply(scheme);
+            if (rootView != null) rootView.setBackgroundColor(PydrudTheme.background);
+            getWindow().setBackgroundDrawable(
+                new android.graphics.drawable.ColorDrawable(PydrudTheme.background));
+            applySystemBarAppearance();
+        });
     }
 
     // ── Platform results ──────────────────────────────────────────────────
@@ -266,10 +312,14 @@ public class {{ app_name }}Activity extends AppCompatActivity {
         runOnUiThread(() -> {
             switch (mode) {
                 case "dark":
+                    PydrudTheme.useDark();
+                    applySystemBarAppearance();
                     androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(
                         androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_YES);
                     break;
                 case "light":
+                    PydrudTheme.useLight();
+                    applySystemBarAppearance();
                     androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(
                         androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_NO);
                     break;

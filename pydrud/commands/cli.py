@@ -1,5 +1,5 @@
 """
-Pydrud CLI — ``pydrud init``, ``run``, ``build``, ``clean``, ``doctor``.
+Pydrud CLI — ``pydrud init``, ``run``, ``sync``, ``build``, ``clean``, ``doctor``.
 
 Powered by Click.
 """
@@ -60,10 +60,33 @@ def main():
 @click.option("--org", default="com.example", help="Android package / organisation prefix.")
 @click.option("--min-sdk", default=24, help="Minimum Android API level.")
 @click.option("--target-sdk", default=35, help="Target Android API level.", show_default=True)
-def init(name, org, min_sdk, target_sdk):
+@click.option("--accent", default=None, metavar="COLOR",
+              help="Brand colour the whole UI is generated from, "
+                   "e.g. --accent '#FF0EA5E9'.")
+def init(name, org, min_sdk, target_sdk, accent):
     """Create a new Pydrud project."""
     from pydrud.commands.project import create_project
-    create_project(name, org=org, min_sdk=min_sdk, target_sdk=target_sdk)
+    create_project(name, org=org, min_sdk=min_sdk, target_sdk=target_sdk,
+                   accent=accent)
+
+
+@main.command()
+@click.option("--no-runtime", is_flag=True, default=False,
+              help="Only refresh the Java layer, keep the bundled Python runtime.")
+def sync(no_runtime):
+    """Upgrade an existing project to this version of Pydrud.
+
+    Rewrites the generated Android renderer, theme resources and the
+    bundled runtime. Your app code in ``src/app/`` is left alone.
+    """
+    from pydrud.commands.project import sync_project
+
+    root = _find_project_root()
+    if not root:
+        click.echo("Not inside a Pydrud project (no pydrud.yaml found).")
+        sys.exit(1)
+    if not sync_project(root, update_runtime=not no_runtime):
+        sys.exit(1)
 
 
 @main.command()
