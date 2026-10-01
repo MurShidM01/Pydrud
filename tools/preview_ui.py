@@ -409,8 +409,13 @@ class Renderer:
         total_weight = sum(weights) or 1
         for child, base, weight in zip(children, fixed, weights):
             child_w = base if not weight else max(0, free * weight / total_weight)
-            child_h = self.measure(child, child_w)
-            self.draw(child, cx, cy + max(0, (ch - child_h) / 2), child_w)
+            fills = (child.get("style") or {}).get("height") in ("match", 0) \
+                or child.get("type") in ("NavigationRail", "Column", "ListView")
+            if fills:
+                self.draw(child, cx, cy, child_w, ch)
+            else:
+                child_h = self.measure(child, child_w)
+                self.draw(child, cx, cy + max(0, (ch - child_h) / 2), child_w)
             cx += child_w + spacing
 
     #: Widgets the native layer lays out full-width by default.
@@ -419,6 +424,9 @@ class Renderer:
         "BottomNavigationBar", "ProgressBar", "SegmentedButton", "Chart",
         "Stack", "RefreshIndicator", "Form", "Slider",
     }
+
+    #: Fixed-width widgets the native layer sizes for us.
+    INTRINSIC = {"NavigationRail": 80}
 
     def _intrinsic_width(self, child, available):
         """Width the child would take on device (wrap_content by default)."""
@@ -430,6 +438,8 @@ class Renderer:
             return float(width)
         if width == "match" or child.get("expand"):
             return available
+        if kind in self.INTRINSIC:
+            return self.INTRINSIC[kind]
         if kind in self.FILL_BY_DEFAULT:
             return available
 
@@ -489,8 +499,32 @@ class Renderer:
     def _draw_center(self, node, x, y, w, h, style, props):
         for child in node.get("children") or []:
             cw = self._intrinsic_width(child, w)
-            ch = self.measure(child, cw)
-            self.draw(child, x + (w - cw) / 2, y + max(0, (h - ch) / 2), cw)
+            fills = (child.get("style") or {}).get("height") == "match"
+            ch = h if fills else self.measure(child, cw)
+            offset = 0 if fills else max(0, (h - ch) / 2)
+            self.draw(child, x + (w - cw) / 2, y + offset, cw, ch if fills else None)
+
+    def _draw_navigationrail(self, node, x, y, w, h, style, props):
+        self.p.rect((x, y, x + w, y + h), fill=_rgba(self.theme.surface))
+        self.p.rect((x + w - 1, y, x + w, y + h), fill=_rgba(self.theme.outline))
+        items = props.get("items") or []
+        top = y + 24
+        for i, item in enumerate(items):
+            selected = i == props.get("selected", 0)
+            color = (_rgba(self.theme.primary) if selected
+                     else _rgba(self.theme.text_secondary))
+            cx = x + w / 2
+            if selected:
+                self.p.rect((cx - 28, top, cx + 28, top + 32),
+                            fill=_alpha(_rgba(self.theme.primary), 0.14),
+                            radius=16)
+            self.p.icon(item.get("icon", "help"), cx - 11, top + 5, 22, color)
+            label = item.get("label", "")
+            tw = self.p.draw.textlength(label, font=_font(11.5, 600 if selected
+                                                          else 500)) / SCALE
+            self.p.text(cx - tw / 2, top + 36, label, 11.5,
+                        600 if selected else 500, color)
+            top += 72
 
     def _draw_text(self, node, x, y, w, h, style, props):
         font = style.get("font") or {}
