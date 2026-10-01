@@ -120,6 +120,18 @@ renderer.
   theme, so they stay readable in dark mode.
 * Chart series now walk a generated palette instead of repeating one
   colour.
+* **A freshly generated project compiles again.** `ChartView` is a
+  `static` nested class, so its calls to `MaterialViews`' instance
+  helpers (`dp`, `parseColor`) made `javac` fail with *"non-static
+  method ... cannot be referenced from a static context"*; it now goes
+  through `PydrudTheme` directly. A test walks every Java template and
+  fails on any static nested class that touches an outer instance
+  member.
+* `pydrud run` no longer forces `buildPython` to whatever `python`
+  resolves to. It picks an interpreter matching the app's Python
+  (3.11) — and honours an explicit `PYDRUD_PYTHON` — so Chaquopy stops
+  warning *"buildPython version 3.12.x is incompatible"* and can
+  pre-compile to `.pyc`.
 
 ## [1.3.0] — The "ship it" release
 

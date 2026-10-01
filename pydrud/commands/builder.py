@@ -422,10 +422,20 @@ class Builder:
         env = os.environ.copy()
         env["ANDROID_HOME"] = self.sdk_dir
         env["ANDROID_SDK_ROOT"] = self.sdk_dir
-        env["PYDRUD_PYTHON"] = shutil.which("python") or shutil.which("python3") or sys.executable
+
+        config = self._load_config(self.root)
+
+        # buildPython: an explicit PYDRUD_PYTHON wins, otherwise pick an
+        # interpreter matching the app's Python so Chaquopy can pre-compile
+        # to .pyc instead of warning that the version "is incompatible".
+        if not os.environ.get("PYDRUD_PYTHON"):
+            from pydrud.commands.project import (
+                APP_PYTHON_VERSION, _detect_build_python,
+            )
+            target = config.get("python_version", "") or APP_PYTHON_VERSION
+            env["PYDRUD_PYTHON"] = _detect_build_python(target)
 
         # NDK version: pydrud.yaml > SDK auto-detection > hardcoded fallback.
-        config = self._load_config(self.root)
         ndk_version = config.get("ndk", "")
         if not ndk_version:
             ndk_dir = os.path.join(self.sdk_dir, "ndk")
