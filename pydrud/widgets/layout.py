@@ -180,3 +180,225 @@ class Divider(Widget):
         super().__init__(key=key, style=style, visible=visible, **kwargs)
         self.style["color"] = color
         self.style["thickness"] = thickness
+
+
+class Stack(Widget):
+    """Overlays children on top of each other (like Flutter's ``Stack``).
+
+    Children are drawn in order; use :class:`Positioned` (or the
+    ``alignment`` style) to place them inside the stack.
+    """
+
+    _widget_type = "Stack"
+
+    def __init__(
+        self,
+        *,
+        children: Optional[list[Widget]] = None,
+        alignment: Optional[str] = None,
+        width: Optional[Union[float, str]] = None,
+        height: Optional[Union[float, str]] = None,
+        key: Optional[str] = None,
+        style: Optional[dict] = None,
+        expand: Optional[int] = None,
+        visible: bool = True,
+        **kwargs,
+    ):
+        super().__init__(key=key, style=style, expand=expand, visible=visible, **kwargs)
+        self.children = list(children) if children else []
+        self.style.setdefault("width", width if width is not None else "match")
+        self.style.setdefault("height", height if height is not None else "match")
+        if alignment:
+            self.style["alignment"] = alignment
+
+    def add(self, *widgets: Widget) -> "Stack":
+        self.children.extend(widgets)
+        return self
+
+
+class Positioned(Widget):
+    """Positions a single child at absolute offsets inside a :class:`Stack`."""
+
+    _widget_type = "Positioned"
+
+    def __init__(
+        self,
+        *,
+        child: Optional[Widget] = None,
+        left: Optional[float] = None,
+        top: Optional[float] = None,
+        right: Optional[float] = None,
+        bottom: Optional[float] = None,
+        width: Optional[Union[float, str]] = None,
+        height: Optional[Union[float, str]] = None,
+        key: Optional[str] = None,
+        style: Optional[dict] = None,
+        visible: bool = True,
+        **kwargs,
+    ):
+        super().__init__(key=key, style=style, visible=visible, **kwargs)
+        if child is not None:
+            self.children = [child]
+        self.style["position"] = "absolute"
+        for name, value in (
+            ("left", left), ("top", top), ("right", right), ("bottom", bottom),
+        ):
+            if value is not None:
+                self.style[name] = value
+        if width is not None:
+            self.style["width"] = width
+        if height is not None:
+            self.style["height"] = height
+
+
+class SizedBox(Widget):
+    """A fixed-size empty box — handy for precise gaps."""
+
+    _widget_type = "SizedBox"
+
+    def __init__(
+        self,
+        *,
+        width: float = 0,
+        height: float = 0,
+        child: Optional[Widget] = None,
+        key: Optional[str] = None,
+        style: Optional[dict] = None,
+        visible: bool = True,
+        **kwargs,
+    ):
+        super().__init__(key=key, style=style, visible=visible, **kwargs)
+        if child is not None:
+            self.children = [child]
+        self.style["width"] = width
+        self.style["height"] = height
+
+
+class Padding(Widget):
+    """Applies padding around a single child."""
+
+    _widget_type = "Padding"
+
+    def __init__(
+        self,
+        padding: Union[EdgeInsets, float, int, dict] = 0,
+        *,
+        child: Optional[Widget] = None,
+        key: Optional[str] = None,
+        style: Optional[dict] = None,
+        expand: Optional[int] = None,
+        visible: bool = True,
+        **kwargs,
+    ):
+        super().__init__(key=key, style=style, expand=expand, visible=visible, **kwargs)
+        if child is not None:
+            self.children = [child]
+        self.style["padding"] = _edge_dict(padding)
+
+
+class Card(Widget):
+    """A rounded, elevated surface — Material card."""
+
+    _widget_type = "Card"
+
+    def __init__(
+        self,
+        *,
+        child: Optional[Widget] = None,
+        content: Optional[Widget] = None,
+        bg: str = "#FFFFFFFF",
+        elevation: float = 2,
+        border_radius: float = 12,
+        padding: Union[EdgeInsets, float, int, dict] = 16,
+        margin: Union[EdgeInsets, float, int, dict] = 8,
+        key: Optional[str] = None,
+        style: Optional[dict] = None,
+        expand: Optional[int] = None,
+        visible: bool = True,
+        **kwargs,
+    ):
+        super().__init__(key=key, style=style, expand=expand, visible=visible, **kwargs)
+        actual_child = child if child is not None else content
+        if actual_child is not None:
+            self.children = [actual_child]
+        base = {
+            "bg": bg,
+            "elevation": elevation,
+            "borderRadius": border_radius,
+            "padding": _edge_dict(padding),
+            "margin": _edge_dict(margin),
+            "width": "match",
+        }
+        base.update(self.style)
+        self.style = base
+
+
+class ListView(Widget):
+    """A scrollable list of children (vertical by default)."""
+
+    _widget_type = "ListView"
+
+    def __init__(
+        self,
+        *,
+        children: Optional[list[Widget]] = None,
+        spacing: float = 0,
+        horizontal: bool = False,
+        padding: Optional[Union[EdgeInsets, float, int, dict]] = None,
+        key: Optional[str] = None,
+        style: Optional[dict] = None,
+        expand: Optional[int] = None,
+        visible: bool = True,
+        **kwargs,
+    ):
+        super().__init__(key=key, style=style, expand=expand, visible=visible, **kwargs)
+        self.children = list(children) if children else []
+        self.style["spacing"] = spacing
+        self.style["mainAxis"] = "horizontal" if horizontal else "vertical"
+        self.style["scroll"] = True
+        self.style.setdefault("width", "match")
+        if padding is not None:
+            self.style["padding"] = _edge_dict(padding)
+
+    def add(self, *widgets: Widget) -> "ListView":
+        self.children.extend(widgets)
+        return self
+
+
+class GridView(Widget):
+    """A simple fixed-column grid of children."""
+
+    _widget_type = "GridView"
+
+    def __init__(
+        self,
+        *,
+        children: Optional[list[Widget]] = None,
+        columns: int = 2,
+        spacing: float = 8,
+        key: Optional[str] = None,
+        style: Optional[dict] = None,
+        expand: Optional[int] = None,
+        visible: bool = True,
+        **kwargs,
+    ):
+        super().__init__(key=key, style=style, expand=expand, visible=visible, **kwargs)
+        self.children = list(children) if children else []
+        self.style["columns"] = max(1, int(columns))
+        self.style["spacing"] = spacing
+        self.style.setdefault("width", "match")
+
+    def add(self, *widgets: Widget) -> "GridView":
+        self.children.extend(widgets)
+        return self
+
+
+def _edge_dict(value: Union[EdgeInsets, float, int, dict]) -> dict:
+    """Normalise padding/margin input into a serialisable dict."""
+    if isinstance(value, EdgeInsets):
+        return value.to_dict()
+    if isinstance(value, (int, float)):
+        return EdgeInsets.all(value).to_dict()
+    if isinstance(value, dict):
+        return EdgeInsets(**value).to_dict()
+    raise TypeError(f"Unsupported edge value: {value!r}")

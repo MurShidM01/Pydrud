@@ -21,9 +21,13 @@ class State(Generic[T]):
         count.value += 1   # triggers watchers
     """
 
-    def __init__(self, initial: T):
+    def __init__(self, initial: T, *, name: str = ""):
         self._value: T = initial
         self._watchers: list[Callable[[T, T], None]] = []
+        #: Optional label. Naming a State lets stateful hot reload match it
+        #: to its replacement after a module is reloaded, even if the order
+        #: of declarations in the file changed.
+        self.name: str = name
 
     @property
     def value(self) -> T:
@@ -47,6 +51,8 @@ class State(Generic[T]):
             pass
 
     def __repr__(self) -> str:
+        if self.name:
+            return f"State({self._value!r}, name={self.name!r})"
         return f"State({self._value!r})"
 
 

@@ -37,13 +37,192 @@ pydrud run                            # Build, install, launch
 
 | Feature | Description |
 |---------|-------------|
-| Declarative UI | Compose screens with Python — Container, Column, Row, Text, Button, and more |
+| Declarative UI | 50+ widgets: layout, Material 3 components, charts, media, gestures, animations |
 | Reactive State | `State<T>` auto-triggers UI re-renders on value change |
 | Full Styling | Colors, padding, margin, borders, fonts, elevation, alignment |
 | Native Rendering | Every widget becomes a real Android View — not a WebView or canvas |
-| CLI Toolchain | `init` / `build` / `run` / `watch` / `analyze` / `doctor` / `clean` |
+| CLI Toolchain | `init` / `build` / `run` / `watch` / `analyze` / `doctor` / `clean` / `pip` / `icons` / `keygen` / `permissions` / `docs` / `inspect` |
+| Data Layer | SQLite `Database`, `Model` ORM with migrations, and a TTL `Cache` |
+| PyPI on Android | 119 verified packages installable with `pydrud pip add` |
+| Background & Hardware | WorkManager jobs, foreground services, push, camera, sensors, biometrics, BLE, NFC, audio |
 | Responsive | `Responsive.text()` auto-scales UI to any screen size |
+| Native Services | Dialogs, storage, permissions, files, share, notifications, GPS, haptics, device info |
+| Async by Default | Thread pool + timers + a non-blocking HTTP client, so the UI never freezes |
+| Testable | `pydrud.testing.AppTester` runs your whole app in CI without a device or emulator |
 | TCP Bridge | Clean NDJSON protocol over port 8595 |
+
+---
+
+## New in v1.3.0 — the "ship it" release
+
+v1.2 completed the toolkit. v1.3 closes the gap with Flet and Flutter: a real
+data layer, URL-based navigation, background execution, hardware access and
+the release plumbing you need to put an app on the Play Store.
+
+| Area | What you get |
+|------|--------------|
+| **Data** | `Database` (SQLite + migrations + transactions), a tiny `Model` ORM with lookups, pagination and bulk ops, and a TTL `Cache` with an `@cached` decorator |
+| **Navigation** | Pattern routes (`/items/:id`, `/files/*rest`), query strings, guards and redirects, nested navigators, deep links and 7 screen transitions |
+| **PyPI packages** | `pydrud pip add yt-dlp` — 119 verified Android-compatible packages wired into Chaquopy automatically |
+| **Background** | WorkManager jobs with constraints, foreground services with progress, FCM push and notification routing |
+| **Hardware** | Camera preview + capture + scanning, sensors, biometrics, Bluetooth LE, NFC, audio record/play, TTS and speech-to-text |
+| **Security** | `page.secure` — EncryptedSharedPreferences-backed keystore storage |
+| **Graphics** | `Canvas` with paths, gradients, transforms, sparklines and pies; `AnimationController` + `Tween` + `Sequence_` for explicit animations |
+| **Widgets** | `CameraPreview`, `MapView`, `RichText`, `Markdown`, `ReorderableList`, virtualising `InfiniteList` |
+| **Release** | `pydrud keygen` (upload keystore), `pydrud icons` (every density + adaptive + splash), `pydrud permissions`, R8 shrinking |
+| **DX** | Stateful hot reload (your counters survive a save), `pydrud inspect` widget inspector, `pydrud docs` offline API reference |
+
+### Data layer
+
+```python
+from pydrud import Model, Field, Database
+
+class Note(Model):
+    title = Field(str, index=True)
+    body  = Field(str, default="")
+    done  = Field(bool, default=False)
+
+db = page.database("notes.db")
+Note.bind(db)
+
+Note.create(title="Buy milk")
+open_notes = Note.where(done=False, title__contains="milk").order_by("-id").page(1, 20)
+```
+
+### Navigation
+
+```python
+router = Router()
+router.define("/", home)
+router.define("/items/:id", details, transition="slide_left")
+router.define("/settings", settings, guard=lambda name, params: signed_in())
+router.initial("/")
+app.attach_router(router)
+
+router.push("/items/42")            # or router.push("/items/:id", id=42)
+app.on_deep_link(router.handle_link)  # myapp://items/42?tab=specs
+```
+
+### Background work
+
+```python
+@page.background.job("sync")
+def sync(inputs):
+    return {"synced": True}
+
+page.background.schedule("sync", every=900, network="unmetered", charging=True)
+```
+
+The job runs through WorkManager even when the app is closed, calling
+`app.main.run_background_job(name, inputs_json)` in your project.
+
+### Secure storage, hardware and push
+
+```python
+page.secure.set("token", jwt)                       # EncryptedSharedPreferences
+page.biometrics.authenticate(title="Unlock").wait()
+page.sensors.listen("accelerometer", on_reading, rate="game")
+page.camera.capture(key="cam", quality=90).then(upload)
+page.audio.speak("Done")
+page.push.subscribe("news")
+```
+
+### PyPI packages on Android
+
+```bash
+pydrud pip add yt-dlp requests     # verified, wired into Chaquopy, Gradle synced
+pydrud pip search qr               # find what is supported
+pydrud pip list --all              # the full catalogue by category
+```
+
+Packages that cannot work on Android (server frameworks, desktop GUI toolkits)
+are rejected with an explanation; anything else can still be forced with
+`--force`.
+
+<details>
+<summary><strong>119 verified packages</strong></summary>
+
+| Category | Count | Packages |
+|----------|-------|----------|
+| **ai** | 8 | `anthropic`, `google-generativeai`, `groq`, `huggingface-hub`, `openai`, `sentencepiece`, `tiktoken`, `transformers` |
+| **database** | 8 | `firebase-admin`, `peewee`, `pymongo`, `pysqlcipher3`, `redis`, `sqlalchemy`, `supabase`, `tinydb` |
+| **documents** | 5 | `et-xmlfile`, `openpyxl`, `pypdf`, `python-docx`, `reportlab` |
+| **media** | 16 | `ffmpeg-python`, `gtts`, `imageio`, `instaloader`, `moviepy`, `mutagen`, `opencv-python`, `pillow`, `pydub`, `python-barcode`, `pytube`, `pyzbar`, `qrcode`, `speechrecognition`, `youtube-search-python`, `yt-dlp` |
+| **network** | 19 | `aiohttp`, `certifi`, `charset-normalizer`, `deep-translator`, `feedparser`, `geopy`, `googletrans`, `httpx`, `idna`, `paho-mqtt`, `praw`, `requests`, `sseclient-py`, `telethon`, `tweepy`, `urllib3`, `websocket-client`, `websockets`, `wikipedia` |
+| **parsing** | 15 | `beautifulsoup4`, `chardet`, `csvkit`, `html5lib`, `jsonschema`, `lxml`, `markdown`, `markdownify`, `orjson`, `pyyaml`, `soupsieve`, `toml`, `tomli`, `ujson`, `xmltodict` |
+| **science** | 10 | `matplotlib`, `mpmath`, `networkx`, `numpy`, `pandas`, `qiskit`, `scikit-learn`, `scipy`, `statsmodels`, `sympy` |
+| **security** | 8 | `bcrypt`, `cryptography`, `keyring`, `passlib`, `pycryptodome`, `pyjwt`, `pyotp`, `python-jose` |
+| **utility** | 30 | `arrow`, `attrs`, `cachetools`, `chevron`, `croniter`, `emoji`, `faker`, `fuzzywuzzy`, `humanize`, `jinja2`, `markupsafe`, `more-itertools`, `phonenumbers`, `psutil`, `pydantic`, `python-dateutil`, `python-dotenv`, `python-slugify`, `pytz`, `qrcode-terminal`, `rapidfuzz`, `regex`, `rich`, `schedule`, `shortuuid`, `tabulate`, `tenacity`, `typing-extensions`, `tzdata`, `validators` |
+
+</details>
+
+### Release workflow
+
+```bash
+pydrud permissions add camera location   # friendly names -> manifest entries
+pydrud icons --source logo.png           # every density, adaptive icon, splash
+pydrud keygen                            # upload keystore + keystore.properties
+pydrud build --release                   # signed, R8-shrunk APK
+```
+
+---
+
+## New in v1.2.0 — the "full Android toolkit" release
+
+v1.1 made the renderer correct. v1.2 makes Pydrud *complete*: the component
+library, the platform APIs and the app architecture you need to ship a real
+product.
+
+| Area | What you get |
+|------|--------------|
+| **21 Material 3 components** | `ListTile`, `ExpansionTile`, `Chip`, `Badge`, `Avatar`, `Banner`, `Tooltip`, `Tabs`, `BottomNavigationBar`, `NavigationRail`, `Drawer`, `SegmentedButton`, `SearchBar`, `Rating`, `CircularProgress`, `Skeleton`, `RefreshIndicator`, `Stepper`, `WebView`, `VideoPlayer`, `Chart` |
+| **Gestures** | `GestureDetector` (tap, double-tap, long-press, 4-way swipe, pan, pinch-scale), `InkWell` ripples, swipe-to-dismiss, `Draggable` |
+| **Animations** | `Animation` specs with 9 curves, implicit `AnimatedContainer` / `AnimatedOpacity` / `AnimatedScale` / `AnimatedRotation` / `AnimatedSwitcher`, entrance effects (`FadeIn`, `SlideIn`, `ScaleIn`), `Hero` shared elements, and `widget.animate(...)` on *any* widget |
+| **Forms & validation** | `Form` + `FormField` with 11 validators (`required`, `email`, `min_length`, `between`, `matches`, `pattern`, `custom`, …), per-field errors, server-side errors, cross-field rules |
+| **Native services** | `page.dialog` (alert/confirm/prompt/choose/bottom-sheet/date/time/colour/progress), `page.storage`, `page.clipboard`, `page.share`, `page.permissions`, `page.notifications`, `page.location`, `page.device`, `page.files`, `page.haptics` |
+| **HTTP client** | `page.http.get/post/put/patch/delete/download` — JSON in/out, retries, timeouts, base URL, never on the UI thread |
+| **Concurrency** | `page.run_task()` (threads *and* `async def`), `page.run_on_ui()`, `page.after()` / `page.every()` timers, `@debounce` / `@throttle` |
+| **App-level state** | `Store` with actions, selectors, middleware, batching and undo; `Computed` cached derivations; `ReactiveList`; all accepted by `app.bind(...)` |
+| **Material You theming** | `ColorScheme.from_seed(...)` (light & dark), the M3 `Typography` scale, `page.set_theme_mode("dark"/"system")` |
+| **More page control** | `open_drawer`, `scroll_to`, `focus`, `hide_keyboard`, `keep_awake`, `set_orientation`, `fullscreen`, `end_refresh` |
+| **Imperative updates** | `page.update(widget)` diffs just that subtree — mutate a control and push it, Flet-style, without re-running the builder |
+| **Richer events** | Handlers now receive an `Event` with `.type`, `.key`, `.value`, `.data`, `.control` (still a dict, so old code works), and `on_<anything>=` works on every widget |
+| **`pydrud.testing`** | `AppTester` — boot your app, `tap("Sign in")`, stub native answers, assert on what the screen shows. 300+ tests in this repo use it |
+
+```python
+from pydrud import Chart, Chip, ListTile, Tabs, Tab, FadeIn
+
+def dashboard(page):
+    page.http.get("https://api.example.com/stats").then(show)
+    page.storage.get("theme", "light").then(page.set_theme_mode)
+
+    page.add(Tabs([
+        Tab("Overview", content=FadeIn(child=Chart([3, 7, 4, 9], kind="bar"))),
+        Tab("Settings", content=ListTile("Account", leading="person",
+                                         on_click=open_account)),
+    ], on_change=lambda e: print("tab", e.value)))
+```
+
+---
+
+## New in v1.1.0
+
+| Feature | Description |
+|---------|-------------|
+| **Stable widget keys** | Auto-generated keys are now deterministic, so `page.update()` really does send tiny patches instead of silently re-rendering everything |
+| **Keyed diffing** | Insert/remove/reorder in a list emits `create` / `delete` / `move` for just that item (with target `index`) |
+| **10 new widgets** | `Stack`, `Positioned`, `SizedBox`, `Padding`, `Card`, `ListView`, `GridView`, `ProgressBar`, `Slider`, `Dropdown`, `Radio` |
+| **Colors / Icons / Theme** | A Material palette, an icon catalogue, and a switchable light/dark theme |
+| **Clicks on any widget** | `on_click` / `on_long_press` now work on Containers, Icons, Images, Cards — not just Buttons |
+| **Working back button** | Android waits for Python's `back_result` before closing the activity — `router.pop()` no longer exits the app |
+| **Scaffold overlays** | `Scaffold(floating_action_button=...)` renders a real floating FAB via absolute positioning |
+| **page.toast / snack_bar / vibrate / close** | Direct access to common Android affordances |
+| **Lifecycle hooks** | `app.on_lifecycle("resume"/"pause"/"stop"/"destroy", cb)` |
+| **Error isolation** | An exception in one event handler is reported via `app.on_error(...)` instead of killing the app |
+| **Self-bootstrapping Gradle** | Generated projects build without a checked-in `gradle-wrapper.jar` — the launcher downloads Gradle once |
+| **Unique package names** | `pydrud init app1 --org com.acme` → `com.acme.app1` (apps no longer overwrite each other) |
+| **`pydrud watch` / `devices`** | Rebuild-reinstall-relaunch loop and device listing |
+| **FakeDevice test harness** | `tests/fake_device.py` emulates the Android bridge so whole apps can be tested in CI |
 
 ---
 
@@ -61,6 +240,22 @@ pydrud run                            # Build, install, launch
 | **Async Event Loop** | Non-blocking socket reader with thread-safe event queue — no UI freezes |
 | **WidgetRegistry** | Modular ViewCreator lambdas on Android side — 10x faster rendering pipeline |
 | **pydrud analyze** | Static analysis CLI — checks missing widget keys, invalid styles, unhandled async |
+
+---
+
+## Examples
+
+Two complete apps live in [`examples/`](examples/) and are covered by the test
+suite:
+
+| File | Demonstrates |
+|------|--------------|
+| `examples/todo_app.py` | `Store` actions, keyed lists, swipe-to-delete, filtering, persistence, confirm dialog |
+| `examples/weather_app.py` | HTTP client, pull-to-refresh, permissions + GPS, `Chart`, `Skeleton` loading, bottom navigation |
+
+```bash
+python examples/todo_app.py --tree     # render the widget tree, no device needed
+```
 
 ---
 
@@ -180,7 +375,7 @@ The Android hardware back button sends a `"back"` event to Python's event loop. 
 
 ---
 
-## Hot Reload
+## Watch mode & Hot Reload
 
 ```python
 app = App(target=main)
@@ -188,17 +383,20 @@ app.enable_hot_reload()  # Watch src/ for .py changes
 app.run()
 ```
 
-Or via CLI:
+In-process hot reload (used when Python runs on the host, or inside a
+long-lived session) reloads the changed module, rebuilds the tree and sends
+incremental patches.
+
+Because Chaquopy embeds your Python *inside the APK*, host-side edits have to
+be shipped to the device. That is what watch mode does:
+
 ```bash
-pydrud run --watch
+pydrud run --watch      # build → install → launch, then rebuild on every save
+pydrud watch            # the same loop for an already-installed app
 ```
 
-When a Python file changes:
-1. The affected module is reloaded via `importlib.reload()`
-2. The widget tree is rebuilt
-3. Incremental patches are sent to the device
-
-**No APK recompilation needed.** Chaquopy serves Python files from the source directory at runtime.
+Each save triggers an incremental Gradle build plus `adb install -r`, which
+normally takes a couple of seconds.
 
 ---
 
@@ -240,8 +438,20 @@ pydrud build    # proxy forwarded to Gradle automatically
 | `Center` | Centres its child | `child`, `expand` |
 | `Spacer` | Flexible empty space | `expand` (default 1) |
 | `Divider` | Horizontal / vertical line | `color`, `thickness` |
-| **`Scaffold`** (v1.0.1) | Page layout with AppBar + body | `app_bar`, `body`, `bg_color` |
-| **`AppBar`** (v1.0.1) | Top app bar | `title`, `leading`, `actions`, `bg_color`, `elevation` |
+| **`Scaffold`** | Page layout: app bar + body + bottom bar + FAB | `app_bar`, `body`, `bottom_bar`, `floating_action_button`, `bg_color` |
+| **`AppBar`** | Top app bar | `title`, `leading`, `actions`, `bg_color`, `color`, `elevation`, `center_title` |
+| **`Stack`** (v1.1) | Overlays children | `children`, `alignment` |
+| **`Positioned`** (v1.1) | Absolute placement inside a Stack | `child`, `left`, `top`, `right`, `bottom` |
+| **`Card`** (v1.1) | Rounded elevated surface | `child`, `bg`, `elevation`, `border_radius`, `padding`, `margin` |
+| **`ListView`** (v1.1) | Scrollable list | `children`, `spacing`, `horizontal`, `padding` |
+| **`GridView`** (v1.1) | Fixed-column grid | `children`, `columns`, `spacing` |
+| **`SizedBox`** (v1.1) | Fixed-size gap / box | `width`, `height`, `child` |
+| **`Padding`** (v1.1) | Pads a single child | `padding`, `child` |
+| **`Drawer`** (v1.2) | Slide-in navigation panel | `children`, `header`, `width`, `side`, opened with `page.open_drawer()` |
+| **`Tabs`** / `Tab` (v1.2) | Tab bar + the selected tab's body | `tabs`, `selected`, `scrollable`, `on_change` |
+| **`BottomNavigationBar`** / `NavItem` (v1.2) | 2-5 bottom destinations | `items`, `selected`, `show_labels`, `on_change` |
+| **`NavigationRail`** (v1.2) | Vertical rail for tablets | `items`, `selected`, `extended` |
+| **`RefreshIndicator`** (v1.2) | Pull-to-refresh | `child`, `on_refresh`, `refreshing` |
 
 ### Basic
 
@@ -254,16 +464,210 @@ pydrud build    # proxy forwarded to Gradle automatically
 | `Icon` | Material icon | `name` (star, home, search, ...), `size`, `color` |
 | `Checkbox` | Checkable box | `label`, `checked` |
 | `Switch` | Toggle switch | `label`, `active` |
+| **`ProgressBar`** (v1.1) | Determinate or spinning progress | `value` (0-1), `indeterminate`, `circular`, `color` |
+| **`Slider`** (v1.1) | Draggable value slider | `value`, `min`, `max`, `divisions`, `color` |
+| **`Dropdown`** (v1.1) | Option picker (spinner) | `options`, `value`, `hint` |
+| **`Radio`** (v1.1) | Radio button | `label`, `value`, `group`, `selected` |
+| **`ListTile`** (v1.2) | List row: leading / title / subtitle / trailing | `title`, `subtitle`, `leading`, `trailing`, `dense`, `selected` |
+| **`ExpansionTile`** (v1.2) | Accordion row | `title`, `children`, `expanded`, `on_expand` |
+| **`Chip`** (v1.2) | Tag / filter / choice | `label`, `variant`, `selected`, `deletable`, `on_change` |
+| **`Badge`** (v1.2) | Count bubble over a child | `label` (int auto-caps at `max_count`), `child`, `color` |
+| **`Avatar`** (v1.2) | Circular image / icon / initials | `source`, `initials`, `icon`, `size`, `bg` |
+| **`Banner`** (v1.2) | Inline status message | `message`, `severity`, `action`, `dismissible` |
+| **`SearchBar`** (v1.2) | Rounded search field | `value`, `hint`, `on_change`, `on_submit`, `on_clear` |
+| **`SegmentedButton`** (v1.2) | Connected choice group | `options`, `selected`, `multi` |
+| **`Rating`** (v1.2) | Star rating | `value`, `count`, `half`, `on_change` (omit → read-only) |
+| **`CircularProgress`** (v1.2) | Spinner or progress ring | `value` (None = indeterminate), `size`, `stroke` |
+| **`Skeleton`** (v1.2) | Shimmering loading placeholder | `lines`, `height`, `radius` |
+| **`Stepper`** (v1.2) | Wizard progress | `steps`, `current`, `orientation` |
+| **`Chart`** (v1.2) | Canvas line / area / bar / pie chart | `series`, `kind`, `labels`, `colors` |
+| **`WebView`** (v1.2) | Embedded browser, 2-way `postMessage` | `url`, `html`, `on_load`, `on_message` |
+| **`VideoPlayer`** (v1.2) | Native video surface | `source`, `autoplay`, `loop`, `controls` |
+| **`Tooltip`** (v1.2) | Long-press hint | `message`, `child` |
 
 ### Events
 
 All interactive widgets support callback chaining:
 
 ```python
-widget.on_click(callback)      # callback(data) -> data is a dict
-widget.on_change(callback)     # TextField, Checkbox, Switch
+widget.on_click(callback)      # Any widget — callback(data) where data is a dict
+widget.on_long_press(callback) # Any widget
+widget.on_change(callback)     # TextField, Checkbox, Switch, Slider, Dropdown
 widget.on_submit(callback)     # TextField (IME action)
 widget.on_focus(callback)      # Focus gain / loss
+widget.on("scroll", callback)  # Any event name
+```
+
+### Gestures (v1.2)
+
+```python
+from pydrud import GestureDetector, InkWell, Dismissible
+
+GestureDetector(
+    child=photo,
+    on_double_tap=lambda e: zoom_in(),
+    on_swipe_left=lambda e: next_photo(),
+    on_scale=lambda e: set_zoom(e.data["scale"]),
+)
+
+InkWell(child=card, on_click=open_item)            # Material ripple
+Dismissible(child=row, direction="end",            # swipe to delete
+            background=Colors.ERROR, on_dismiss=delete_row)
+```
+
+Only the gestures you subscribe to are detected and transmitted, so scrolling
+a long list stays silent on the wire.
+
+### Animations (v1.2)
+
+```python
+from pydrud import Animation, AnimatedContainer, FadeIn, Hero
+
+AnimatedContainer(child=body, height=expanded and 240 or 80,
+                  bg=Colors.SURFACE, animation=Animation.springy())
+
+FadeIn(child=Text("Welcome"), animation=250)
+Hero("cover", child=Image(url))          # shared element across routes
+Text("Pulse").animate(Animation.fast(), opacity=0.4)
+```
+
+Animated widgets tween towards their new values on the device
+(`ValueAnimator` / `ViewPropertyAnimator`) instead of snapping.
+
+### Forms & validation (v1.2)
+
+```python
+from pydrud import Form, FormField, TextField, required, email, min_length
+
+form = Form(
+    FormField("email", TextField(""), label="Email",
+              validators=[required(), email()]),
+    FormField("password", TextField("", password=True), label="Password",
+              validators=[required(), min_length(8)]),
+    on_submit=lambda values: sign_in(**values),
+)
+
+Button("Sign in", on_click=lambda e: form.submit())   # validates first
+form.set_error("email", "Already registered")         # server-side errors
+```
+
+Validators: `required`, `min_length`, `max_length`, `email`, `phone`, `url`,
+`numeric`, `between`, `pattern`, `matches` (cross-field), `custom`.
+
+### Native services (v1.2)
+
+```python
+page.dialog.confirm("Delete?").then(lambda yes: delete() if yes else None)
+page.dialog.prompt("New name", value=current).then(rename)
+page.dialog.date().then(set_due_date)
+page.dialog.bottom_sheet(["Camera", "Gallery"]).then(pick_source)
+
+page.storage.set("profile", {"name": "Ada"})
+page.storage.get("profile", default={}).then(render_profile)
+
+page.permissions.request("camera").then(lambda granted: ...)
+page.files.pick_image(camera=True).then(upload)
+page.clipboard.copy("pydrud.dev")
+page.share.text("Built with Pydrud!")
+page.notifications.show("Done", "Your export is ready", route="/exports")
+page.location.current().then(lambda pos: print(pos["lat"], pos["lon"]))
+page.device.info().then(print)
+page.haptics.impact("medium")
+```
+
+Every call returns a `Result`: use `.then()` / `.catch()` on the UI thread, or
+`.wait()` inside a `page.run_task()` worker. Results always settle — a missing
+bridge or a cancelled dialog fails fast instead of hanging.
+
+### HTTP & background work (v1.2)
+
+```python
+page.http.configure(base_url="https://api.example.com").bearer(token)
+page.http.get("/posts", params={"page": 2}).then(render).catch(show_error)
+page.http.post("/posts", json_body={"title": "Hi"}, retries=2).then(done)
+
+page.run_task(heavy_sync)              # thread pool; async def also works
+page.run_on_ui(lambda: page.update())  # hop back before touching widgets
+timer = page.every(1.0, tick)          # repeating timer; timer.cancel()
+```
+
+### App-level state (v1.2)
+
+```python
+from pydrud import Store, Computed, ReactiveList
+
+store = Store({"todos": [], "filter": "all"})
+
+@store.action
+def add_todo(state, text):
+    return {"todos": state["todos"] + [text]}
+
+visible = Computed(lambda: [t for t in store["todos"] if matches(t)],
+                   sources=[store])
+store.select("todos").listen(lambda todos: print(len(todos)))
+
+app.bind(store)        # any change re-renders
+store.undo()           # time travel, for free
+```
+
+### Theme, colours and icons (v1.1)
+
+```python
+from pydrud import Colors, Icons, Theme, Text, Icon
+
+Text("Hello", color=Colors.PRIMARY)
+Text("Dim",   color=Colors.with_opacity(Colors.TEXT, 0.5))
+Icon(Icons.SETTINGS)
+
+Theme.dark()            # switch the default palette
+Theme.apply(primary="#FF0EA5E9")
+```
+
+### Page commands (v1.1)
+
+```python
+page.toast("Saved!")
+page.snack_bar("Deleted", action="UNDO")
+page.set_title("Inbox")
+page.vibrate(30)                       # needs the VIBRATE permission
+page.set_system_ui(status_bar_color="#FF6366F1", icon_brightness="light")
+page.close()                           # finish the activity
+```
+
+### Page commands (v1.2)
+
+```python
+page.update(widget)                    # push one mutated subtree
+page.open_drawer(); page.close_drawer()
+page.scroll_to("row_42"); page.focus("email")
+page.hide_keyboard(); page.keep_awake(True)
+page.set_orientation("portrait"); page.fullscreen(True)
+page.set_theme_mode("system")          # light / dark / system
+page.end_refresh()                     # stop a RefreshIndicator spinner
+```
+
+### Theming with Material You (v1.2)
+
+```python
+from pydrud import ColorScheme, Theme, Typography
+
+Theme.use(ColorScheme.from_seed(Colors.INDIGO, dark=True))
+Theme.scheme.primary_container          # 13 M3 roles
+Typography.scale(1.2)                   # accessibility-scaled type ramp
+```
+
+### Testing your app (v1.2)
+
+```python
+from pydrud.testing import AppTester
+
+def test_login():
+    with AppTester(main) as app:
+        app.answer("dialog", True)              # stub the native dialog
+        app.type_in("email", "ada@example.com")
+        app.tap("Sign in")                      # by key *or* visible text
+        assert app.shows("Welcome back")
+        assert app.requested("prefs_set")["key"] == "token"
 ```
 
 ### Styling
@@ -395,6 +799,8 @@ page.set_system_ui(status_bar_color="#FF6366F1", icon_brightness="light")
 {"type": "submit",  "key": "tf_xyz",  "data": {"value": "hello"}}
 {"type": "ready",   "key": "",        "data": {"width": 360, "height": 640, "density": 2.0}}
 {"type": "back",    "key": "",        "data": {}}            # Hardware back button
+{"type": "long_press", "key": "card_1", "data": {}}
+{"type": "lifecycle",  "key": "",       "data": {"state": "resume"}}
 ```
 
 **Python -> Android commands:**
@@ -404,7 +810,20 @@ page.set_system_ui(status_bar_color="#FF6366F1", icon_brightness="light")
 {"cmd": "toast",            "message": "Saved"}
 {"cmd": "set_title",        "title": "My App"}
 {"cmd": "set_system_ui",    "status_bar_color": "#...", "icon_brightness": "light"}
+{"cmd": "snackbar",         "message": "Deleted", "action": "UNDO"}
+{"cmd": "vibrate",          "duration": 40}
+{"cmd": "back_result",      "handled": true}                   # Answer to a back event
 {"cmd": "finish_activity"}                                     # Exit app
+```
+
+Patches carry `op`, `key`, `parent_key` and — for `create` / `move` / `replace` —
+the target child `index`, so the renderer inserts views in the right place:
+
+```
+{"op": "update",  "key": "counter", "props": {"value": "3"}}
+{"op": "create",  "key": "row-eggs", "parent_key": "list", "index": 2, "tree": {...}}
+{"op": "move",    "key": "row-milk", "parent_key": "list", "index": 0}
+{"op": "delete",  "key": "row-bread", "parent_key": "list"}
 ```
 
 ---
@@ -419,12 +838,24 @@ page.set_system_ui(status_bar_color="#FF6366F1", icon_brightness="light")
 | `pydrud build --release` | Build release APK |
 | `pydrud run` | Build + install + launch + live logcat |
 | `pydrud run --device <id>` | Target specific device |
-| `pydrud run --watch` | Enable hot-reload (file watcher) |
+| `pydrud run --watch` | Rebuild + reinstall + relaunch on every file change |
+| `pydrud watch` | Same loop without rebuilding first |
+| `pydrud devices` | List connected devices (`adb devices -l`) |
 | `pydrud analyze` | Static analysis (missing keys, invalid styles) |
 | `pydrud analyze --path src` | Custom source directory |
 | `pydrud analyze --json` | Machine-readable JSON output |
 | `pydrud clean` | Clean build artifacts |
 | `pydrud doctor` | Check environment requirements |
+| `pydrud pip add <pkg>...` | Add verified PyPI packages (auto-syncs Gradle) |
+| `pydrud pip remove <pkg>...` | Remove packages |
+| `pydrud pip list [--all] [--category ai]` | Installed, or the whole catalogue |
+| `pydrud pip search <term>` | Search the supported-package registry |
+| `pydrud pip sync` | Re-apply `pydrud.toml` packages to `build.gradle.kts` |
+| `pydrud permissions add\|remove <name>...` | Edit `AndroidManifest.xml` by friendly name |
+| `pydrud icons [--source logo.png]` | Launcher, round, adaptive icons and splash |
+| `pydrud keygen` | Create the Play Store upload keystore |
+| `pydrud docs [--serve]` | Offline HTML API reference |
+| `pydrud inspect [--tree] [--watch]` | Widget inspector for a running app |
 
 ### Environment
 
@@ -504,7 +935,24 @@ pip install -e ".[dev]"
 python -m pytest tests/ -v
 ```
 
-Current test count: **96 tests** (widgets, state, diffing, events, styling, bridge, responsive).
+Current test count: **315 tests**, covering:
+
+* unit tests — widgets, state, styling, responsive scaling, diffing, routing,
+  the 1.2 component library, gestures, animations, forms and validators;
+* runtime tests — `Store`/`Computed`/`ReactiveList`, `Result` futures, the task
+  runner, timers, `@debounce` / `@throttle`, and the HTTP client against a real
+  local server;
+* template tests — every generated Java file is rendered and parsed with
+  `javalang`, and the generated project is compiled with `compileall`;
+* **end-to-end tests** — `pydrud.testing` implements the Android side of
+  the bridge (including patch application), so a complete app is launched,
+  tapped, typed into and navigated exactly as it would be on a phone.
+
+```bash
+python -m pytest tests/ -v            # everything
+python -m pytest tests/test_integration.py       # app ⇄ bridge ⇄ renderer
+python -m pytest tests/test_starter_app_e2e.py   # the scaffolded starter app
+```
 
 ### Project Structure
 
@@ -588,8 +1036,10 @@ pydrud/
 |---------|-------|
 | **v1.0.0** | Core widgets, state, diffing, CLI, APK generation, responsive scaling |
 | **v1.0.1** | Router, Scaffold, AppBar, FAB, MediaQuery, Hot Reload, incremental patches, WidgetRegistry, analyze CLI |
-| **v1.1** | Material theme, ListView / GridView, Animations, Snackbar / Dialog |
-| **v1.2** | Canvas / CustomPaint, Camera / GPS, Plugins, Database (SQLite) |
+| **v1.1.0** | Stable keys + keyed diffing, 10 new widgets, Colors/Icons/Theme, working back button, FAB overlays, toast/snackbar/vibrate, lifecycle hooks, self-bootstrapping Gradle, FakeDevice test harness |
+| **v1.2.0** | 21 Material 3 components, gestures, implicit animations + Hero, forms & validation, native services (dialogs/storage/permissions/files/notifications/location/haptics), HTTP client, task runner & timers, Store/Computed/ReactiveList, Material You theming, `pydrud.testing.AppTester` |
+| **v1.3.0** | SQLite + ORM + cache, pattern routes/deep links/nested navigators, 119 PyPI packages via `pydrud pip`, WorkManager jobs & foreground services, FCM push, camera/sensors/biometrics/BLE/NFC/audio, secure storage, Canvas & explicit animations, stateful hot reload, inspector, docs generator, signing & icon tooling |
+| **v1.4** | Desktop preview target, richer Material 3 motion, Compose interop |
 | **v2.0** | iOS backend (SwiftUI), Web (WASM), macOS desktop |
 
 ---

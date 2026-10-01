@@ -59,6 +59,14 @@ class Responsive:
         cls._density = density
         cls._scale_factor = cls._screen_width / cls._BASELINE_WIDTH
 
+    @classmethod
+    def reset(cls) -> None:
+        """Restore the default (baseline) metrics — mainly for tests."""
+        cls._screen_width = 360
+        cls._screen_height = 640
+        cls._density = 2.0
+        cls._scale_factor = 1.0
+
     # ── public scaling methods ──────────────────────────────────────────
 
     @classmethod
@@ -143,7 +151,7 @@ class MediaQuery:
         factor = info["scale_factor"]  # width / 360
     """
 
-    _data: dict = {
+    _DEFAULTS: dict = {
         "width": 360,
         "height": 640,
         "density": 2.0,
@@ -155,6 +163,8 @@ class MediaQuery:
         "padding_left": 0,
         "padding_right": 0,
     }
+
+    _data: dict = dict(_DEFAULTS)
 
     # ── initialisation ──────────────────────────────────────────────────
 
@@ -180,6 +190,11 @@ class MediaQuery:
             cls._data[k] = v
 
     # ── public API ──────────────────────────────────────────────────────
+
+    @classmethod
+    def reset(cls) -> None:
+        """Restore the default metrics — mainly for tests."""
+        cls._data = dict(cls._DEFAULTS)
 
     @classmethod
     def of(cls) -> dict:

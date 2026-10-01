@@ -26,9 +26,23 @@ _SEVERITY_ERROR = "error"
 # Known Pydrud widget classes that should have keys in dynamic lists.
 _WIDGET_CLASSES = {
     "Container", "Column", "Row", "Center", "Spacer", "Divider",
+    "Stack", "Positioned", "SizedBox", "Padding", "Card", "ListView", "GridView",
     "Text", "Button", "TextField", "Image", "Icon", "Checkbox", "Switch",
+    "ProgressBar", "Slider", "Dropdown", "Radio",
     "AppBar", "Scaffold", "FloatingActionButton",
-    "Container", "Column", "Row",
+    # v1.2 — Material components
+    "ListTile", "ExpansionTile", "Chip", "Badge", "Avatar", "Banner",
+    "Tooltip", "Tabs", "BottomNavigationBar", "NavigationRail", "Drawer",
+    "SegmentedButton", "SearchBar", "Rating", "CircularProgress", "Skeleton",
+    "RefreshIndicator", "Stepper", "WebView", "VideoPlayer", "Chart",
+    # v1.2 — gestures, animation and forms
+    "GestureDetector", "InkWell", "Dismissible", "Draggable",
+    # v1.3 — painting, hardware, maps, rich text, big lists
+    "Canvas", "CameraPreview", "MapView", "RichText", "Markdown",
+    "ReorderableList", "InfiniteList",
+    "AnimatedContainer", "AnimatedOpacity", "AnimatedScale",
+    "AnimatedRotation", "AnimatedSwitcher", "FadeIn", "SlideIn", "ScaleIn",
+    "Hero", "Form", "FormField",
 }
 
 # Style property keys known to be valid.
@@ -42,6 +56,11 @@ _VALID_STYLE_KEYS = {
     "readOnly", "keyboard", "activeColor", "color", "thickness",
     "textScale", "status_bar_color", "icon_brightness",
     "borderLeft", "borderRight", "borderTop", "borderBottom",
+    "columns", "circular", "divisions", "maxLines", "overflow", "selectable",
+    "tristate", "crossAxis", "mainAxisAlignment",
+    # v1.2
+    "animation", "scale", "rotation", "drawerSide", "fabPosition",
+    "safeArea", "resizeForKeyboard", "shadow", "aspectRatio", "zIndex",
 }
 
 
@@ -114,23 +133,34 @@ def _analyze_file(source: str, filepath: str) -> list[dict]:
 
 
 def _check_missing_keys(tree: ast.AST, filepath: str) -> list[dict]:
-    """Warn if widget constructors are called without explicit ``key=``."""
+    """Warn about widgets built inside loops without an explicit ``key=``.
+
+    Pydrud assigns deterministic structural keys automatically, so a static
+    widget tree never needs manual keys. Dynamic lists are different: when
+    items are inserted or reordered, structural keys shift and the diff
+    engine has to rebuild more than it should. An explicit, data-derived key
+    (e.g. ``key=f"todo-{item.id}"``) keeps those updates minimal.
+    """
     issues: list[dict] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            func = _get_call_name(node)
-            if func in _WIDGET_CLASSES:
-                has_key = any(
-                    kw.arg == "key" for kw in node.keywords if kw.arg is not None
-                )
-                if not has_key:
-                    issues.append({
-                        "file": filepath,
-                        "line": node.lineno,
-                        "severity": _SEVERITY_WARNING,
-                        "message": f"{func}() created without explicit key="
-                                   " -- may cause diff issues in dynamic lists",
-                    })
+        if not isinstance(node, (ast.For, ast.While, ast.ListComp,
+                                 ast.SetComp, ast.GeneratorExp)):
+            continue
+        for child in ast.walk(node):
+            if not isinstance(child, ast.Call):
+                continue
+            func = _get_call_name(child)
+            if func not in _WIDGET_CLASSES:
+                continue
+            has_key = any(kw.arg == "key" for kw in child.keywords if kw.arg is not None)
+            if not has_key:
+                issues.append({
+                    "file": filepath,
+                    "line": child.lineno,
+                    "severity": _SEVERITY_WARNING,
+                    "message": f"{func}() built in a loop without an explicit key= "
+                               "-- dynamic lists diff better with stable keys",
+                })
     return issues
 
 
