@@ -33,6 +33,48 @@ JAVA_TEMPLATES = [
     "android/ViewCreator.java.j2",
 ]
 
+def all_java_templates() -> list:
+    """Every ``*.java.j2`` shipped under ``android/templates/android``."""
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    folder = os.path.join(here, "pydrud", "android", "templates", "android")
+    return sorted("android/" + f for f in os.listdir(folder)
+                  if f.endswith(".java.j2"))
+
+
+def _declared(node, want_static=None) -> tuple:
+    """(method names, field names) declared directly on ``node``."""
+    names = {m.name for m in node.methods
+             if want_static is None
+             or ("static" in m.modifiers) == want_static}
+    fields = {d.name for f in node.fields
+              if want_static is None
+              or ("static" in f.modifiers) == want_static
+              for d in f.declarators}
+    return names, fields
+
+
+def outer_instance_uses(outer, template: str) -> list:
+    """Bare uses of ``outer``'s instance members inside its static classes."""
+    methods, fields = _declared(outer, want_static=False)
+    found = []
+    nested_classes = [m for m in outer.body
+                      if isinstance(m, javalang.tree.ClassDeclaration)
+                      and "static" in m.modifiers]
+    for nested in nested_classes:
+        own_methods, own_fields = _declared(nested)
+        for _, call in nested.filter(javalang.tree.MethodInvocation):
+            if (not call.qualifier and call.member in methods
+                    and call.member not in own_methods):
+                found.append(f"{template}: {outer.name}.{nested.name} "
+                             f"calls instance method {call.member}()")
+        for _, ref in nested.filter(javalang.tree.MemberReference):
+            if (not ref.qualifier and ref.member in fields
+                    and ref.member not in own_fields):
+                found.append(f"{template}: {outer.name}.{nested.name} "
+                             f"reads instance field {ref.member}")
+    return sorted(set(found))
+
+
 CTX = {
     "project_name": "demo_app",
     "app_name": "DemoApp",
@@ -211,6 +253,20 @@ class TestJavaTemplates(unittest.TestCase):
             with self.subTest(template=name):
                 source = self.render(name)
                 javalang.parse.parse(source)
+
+    @unittest.skipUnless(HAS_JAVALANG, "javalang not installed")
+    def test_static_nested_classes_touch_no_outer_instance_members(self):
+        """A ``static`` inner class has no outer instance — javac rejects
+        bare calls/references to the enclosing class' instance members
+        (``error: non-static method dp(int) cannot be referenced from a
+        static context``).  Catch that here instead of at Gradle time."""
+        violations = []
+        for name in all_java_templates():
+            tree = javalang.parse.parse(self.render(name))
+            for _, outer in tree.filter(javalang.tree.ClassDeclaration):
+                violations += outer_instance_uses(outer, name)
+        self.assertEqual(violations, [], "static context violations: "
+                         + ", ".join(violations))
 
     def test_no_unrendered_jinja_placeholders(self):
         for name in JAVA_TEMPLATES + ["android/AndroidManifest.xml.j2",

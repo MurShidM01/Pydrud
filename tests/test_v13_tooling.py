@@ -7,6 +7,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 from click.testing import CliRunner
 
@@ -350,6 +351,73 @@ class TestCliCommands(unittest.TestCase):
     def test_inspect_without_a_device_reports_statically(self):
         result = self.runner.invoke(cli, ["inspect", "--port", "1"])
         self.assertIn("Nodes:", result.output)
+
+
+class TestBuildPython(unittest.TestCase):
+    """``buildPython`` must match the app's Python so Chaquopy can
+    pre-compile to .pyc (Gradle otherwise warns the version is
+    "incompatible" and ships plain source)."""
+
+    def test_detection_prefers_the_apps_python_version(self):
+        from pydrud.commands import project as project_mod
+
+        tried = []
+
+        def fake_which(name):
+            tried.append(name)
+            return f"/usr/bin/{name}"
+
+        class FakeRun:
+            returncode = 0
+            stdout = "/usr/bin/pythonX\n"
+
+        with mock.patch.object(project_mod.shutil, "which", fake_which), \
+                mock.patch("subprocess.run", return_value=FakeRun()):
+            project_mod._detect_build_python("3.11")
+        self.assertTrue(tried[0].endswith("3.11"), tried[:3])
+
+        tried.clear()
+        with mock.patch.object(project_mod.shutil, "which", fake_which), \
+                mock.patch("subprocess.run", return_value=FakeRun()):
+            project_mod._detect_build_python("3.9")
+        self.assertTrue(tried[0].endswith("3.9"), tried[:3])
+
+    def test_builder_does_not_force_the_default_interpreter(self):
+        """Regression: the builder used to export whatever ``python``
+        resolved to, defeating the version-aware detection."""
+        from pydrud.commands.builder import Builder
+
+        tmp = tempfile.mkdtemp(prefix="pydrud-buildenv-")
+        cwd = os.getcwd()
+        try:
+            os.chdir(tmp)
+            create_project("envdemo", org="com.example")
+            builder = Builder(os.path.join(tmp, "envdemo"))
+            with mock.patch("pydrud.commands.project._detect_build_python",
+                            return_value="/opt/py311") as detect:
+                env = builder._build_env()
+            detect.assert_called_once_with("3.11")
+            self.assertEqual(env["PYDRUD_PYTHON"], "/opt/py311")
+        finally:
+            os.chdir(cwd)
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_explicit_pydrud_python_is_respected(self):
+        from pydrud.commands.builder import Builder
+
+        tmp = tempfile.mkdtemp(prefix="pydrud-buildenv-")
+        cwd = os.getcwd()
+        try:
+            os.chdir(tmp)
+            create_project("envdemo2", org="com.example")
+            builder = Builder(os.path.join(tmp, "envdemo2"))
+            with mock.patch.dict(os.environ,
+                                 {"PYDRUD_PYTHON": "/custom/python"}):
+                env = builder._build_env()
+            self.assertEqual(env["PYDRUD_PYTHON"], "/custom/python")
+        finally:
+            os.chdir(cwd)
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 if __name__ == "__main__":
