@@ -1062,7 +1062,7 @@ public class MaterialViews {
                     float value = (float) values.optDouble(i, 0);
                     float barHeight = (h - 2 * pad) * (value / max);
                     float cx = (i + 0.5f) * (w / count);
-                    float radius = Math.min(barWidth / 2f, dp(6));
+                    float radius = Math.min(barWidth / 2f, PydrudTheme.dp(6));
                     canvas.drawRoundRect(cx - barWidth / 2, h - pad - barHeight,
                                          cx + barWidth / 2, h - pad,
                                          radius, radius, paint);
@@ -1112,7 +1112,7 @@ public class MaterialViews {
                 // repeating one colour.
                 paint.setColor(c.isEmpty()
                     ? PydrudTheme.seriesColor(i)
-                    : parseColor(c, PydrudTheme.seriesColor(i)));
+                    : PydrudTheme.parse(c, PydrudTheme.seriesColor(i)));
                 canvas.drawArc(box, start, sweep, true, paint);
                 start += sweep;
             }
@@ -1121,7 +1121,8 @@ public class MaterialViews {
         private int firstColor() {
             JSONArray colors = props.optJSONArray("colors");
             if (colors != null && colors.length() > 0) {
-                return parseColor(colors.optString(0, ""), PydrudTheme.primary);
+                return PydrudTheme.parse(colors.optString(0, ""),
+                                         PydrudTheme.primary);
             }
             return PydrudTheme.primary;
         }

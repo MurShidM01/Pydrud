@@ -194,16 +194,28 @@ _JAVA_TEMPLATES = (
 )
 
 
-def _detect_build_python() -> str:
+#: CPython versions Chaquopy 15 accepts as ``buildPython``.
+BUILD_PYTHON_VERSIONS = ("3.12", "3.11", "3.10", "3.9", "3.8")
+
+#: The Python version the app itself runs on the device.
+APP_PYTHON_VERSION = "3.11"
+
+
+def _detect_build_python(target: str = APP_PYTHON_VERSION) -> str:
     """Pick an interpreter Chaquopy can actually use for ``buildPython``.
 
     Chaquopy 15 supports CPython 3.8 - 3.12 here; anything newer makes it
-    skip bytecode compilation with a warning. Prefer a supported version
-    on PATH before falling back to whatever ``python`` happens to be.
+    skip bytecode compilation with a warning. It can only pre-compile to
+    ``.pyc`` when ``buildPython`` matches the app's own Python version,
+    so ``target`` (the version the APK ships) is tried first — otherwise
+    the build prints "buildPython version ... is incompatible" and ships
+    plain source. Falls back to whatever ``python`` happens to be.
     """
     import subprocess
 
-    supported = ("3.12", "3.11", "3.10", "3.9", "3.8")
+    preferred = [target] if target in BUILD_PYTHON_VERSIONS else []
+    supported = preferred + [v for v in BUILD_PYTHON_VERSIONS
+                             if v not in preferred]
     candidates = [f"python{v}" for v in supported]
     if os.name == "nt":
         candidates = [f"py -{v}" for v in supported] + candidates
@@ -227,10 +239,11 @@ def _detect_build_python() -> str:
     current = f"{sys.version_info.major}.{sys.version_info.minor}"
     fallback = (shutil.which("python") or shutil.which("python3")
                 or sys.executable)
-    if current not in supported:
+    if current not in BUILD_PYTHON_VERSIONS:
         print(info(
             f"  buildPython: no Chaquopy-compatible Python found "
-            f"(need {supported[-1]}-{supported[0]}); using {fallback}. "
+            f"(need {BUILD_PYTHON_VERSIONS[-1]}-{BUILD_PYTHON_VERSIONS[0]}, "
+            f"ideally {target}); using {fallback}. "
             f"Set PYDRUD_PYTHON to override."))
     return fallback.replace("\\", "/")
 
