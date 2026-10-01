@@ -100,11 +100,17 @@ class TestNewWidgets(unittest.TestCase):
         self.assertEqual(pos["style"]["top"], 4)
 
     def test_card_defaults(self):
+        """Flat + outlined by default; raised cards drop the hairline."""
         card = Card(child=Text("hi")).to_dict()
-        self.assertEqual(card["style"]["elevation"], 2)
-        self.assertEqual(card["style"]["borderRadius"], 12)
+        self.assertEqual(card["style"]["elevation"], 0)
+        self.assertEqual(card["style"]["borderRadius"], 16)
         self.assertEqual(card["style"]["padding"],
                          {"left": 16, "top": 16, "right": 16, "bottom": 16})
+        self.assertIn("border", card["style"])
+
+        raised = Card(child=Text("hi"), elevation=3).to_dict()
+        self.assertEqual(raised["style"]["elevation"], 3)
+        self.assertNotIn("border", raised["style"])
 
     def test_list_and_grid(self):
         lv = ListView(children=[Text("a")], spacing=4).to_dict()

@@ -183,6 +183,157 @@ def _detect_ndk(sdk_dir: str) -> str:
     return "29.0.14206865"
 
 
+#: Every Java class that makes up the generated native layer, with the
+#: file name it is written to. ``MainActivity`` is special-cased because
+#: its class name is derived from the app name.
+_JAVA_TEMPLATES = (
+    "BridgeService", "ViewFactory", "EventDispatcher", "WidgetRegistry",
+    "ViewCreator", "MaterialViews", "PydrudTheme", "PydrudIcons",
+    "GestureBinder", "NativeServices", "PlatformServices", "AdvancedViews",
+    "PydrudWorker", "PydrudForegroundService",
+)
+
+
+def _detect_build_python() -> str:
+    """Pick an interpreter Chaquopy can actually use for ``buildPython``.
+
+    Chaquopy 15 supports CPython 3.8 - 3.12 here; anything newer makes it
+    skip bytecode compilation with a warning. Prefer a supported version
+    on PATH before falling back to whatever ``python`` happens to be.
+    """
+    import subprocess
+
+    supported = ("3.12", "3.11", "3.10", "3.9", "3.8")
+    candidates = [f"python{v}" for v in supported]
+    if os.name == "nt":
+        candidates = [f"py -{v}" for v in supported] + candidates
+
+    for candidate in candidates:
+        parts = candidate.split()
+        exe = shutil.which(parts[0])
+        if not exe:
+            continue
+        try:
+            found = subprocess.run(
+                [exe, *parts[1:], "-c", "import sys; print(sys.executable)"],
+                capture_output=True, text=True, timeout=15,
+            )
+        except Exception:
+            continue
+        path = found.stdout.strip()
+        if found.returncode == 0 and path:
+            return path.replace("\\", "/")
+
+    current = f"{sys.version_info.major}.{sys.version_info.minor}"
+    fallback = (shutil.which("python") or shutil.which("python3")
+                or sys.executable)
+    if current not in supported:
+        print(info(
+            f"  buildPython: no Chaquopy-compatible Python found "
+            f"(need {supported[-1]}-{supported[0]}); using {fallback}. "
+            f"Set PYDRUD_PYTHON to override."))
+    return fallback.replace("\\", "/")
+
+
+def _normalise_color(value: str | None) -> str | None:
+    """Accept #RGB, #RRGGBB and #AARRGGBB (with or without the hash)."""
+    if not value:
+        return None
+    text = str(value).strip().lstrip("#")
+    if len(text) == 3:
+        text = "".join(ch * 2 for ch in text)
+    if len(text) == 6:
+        text = "FF" + text
+    if len(text) != 8 or any(ch not in "0123456789abcdefABCDEF" for ch in text):
+        raise ValueError(f"'{value}' is not a colour like '#FF0EA5E9'")
+    return "#" + text.upper()
+
+
+def _theme_colors(seed: str | None = None) -> dict:
+    """Build the XML palette from the Python colour scheme.
+
+    ``themes.xml`` exists only so native dialogs, text-selection handles
+    and the system bars match the app.  Rather than hand-maintaining hex
+    in XML, both variants are generated from the same
+    :class:`~pydrud.ColorScheme` Python uses at runtime.
+    """
+    from pydrud.widgets.theme import Colors, ColorScheme
+
+    seed = seed or Colors.PRIMARY
+
+    def palette(dark: bool) -> dict:
+        scheme = ColorScheme.from_seed(seed, dark=dark)
+        return {
+            "primary": scheme.primary,
+            "on_primary": scheme.on_primary,
+            "primary_container": scheme.primary_container,
+            "on_primary_container": Colors.on(scheme.primary_container),
+            "secondary": scheme.secondary,
+            "on_secondary": scheme.on_secondary,
+            "surface": scheme.surface,
+            "on_surface": scheme.on_surface,
+            "surface_variant": scheme.surface_variant,
+            "on_surface_variant": Colors.mix(scheme.on_surface,
+                                             scheme.surface_variant, 0.42),
+            "outline": scheme.outline,
+            "error": scheme.error,
+            "background": scheme.background,
+            "hint": Colors.mix(scheme.on_surface, scheme.surface, 0.58),
+        }
+
+    return {"light": palette(False), "dark": palette(True), "seed": seed}
+
+
+def _project_seed(project_dir: str) -> str | None:
+    """Read ``[theme] seed`` from pydrud.toml, if the user set one."""
+    path = os.path.join(project_dir, "pydrud.toml")
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            section = False
+            for line in handle:
+                stripped = line.strip()
+                if stripped.startswith("["):
+                    section = stripped == "[theme]"
+                elif section and stripped.startswith("seed"):
+                    _, _, value = stripped.partition("=")
+                    return value.strip().strip('"\'') or None
+    except OSError:
+        return None
+    return None
+
+
+def _render_native_layer(project_dir: str, java_package_path: str, ctx: dict):
+    """Write the Java renderer and its theme resources.
+
+    Shared by ``pydrud init`` and ``pydrud sync`` so an existing project can
+    pick up a new Pydrud release without being recreated.
+    """
+    java_dir = f"{project_dir}/android/app/src/main/java/{java_package_path}"
+    _ensure_dir(java_dir)
+
+    _write_template("android/MainActivity.java.j2",
+                    f"{java_dir}/{ctx['app_name']}Activity.java", ctx)
+    for name in _JAVA_TEMPLATES:
+        _write_template(f"android/{name}.java.j2", f"{java_dir}/{name}.java", ctx)
+    if ctx.get("firebase"):
+        _write_template("android/PydrudMessagingService.java.j2",
+                        f"{java_dir}/PydrudMessagingService.java", ctx)
+
+    # Material theme resources. The night variant keeps native dialogs and
+    # system bars in step with ``Theme.dark()`` on the Python side.
+    _ensure_dir(f"{project_dir}/android/app/src/main/res/values")
+    _ensure_dir(f"{project_dir}/android/app/src/main/res/values-night")
+    colors = _theme_colors(ctx.get("seed_color") or _project_seed(project_dir))
+    _write_template("android/themes.xml.j2",
+                    f"{project_dir}/android/app/src/main/res/values/themes.xml",
+                    {**ctx, "night": False, "colors": colors["light"]})
+    _write_template("android/themes.xml.j2",
+                    f"{project_dir}/android/app/src/main/res/values-night/themes.xml",
+                    {**ctx, "night": True, "colors": colors["dark"]})
+
+
 def create_project(
     name: str,
     org: str = "com.example",
@@ -191,8 +342,14 @@ def create_project(
     pip_packages=None,
     firebase: bool = False,
     permissions=None,
+    accent: str | None = None,
 ):
-    """Scaffold a new Pydrud project in a subdirectory ``./<name>/``."""
+    """Scaffold a new Pydrud project in a subdirectory ``./<name>/``.
+
+    ``accent`` is the brand colour the whole design system is generated
+    from — the Python palette, the generated ``themes.xml`` and the
+    starter app all start from it.
+    """
 
     project_dir = os.path.join(os.getcwd(), _slugify(name))
     if os.path.exists(project_dir):
@@ -210,7 +367,7 @@ def create_project(
     # Detect SDK for local.properties
     sdk_dir = _detect_sdk()
     # Detect Python executable for Chaquopy buildPython
-    python_exe = (shutil.which("python") or shutil.which("python3") or sys.executable).replace("\\", "/")
+    python_exe = _detect_build_python()
 
     # Normalise paths — Windows users get backslashes, but Gradle Kotlin DSL
     # and .properties files treat ``\`` as an escape character.
@@ -219,9 +376,13 @@ def create_project(
     # Detect NDK version for pydrud.yaml
     ndk_version = _detect_ndk(sdk_dir)
 
+    from pydrud.widgets.theme import Colors as _Colors
+
+    seed_color = _normalise_color(accent) or _Colors.PRIMARY
     ctx = {
         "project_name": name,
         "app_name": android_app_name,
+        "seed_color": seed_color,
         "pydrud_app_name": pydrud_app_name,
         "package": package,
         "package_path": java_package_path,
@@ -265,36 +426,7 @@ def create_project(
     _bundle_pydrud_source(project_dir)
 
     # ── 2.  Android / Gradle ─────────────────────────────────────────────
-    _ensure_dir(f"{project_dir}/android/app/src/main/java/{java_package_path}")
-    _write_template("android/MainActivity.java.j2",
-                    f"{project_dir}/android/app/src/main/java/{java_package_path}/{android_app_name}Activity.java", ctx)
-    _write_template("android/BridgeService.java.j2",
-                    f"{project_dir}/android/app/src/main/java/{java_package_path}/BridgeService.java", ctx)
-    _write_template("android/ViewFactory.java.j2",
-                    f"{project_dir}/android/app/src/main/java/{java_package_path}/ViewFactory.java", ctx)
-    _write_template("android/EventDispatcher.java.j2",
-                    f"{project_dir}/android/app/src/main/java/{java_package_path}/EventDispatcher.java", ctx)
-    _write_template("android/WidgetRegistry.java.j2",
-                    f"{project_dir}/android/app/src/main/java/{java_package_path}/WidgetRegistry.java", ctx)
-    _write_template("android/ViewCreator.java.j2",
-                    f"{project_dir}/android/app/src/main/java/{java_package_path}/ViewCreator.java", ctx)
-    _write_template("android/MaterialViews.java.j2",
-                    f"{project_dir}/android/app/src/main/java/{java_package_path}/MaterialViews.java", ctx)
-    _write_template("android/GestureBinder.java.j2",
-                    f"{project_dir}/android/app/src/main/java/{java_package_path}/GestureBinder.java", ctx)
-    _write_template("android/NativeServices.java.j2",
-                    f"{project_dir}/android/app/src/main/java/{java_package_path}/NativeServices.java", ctx)
-    _write_template("android/PlatformServices.java.j2",
-                    f"{project_dir}/android/app/src/main/java/{java_package_path}/PlatformServices.java", ctx)
-    _write_template("android/AdvancedViews.java.j2",
-                    f"{project_dir}/android/app/src/main/java/{java_package_path}/AdvancedViews.java", ctx)
-    _write_template("android/PydrudWorker.java.j2",
-                    f"{project_dir}/android/app/src/main/java/{java_package_path}/PydrudWorker.java", ctx)
-    _write_template("android/PydrudForegroundService.java.j2",
-                    f"{project_dir}/android/app/src/main/java/{java_package_path}/PydrudForegroundService.java", ctx)
-    if ctx.get("firebase"):
-        _write_template("android/PydrudMessagingService.java.j2",
-                        f"{project_dir}/android/app/src/main/java/{java_package_path}/PydrudMessagingService.java", ctx)
+    _render_native_layer(project_dir, java_package_path, ctx)
 
     # AndroidManifest.xml
     _ensure_dir(f"{project_dir}/android/app/src/main")
@@ -314,11 +446,6 @@ def create_project(
                     f"{project_dir}/android/gradle.properties", ctx)
     _write_template("android/local.properties.j2",
                     f"{project_dir}/android/local.properties", ctx)
-
-    # Android resources (Material theme + launcher icons)
-    _ensure_dir(f"{project_dir}/android/app/src/main/res/values")
-    _write_template("android/themes.xml.j2",
-                    f"{project_dir}/android/app/src/main/res/values/themes.xml", ctx)
 
     # Launcher icons — copy from the pydrud package res/ directory.
     _copy_icon_resources(project_dir)
@@ -365,3 +492,75 @@ def create_project(
     print(f"    $ cd {_slugify(name)}")
     print(f"    $ pydrud run")
     print()
+
+
+# ── Upgrading an existing project ────────────────────────────────────────────
+
+
+def _discover_project(project_dir: str) -> dict | None:
+    """Work out the package, app name and scheme of an existing project.
+
+    Everything is read back from the generated tree itself, so no config
+    file has to be kept in sync.
+    """
+    java_root = os.path.join(project_dir, "android", "app", "src", "main", "java")
+    if not os.path.isdir(java_root):
+        return None
+
+    for root, _dirs, files in os.walk(java_root):
+        if "BridgeService.java" not in files:
+            continue
+        package_path = os.path.relpath(root, java_root).replace(os.sep, "/")
+        activity = next((f for f in files if f.endswith("Activity.java")), None)
+        app_name = activity[: -len("Activity.java")] if activity else _camel(
+            os.path.basename(package_path))
+        return {
+            "package": package_path.replace("/", "."),
+            "package_path": package_path,
+            "app_name": app_name,
+            "firebase": "PydrudMessagingService.java" in files,
+        }
+    return None
+
+
+def sync_project(project_dir: str, *, update_runtime: bool = True) -> bool:
+    """Refresh an existing project's native layer from this Pydrud version.
+
+    Rewrites the generated Java renderer, the theme resources and the
+    bundled Python runtime. Your own code under ``src/app/`` is never
+    touched, so upgrading is safe:
+
+        $ pydrud sync && pydrud run
+    """
+    found = _discover_project(project_dir)
+    if not found:
+        print(fail("No generated Android sources found — is this a Pydrud project?"))
+        return False
+
+    project_name = os.path.basename(os.path.abspath(project_dir))
+    pydrud_app_name = _slugify(project_name)
+    ctx = {
+        "project_name": project_name,
+        "pydrud_app_name": pydrud_app_name,
+        "scheme": pydrud_app_name.replace("_", ""),
+        **found,
+    }
+
+    print(header(f"\n  Syncing {project_name} with Pydrud {_version()}"))
+    print(f"    Package:  {ctx['package']}")
+
+    _render_native_layer(project_dir, ctx["package_path"], ctx)
+    count = len(_JAVA_TEMPLATES) + 1 + (1 if ctx["firebase"] else 0)
+    print(info(f"  Rewrote {count} Java classes + theme resources"))
+
+    if update_runtime:
+        _bundle_pydrud_source(project_dir)
+
+    print(ok("Project synced — run `pydrud run` to rebuild."))
+    return True
+
+
+def _version() -> str:
+    from pydrud import __version__
+
+    return __version__

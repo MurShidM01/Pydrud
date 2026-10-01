@@ -9,16 +9,19 @@ Usage::
     from pydrud import FloatingActionButton
 
     FloatingActionButton(
-        text="+",
+        icon="plus",
         on_click=lambda e: print("FAB tapped"),
-        bg_color="#7C3AED",
     )
+
+The colour follows :class:`pydrud.Theme` unless overridden, and the
+native layer adds the Material press/elevation response.
 """
 
 from __future__ import annotations
 from typing import Callable, Optional
 
 from pydrud.widgets.base import Widget
+from pydrud.widgets.theme import Colors, Theme
 
 
 class FloatingActionButton(Widget):
@@ -37,10 +40,10 @@ class FloatingActionButton(Widget):
         *,
         icon: Optional[str] = None,
         on_click: Optional[Callable] = None,
-        bg_color: str = "#FF7C3AED",
-        text_color: str = "#FFFFFFFF",
-        size: float = 56,
-        elevation: float = 6,
+        bg_color: Optional[str] = None,
+        text_color: Optional[str] = None,
+        size: Optional[float] = None,
+        elevation: Optional[float] = None,
         bottom: float = 24,
         right: float = 24,
         left: Optional[float] = None,
@@ -51,10 +54,16 @@ class FloatingActionButton(Widget):
         **kwargs,
     ):
         super().__init__(key=key, style=style, visible=visible, **kwargs)
+        from pydrud.widgets.tokens import Tokens
 
+        if size is None:
+            size = Tokens.fab_size
+        if elevation is None:
+            elevation = Tokens.elevation_fab
         self._text = text
         self._icon = icon
-        self._text_color = text_color
+        bg_color = bg_color or Theme.primary
+        self._text_color = text_color or Colors.on(bg_color)
 
         base = {
             "bg": bg_color,
@@ -94,7 +103,8 @@ class FloatingActionButton(Widget):
 
         label_font = dict(self.style.get("font") or {})
         label_font.setdefault("color", self._text_color)
-        label_font.setdefault("size", 24)
+        label_font.setdefault("size", 24 if not self._icon else 22)
+        label_font.setdefault("weight", 500)
 
         if self._icon:
             child: Widget = Icon(self._icon, key=f"{self.key}._icon", style={"font": label_font})
