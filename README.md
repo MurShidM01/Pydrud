@@ -582,7 +582,7 @@ pip install -e ".[dev]"
 python -m pytest tests/ -v
 ```
 
-Current test count: **179 tests**, covering:
+Current test count: **184 tests**, covering:
 
 * unit tests — widgets, state, styling, responsive scaling, diffing, routing;
 * template tests — every generated Java file is rendered and parsed with
