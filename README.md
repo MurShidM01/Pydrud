@@ -119,6 +119,7 @@ The development line adds regression and compatibility coverage for:
 * subscription/state scheduling behavior
 * generated-project compatibility defaults
 * generated Java static checks in CI
+* transaction-aware `FakeDevice` acknowledgements so AppTester matches the v2 bridge
 
 The PR still needs real Android build/device validation before these defaults
 should be treated as a fully certified production matrix.
