@@ -57,7 +57,7 @@ DIST_URL=""
 if [ -f "$WRAPPER_PROPS" ] ; then
     DIST_URL=$(grep '^distributionUrl=' "$WRAPPER_PROPS" | cut -d= -f2- | sed 's|\\:|:|g')
 fi
-[ -n "$DIST_URL" ] || DIST_URL="https://services.gradle.org/distributions/gradle-8.14.4-bin.zip"
+[ -n "$DIST_URL" ] || DIST_URL="https://services.gradle.org/distributions/gradle-{{ gradle_version | default("8.14.4") }}-bin.zip"
 
 DIST_NAME=$(basename "$DIST_URL" .zip)       # e.g. gradle-8.14.4-bin
 GRADLE_VER=$(echo "$DIST_NAME" | sed 's/^gradle-//; s/-bin$//; s/-all$//')

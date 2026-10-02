@@ -29,7 +29,7 @@ if exist "%WRAPPER_JAR%" (
     exit /b %ERRORLEVEL%
 )
 
-set DIST_URL=https://services.gradle.org/distributions/gradle-8.14.4-bin.zip
+set DIST_URL=https://services.gradle.org/distributions/gradle-{{ gradle_version | default("8.14.4") }}-bin.zip
 if exist "%WRAPPER_PROPS%" (
     for /f "tokens=1,* delims==" %%a in ('findstr /b "distributionUrl" "%WRAPPER_PROPS%"') do set RAW_URL=%%b
     if defined RAW_URL set DIST_URL=!RAW_URL:\:=:!

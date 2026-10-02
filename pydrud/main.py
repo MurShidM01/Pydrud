@@ -750,6 +750,10 @@ class App:
     def _reader_loop(self, sock):
         """Background thread: read NDJSON lines from the socket and enqueue them."""
         buffer = b""
+        #: One event line is a few KB at most; anything past this means the
+        #: stream desynchronised (or is hostile) and must not be buffered
+        #: until the process runs out of memory.
+        max_line = 8 * 1024 * 1024
         try:
             while self._running and not self._shutdown_event.is_set():
                 try:
@@ -761,6 +765,12 @@ class App:
                 except OSError:
                     break
                 buffer += data
+                if len(buffer) > max_line and b"\n" not in buffer:
+                    self._report_error(RuntimeError(
+                        "bridge stream desynchronised: dropped "
+                        f"{len(buffer)} bytes with no line break"))
+                    buffer = b""
+                    continue
                 while b"\n" in buffer:
                     line, buffer = buffer.split(b"\n", 1)
                     decoded = line.decode("utf-8", errors="replace").strip()
