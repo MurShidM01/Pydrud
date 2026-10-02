@@ -866,6 +866,7 @@ class App:
     def _handle_render_confirmation(self, event_type: str, data: dict) -> None:
         tx_id = str(data.get("transaction_id", ""))
         tx = self._inflight.pop(tx_id, None)
+        sent_tree = self._inflight_trees.pop(tx_id, None)
         if tx is None:
             return
         revision = int(data.get("revision", 0) or 0)
@@ -877,7 +878,6 @@ class App:
             return
         if event_type == "render_ack":
             self._confirmed_revision = revision
-            sent_tree = self._inflight_trees.pop(tx_id, None)
             if sent_tree is not None:
                 self._snapshot = sent_tree.clone()
             if self._render_pending:
