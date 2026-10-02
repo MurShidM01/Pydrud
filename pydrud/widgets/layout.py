@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import Optional, Union
 
 from pydrud.widgets.base import Widget
-from pydrud.widgets.styling import EdgeInsets, Style
+from pydrud.widgets.styling import Border, EdgeInsets, Style
 
 
 class Container(Widget):
