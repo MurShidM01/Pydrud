@@ -1,0 +1,35 @@
+name: Pydrud CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        run: python -m pip install -U pip && pip install -e ".[dev]"
+      - name: Compile Python
+        run: python -m compileall -q pydrud tests
+      - name: Test
+        run: python -m pytest -q
+
+  generated-java:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install generator dependencies
+        run: python -m pip install -e ".[dev]"
+      - name: Static generated-source validation
+        run: python tools/check_java.py

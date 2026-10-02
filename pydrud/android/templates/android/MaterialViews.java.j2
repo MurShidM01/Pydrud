@@ -883,7 +883,7 @@ public class MaterialViews {
 
     private View createWebView(final String key, JSONObject p) {
         WebView web = new WebView(activity);
-        web.getSettings().setJavaScriptEnabled(p.optBoolean("javascript", true));
+        web.getSettings().setJavaScriptEnabled(p.optBoolean("javascript", false));
         web.getSettings().setBuiltInZoomControls(p.optBoolean("zoom", false));
         web.getSettings().setDisplayZoomControls(false);
         web.setWebChromeClient(new WebChromeClient());
@@ -896,7 +896,9 @@ public class MaterialViews {
                 }
             }
         });
-        web.addJavascriptInterface(new JsBridge(key), "Pydrud");
+        if (p.optBoolean("javascript", false) && p.optBoolean("allowNativeBridge", false)) {
+            web.addJavascriptInterface(new JsBridge(key), "Pydrud");
+        }
         String html = p.optString("html", "");
         String url = p.optString("url", "");
         if (!html.isEmpty()) {

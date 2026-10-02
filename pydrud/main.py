@@ -23,7 +23,9 @@ from pydrud.core.tasks import TaskRunner
 from pydrud.core.diff import TreeDiff
 from pydrud.core.events import EventDispatcher
 from pydrud.core.bridge import BridgeProtocol
-from pydrud.widgets import Widget, assign_stable_keys
+from pydrud.core.protocol import RenderTransaction, PROTOCOL_VERSION
+from pydrud.core.elements import ElementTree
+from pydrud.widgets import Widget, assign_stable_keys, validate_tree_keys
 
 #: Above this many patches a full re-render is cheaper than patching.
 MAX_PATCHES = 60
@@ -60,13 +62,21 @@ class App:
         self._page = _Page(self)
         self._event_dispatcher = EventDispatcher()
         self._current_tree: Optional[Widget] = None
-        #: Clone of the tree as the device last saw it (for partial updates).
+        #: Desired Python tree. Native confirmation advances _snapshot.
+        self._desired_tree: Optional[Widget] = None
+        #: Clone of the tree the native runtime has explicitly acknowledged.
         self._snapshot: Optional[Widget] = None
+        self._elements = ElementTree()
+        self._desired_revision = 0
+        self._confirmed_revision = 0
+        self._inflight: dict[str, RenderTransaction] = {}
+        self._native_capabilities: dict = {}
+        self._ui_thread_id: Optional[int] = None
         self._bridge = BridgeProtocol()
         self._connected = False
         self._transport: Optional[socket.socket] = None
         # ── Thread-safe event queue ─────────────────────────────────
-        self._event_queue: queue.Queue = queue.Queue()
+        self._event_queue: queue.Queue = queue.Queue(maxsize=1024)
         self._shutdown_event = threading.Event()
         self._reader_thread: Optional[threading.Thread] = None
         self._running = False
@@ -88,6 +98,7 @@ class App:
         #: Bound reactive objects — also used to carry values across reloads.
         self._bound_states: list = []
         self._bound_stores: list = []
+        self._subscriptions: list = []
         self._preserve_state: bool = True
         self._error_handler: Optional[Callable[[BaseException], None]] = None
         # ── Native service calls (request/response) ────────────────
@@ -95,7 +106,7 @@ class App:
         self._request_seq = 0
         self._tasks = TaskRunner(on_error=self._report_error)
         # ── UI-thread marshalling ──────────────────────────────────
-        self._ui_queue: queue.Queue = queue.Queue()
+        self._ui_queue: queue.Queue = queue.Queue(maxsize=1024)
 
     # ── public API ────────────────────────────────────────────────────────
 
@@ -131,97 +142,98 @@ class App:
         return self._build_tree()
 
     def update(self):
-        """Rebuild the widget tree and send incremental patches via TreeDiff.
+        """Rebuild and transact the desired tree.
 
-        This re-runs the ``target`` builder, so the UI is a pure function of
-        your state — the declarative model. If instead you hold on to a
-        widget, mutate it and want just that subtree refreshed, use
-        :meth:`update_widget` (``page.update(widget)``).
-
-        Falls back to a full render when there is no previous tree or when
-        the patch list grows beyond :data:`MAX_PATCHES`.
+        Python keeps desired, confirmed and in-flight UI state separate.  A
+        native ACK is the only operation which advances the confirmed snapshot.
         """
-        # Diff against what the *device* is actually showing, not merely
-        # the last tree we built. They diverge whenever an update was
-        # built while disconnected — diffing against the newer tree then
-        # produced zero patches and the UI froze.
-        old_tree = self._current_tree
-        old_clone = self._snapshot
-        if old_clone is None and old_tree is not None:
-            old_clone = old_tree.clone()
-
         new = self._build_tree()
-
+        self._desired_tree = new
         if not (self._connected and self._transport):
             return
-
-        if old_clone is None:
-            self._send(self._bridge.encode_full_render(new.to_dict()))
+        if self._inflight:
+            self._render_pending = True
             return
 
-        try:
-            patches = TreeDiff.diff(old_clone, new)
-        except Exception as exc:  # pragma: no cover — defensive
-            self._report_error(exc)
-            self._send(self._bridge.encode_full_render(new.to_dict()))
-            return
+        base_revision = self._confirmed_revision
+        self._desired_revision = max(self._desired_revision, base_revision) + 1
 
-        if not patches:
-            return
-        if len(patches) <= MAX_PATCHES:
-            self._send(self._bridge.encode_render([p.to_dict() for p in patches]))
+        old = self._snapshot
+        if old is None:
+            tx = RenderTransaction.create(
+                revision=self._desired_revision,
+                base_revision=base_revision,
+                kind="snapshot",
+                payload={"tree": new.to_dict()},
+            )
         else:
-            self._send(self._bridge.encode_full_render(new.to_dict()))
-        self._snapshot = new.clone()
+            try:
+                patches = TreeDiff.diff(old, new)
+            except Exception as exc:
+                self._report_error(exc)
+                tx = RenderTransaction.create(
+                    revision=self._desired_revision,
+                    base_revision=base_revision,
+                    kind="snapshot",
+                    payload={"tree": new.to_dict()},
+                )
+            else:
+                if not patches:
+                    return
+                kind = "patch" if len(patches) <= MAX_PATCHES else "snapshot"
+                payload = (
+                    {"patches": [p.to_dict() for p in patches]}
+                    if kind == "patch"
+                    else {"tree": new.to_dict()}
+                )
+                tx = RenderTransaction.create(
+                    revision=self._desired_revision,
+                    base_revision=base_revision,
+                    kind=kind,
+                    payload=payload,
+                )
+
+        self._inflight[tx.tx_id] = tx
+        self._send(self._bridge.encode_transaction(tx))
 
     def update_widget(self, *widgets: Widget) -> None:
-        """Push changes for mutated widgets without re-running the builder.
-
-        This is the imperative counterpart of :meth:`update`::
-
-            label.value = "Saved"
-            page.update(label)
-
-        Only the affected subtree is diffed, so updating one row of a long
-        list costs one patch instead of a whole rebuild.
-        """
+        """Compatibility API: merge explicit widget mutations into the desired tree."""
         if not widgets:
             return self.update()
-        if self._current_tree is None or self._snapshot is None:
+        if self._current_tree is None:
             return self.update()
-        if not (self._connected and self._transport):
-            # Keep the snapshot honest even while disconnected (tests).
-            self._snapshot = self._current_tree.clone()
-            return None
-
-        patches: list = []
         for widget in widgets:
-            previous = self._snapshot.find_by_key(widget.key)
-            if previous is None:
+            if not self._replace_widget_reference(self._current_tree, widget.key, widget):
                 return self.update()
-            try:
-                patches.extend(TreeDiff.diff(previous, widget))
-            except Exception as exc:  # pragma: no cover - defensive
-                self._report_error(exc)
-                return self.update()
-
-        if patches:
-            if len(patches) <= MAX_PATCHES:
-                self._send(self._bridge.encode_render(
-                    [p.to_dict() for p in patches]))
-            else:
-                self._send(self._bridge.encode_full_render(
-                    self._current_tree.to_dict()))
-        self._snapshot = self._current_tree.clone()
-        self._event_dispatcher.register_tree(self._current_tree)
+        self._desired_tree = self._current_tree
+        self._render_pending = True if self._inflight else False
+        if self._connected and self._transport and not self._inflight:
+            self._send_desired_tree()
         return None
 
+    def _replace_widget_reference(self, root: Widget, key: str, replacement: Widget) -> bool:
+        for index, child in enumerate(root.children):
+            if child.key == key:
+                root.children[index] = replacement
+                return True
+            if self._replace_widget_reference(child, key, replacement):
+                return True
+        return False
+
     def render(self):
-        """Force a full re-render (send the entire tree)."""
+        """Force a full desired-state snapshot reconciliation."""
         tree = self._build_tree()
-        self._snapshot = tree.clone()
+        self._desired_tree = tree
         if self._connected and self._transport:
-            self._send(self._bridge.encode_full_render(tree.to_dict()))
+            self._desired_revision = max(self._desired_revision, self._confirmed_revision) + 1
+            tx = RenderTransaction.create(
+                revision=self._desired_revision,
+                base_revision=self._confirmed_revision,
+                kind="snapshot",
+                payload={"tree": tree.to_dict()},
+            )
+            self._inflight[tx.tx_id] = tx
+            self._send(self._bridge.encode_transaction(tx))
 
     def update_state(self, state: State):
         """Rebuild after a State change."""
@@ -237,10 +249,10 @@ class App:
         for state in states:
             if isinstance(state, State):
                 self._bound_states.append(state)
-                state.watch(lambda _old, _new: self.update())
+                self._subscriptions.append(state.watch(lambda _old, _new: self.update(), scheduler=self.run_on_ui))
             elif hasattr(state, "subscribe"):
                 self._bound_stores.append(state)
-                state.subscribe(lambda *_args, **_kw: self.update())
+                self._subscriptions.append(state.subscribe(lambda *_args, **_kw: self.update()))
             else:
                 raise TypeError(
                     f"App.bind() expects State or an observable store, "
@@ -259,6 +271,12 @@ class App:
             self._watcher = None
         self._event_queue.put(None)
         self._cancel_pending("app stopped")
+        for subscription in list(self._subscriptions):
+            try:
+                subscription.cancel()
+            except Exception:
+                pass
+        self._subscriptions.clear()
         try:
             self._tasks.shutdown()
         except Exception:
@@ -343,10 +361,30 @@ class App:
                 self._report_error(exc)
         tree = self._page.build()
         assign_stable_keys(tree, prefix="_page")
+        validate_tree_keys(tree)
+        self._materialize_elements(tree)
         self._current_tree = tree
+        self._desired_tree = tree
         self._event_dispatcher.unregister_all()
         self._event_dispatcher.register_tree(tree)
         return tree
+
+    def _materialize_elements(self, tree: Widget) -> None:
+        """Refresh persistent logical element metadata without touching Views."""
+        def walk(widget: Widget, parent_key: Optional[str] = None, index: int = 0):
+            props = widget._serialise_props()
+            element, _ = self._elements.upsert(
+                widget.key,
+                widget._widget_type,
+                parent_key=parent_key,
+                index=index,
+                desired_props=props,
+            )
+            element.listeners = set(widget.event_handlers)
+            element.children = [child.key for child in widget.children]
+            for i, child in enumerate(widget.children):
+                walk(child, widget.key, i)
+        walk(tree)
 
     # ── Hot Reload ─────────────────────────────────────────────────────────
 
@@ -560,13 +598,20 @@ class App:
         Widget mutations from a worker thread must go through this, exactly
         like ``runOnUiThread`` on Android.
         """
+        if self._ui_thread_id == threading.get_ident():
+            try:
+                fn(*args, **kwargs)
+            except Exception as exc:
+                self._report_error(exc)
+            return
         if not self._running:
-            # No event loop yet (tests, CLI, headless renders): run inline so
-            # callers never silently lose work.
             fn(*args, **kwargs)
             return
-        self._ui_queue.put((fn, args, kwargs))
-        self._event_queue.put("__ui__")
+        try:
+            self._ui_queue.put_nowait((fn, args, kwargs))
+            self._event_queue.put_nowait("__ui__")
+        except queue.Full as exc:
+            raise RuntimeError("Pydrud UI queue is full") from exc
 
     def _drain_ui_queue(self) -> None:
         while True:
@@ -708,7 +753,8 @@ class App:
             self._event_queue.put(None)  # Sentinel: stop the event loop.
 
     def _event_loop(self):
-        """Process incoming events from the queue on the main thread."""
+        """Process incoming events on the single Python UI actor."""
+        self._ui_thread_id = threading.get_ident()
         try:
             while self._running:
                 try:
@@ -719,8 +765,10 @@ class App:
                     break
                 self._handle_raw_event(raw)
         finally:
+            self._ui_thread_id = None
             self._connected = False
             self._cancel_pending()
+            self._inflight.clear()
             if self._transport:
                 try:
                     self._transport.close()
@@ -744,6 +792,10 @@ class App:
 
         if etype == "result":
             self._resolve_result(data)
+            return
+
+        if etype in ("render_ack", "render_nack"):
+            self._handle_render_confirmation(etype, data)
             return
 
         if etype == "ready":
@@ -823,8 +875,43 @@ class App:
         except Exception as exc:
             self._report_error(exc)
 
+    def _handle_render_confirmation(self, event_type: str, data: dict) -> None:
+        tx_id = str(data.get("transaction_id", ""))
+        tx = self._inflight.pop(tx_id, None)
+        if tx is None:
+            return
+        revision = int(data.get("revision", 0) or 0)
+        if revision != tx.revision:
+            self._report_error(RuntimeError(
+                f"Render confirmation mismatch for {tx_id}: "
+                f"expected {tx.revision}, got {revision}"
+            ))
+            return
+        if event_type == "render_ack":
+            self._confirmed_revision = revision
+            if self._desired_tree is not None:
+                self._snapshot = self._desired_tree.clone()
+            if self._render_pending:
+                self._render_pending = False
+                self.update()
+            return
+
+        self._confirmed_revision = int(data.get("native_revision", 0) or 0)
+        if self._desired_tree is None or not (self._connected and self._transport):
+            return
+        self._desired_revision = max(self._desired_revision, self._confirmed_revision) + 1
+        recovery = RenderTransaction.create(
+            revision=self._desired_revision,
+            base_revision=self._confirmed_revision,
+            kind="snapshot",
+            payload={"tree": self._desired_tree.to_dict()},
+        )
+        self._inflight[recovery.tx_id] = recovery
+        self._send(self._bridge.encode_transaction(recovery))
+
     def _handle_ready(self, d: dict) -> None:
-        """First contact: store the device metrics and render for real."""
+        """First contact: negotiate native capabilities, then render."""
+        self._native_capabilities = dict(d.get("capabilities") or {})
         self._apply_metrics(d)
         # Device metrics may change the layout — re-render with real sizes.
         self.render()
