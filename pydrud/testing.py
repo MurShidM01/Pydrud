@@ -537,7 +537,7 @@ class AppTester:
             raise ValueError("AppTester needs target= or app=")
         self.device = FakeDevice(width=width, height=height, density=density)
         if app is None:
-            from pydrud.main import App
+            from pydrud.runtime.app import App
 
             app = App(target=target, title=title)
         self.app = app

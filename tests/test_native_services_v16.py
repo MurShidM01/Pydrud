@@ -101,7 +101,7 @@ class TestStreamingEvents(unittest.TestCase):
     """`location`, `bluetooth` and `recording` must reach an App callback."""
 
     def setUp(self):
-        from pydrud.main import App
+        from pydrud.runtime.app import App
         self.app = App(target=lambda page: None)
 
     def test_location_events(self):

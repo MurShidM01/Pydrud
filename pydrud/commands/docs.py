@@ -113,13 +113,13 @@ def build_docs(project_dir: str = ".", output: str = "docs") -> str:
     os.makedirs(out_dir, exist_ok=True)
     version = getattr(pydrud, "__version__", "")
 
-    modules = ["pydrud", "pydrud.main", "pydrud.navigation",
+    modules = ["pydrud", "pydrud.runtime.app", "pydrud.runtime.navigation",
                "pydrud.widgets", "pydrud.widgets.canvas",
                "pydrud.widgets.advanced", "pydrud.core.store",
                "pydrud.core.controllers", "pydrud.core.tasks",
                "pydrud.core.results", "pydrud.data.database",
                "pydrud.data.cache", "pydrud.services.native",
-               "pydrud.services.http", "pydrud.packages", "pydrud.testing"]
+               "pydrud.services.http", "pydrud.commands.packages", "pydrud.testing"]
 
     pages: list[tuple[str, str]] = []
     for name in modules:

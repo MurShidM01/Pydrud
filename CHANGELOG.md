@@ -2,15 +2,17 @@
 
 All notable changes to Pydrud are documented here.
 
-## [1.7.0] — A project you can grow into
+## [2.0.0] — A project you can grow into
 
-`pydrud init` used to hand you a 700-line `src/app/main.py`. That is a demo,
-not a project: the first thing every team did was take it apart. The starter
-app now ships as the structure a real app wants, and the test harness tells
-the truth about when an interaction has landed.
+Two restructures, one release: the project `pydrud init` gives you, and the
+package Pydrud itself is. Nothing about writing an app changes —
+`from pydrud import App, Router, Column` is still the only import you need.
 
 ### Changed — generated project layout (breaking for the scaffold)
-The same starter app, same widgets, same keys, now laid out as:
+
+`pydrud init` used to hand you a 702-line `src/app/main.py`. That is a demo,
+not a project: the first thing every team did was take it apart. The same
+starter app — same widgets, same keys, same behaviour — now arrives as:
 
 ```
 src/app/
@@ -25,28 +27,50 @@ src/app/
 
 Existing projects are untouched: `pydrud sync` only regenerates `android/`,
 never your Python. To adopt the layout, scaffold a new project and move your
-screens across — `from app.runtime import refresh, router` replaces the
+screens across; `from app.runtime import refresh, router` replaces the
 module-level globals that used to live in `main.py`.
+
+### Changed — framework package layout (shimmed, not broken)
+
+The top level of the package now names layers instead of files:
+
+| Was | Is |
+| --- | --- |
+| `pydrud/main.py` (1 602 lines) | `pydrud/runtime/app.py` |
+| `pydrud/navigation.py` | `pydrud/runtime/navigation.py` |
+| `pydrud/packages.py` | `pydrud/commands/packages.py` (it is build tooling) |
+
+The old paths still import, with a `DeprecationWarning` naming the
+replacement; they are removed in 3.0. `pydrud/android/` is now a real
+package rather than an implicit namespace one.
 
 ### Added
 * **`README.md` in every new project** — how to run it, what each directory
   is for, and how to add a screen.
-* **`tests/test_app.py` in every new project** — three `AppTester` tests that
-  pass from the first commit, so a project starts out testable.
-* **`App.current()`** — the most recently created app. Screen code can reach
-  the running app (`refresh()`) without a module-level global, which is what
-  makes the split above possible.
+* **`tests/test_app.py` in every new project** — three `AppTester` tests
+  that pass from the first commit, so a project starts out testable.
+* **`App.current()`** — the most recently created app, so screen code can
+  reach the running app without a module-level global.
+* **`docs/ARCHITECTURE.md`** — the layers, the render/ack contract, the
+  threading rule and the native-service convention.
+* **`CONTRIBUTING.md`** — how to set up, what to run before a PR, and the
+  rules a native command has to satisfy.
+* **`tests/test_package_layout.py`, `tests/test_scaffold_layout.py`,
+  `tests/test_tester_settle.py`** — the layout, the shims and the harness
+  are now pinned by tests (733 tests, 2 217 subtests in total).
 
 ### Fixed
-* **`AppTester.settle()` returned too early.** It only checked that the event
-  queue was empty, which is also true while an event is still in flight on
-  the socket — so a `tap()` could silently do nothing and the next assertion
-  would read stale UI. It now waits for the app to handle everything the
-  device has sent *and* for the resulting render to be acknowledged. Taps,
-  typing and toggles are deterministic.
+* **`AppTester.settle()` returned too early.** It only checked that the
+  event queue was empty — which is also true while an event is still in
+  flight on the socket — so a `tap()` could silently do nothing and the
+  next assertion would read stale UI. It now waits for the app to handle
+  everything the device has sent *and* for the resulting render to be
+  acknowledged. Taps, typing and toggles are deterministic.
 * **`FakeDevice` text matching missed list tiles.** `shows()` now sees
   `title`, `subtitle`, `message` and `placeholder` text, not just
   `value`/`text`/`label`/`hint`.
+* **README** no longer advertises unimplemented native commands; they all
+  shipped in 1.6.0.
 
 ## [1.6.0] — Every native command implemented
 

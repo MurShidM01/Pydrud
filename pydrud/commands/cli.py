@@ -232,7 +232,7 @@ def _project_or_exit() -> str:
               help="Only record it in pydrud.toml; do not touch Gradle.")
 def pip_add(packages, force, no_sync):
     """Add one or more packages (e.g. ``pydrud pip add yt-dlp``)."""
-    from pydrud.packages import PackageError, Requirements, sync_gradle
+    from pydrud.commands.packages import PackageError, Requirements, sync_gradle
 
     root = _project_or_exit()
     requirements = Requirements(root)
@@ -261,7 +261,7 @@ def pip_add(packages, force, no_sync):
 @click.argument("packages", nargs=-1, required=True)
 def pip_remove(packages):
     """Remove packages from the project."""
-    from pydrud.packages import PackageError, Requirements, sync_gradle
+    from pydrud.commands.packages import PackageError, Requirements, sync_gradle
 
     root = _project_or_exit()
     requirements = Requirements(root)
@@ -282,7 +282,7 @@ def pip_remove(packages):
 @click.option("--category", default=None, help="Filter --all by category.")
 def pip_list(show_all, category):
     """Show installed packages, or the whole verified registry."""
-    from pydrud.packages import by_category, installed_summary
+    from pydrud.commands.packages import by_category, installed_summary
 
     if show_all:
         groups = by_category()
@@ -316,7 +316,7 @@ def pip_list(show_all, category):
 @click.argument("query")
 def pip_search(query):
     """Search the verified registry."""
-    from pydrud.packages import search
+    from pydrud.commands.packages import search
 
     results = search(query)
     if not results:
@@ -332,7 +332,7 @@ def pip_search(query):
 @pip.command("sync")
 def pip_sync():
     """Re-apply pydrud.toml to the Gradle build (after editing it by hand)."""
-    from pydrud.packages import PackageError, Requirements, sync_gradle
+    from pydrud.commands.packages import PackageError, Requirements, sync_gradle
 
     root = _project_or_exit()
     try:

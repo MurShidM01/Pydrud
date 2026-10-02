@@ -272,28 +272,21 @@ the release plumbing you need to put an app on the Play Store.
 | **Navigation** | Pattern routes (`/items/:id`, `/files/*rest`), query strings, guards and redirects, nested navigators, deep links and 7 screen transitions |
 | **PyPI packages** | `pydrud pip add yt-dlp` — 119 verified Android-compatible packages wired into Chaquopy automatically |
 | **Background** | WorkManager jobs with constraints, foreground services with progress, FCM push and notification routing |
-| **Hardware** | Camera preview + capture, sensors, biometrics, audio record/play and TTS (the BLE, NFC, speech-to-text and camera-extras APIs exist but are [not implemented natively yet](#not-implemented-yet)) |
+| **Hardware** | Camera preview + capture + torch/zoom/video/barcode scanning, Bluetooth LE, NFC, sensors, biometrics, audio record/play, speech-to-text and TTS — every documented native command has a handler |
 | **Security** | `page.secure` — EncryptedSharedPreferences-backed keystore storage |
 | **Graphics** | `Canvas` with paths, gradients, transforms, sparklines and pies; `AnimationController` + `Tween` + `Sequence_` for explicit animations |
 | **Widgets** | `CameraPreview`, `MapView`, `RichText`, `Markdown`, `ReorderableList`, virtualising `InfiniteList` |
 | **Release** | `pydrud keygen` (upload keystore), `pydrud icons` (every density + adaptive + splash), `pydrud permissions`, R8 shrinking |
 | **DX** | Stateful hot reload (your counters survive a save), `pydrud inspect` widget inspector, `pydrud docs` offline API reference |
 
-### Not implemented yet
+### Native coverage
 
-A handful of service calls are part of the Python API but have no handler in
-the generated Android runtime. They do not hang or silently no-op: the
-`Result` fails with `unsupported native command`, and each docstring says so.
-The authoritative list is `pydrud.services.native.UNIMPLEMENTED_COMMANDS`,
-kept in sync with the Java sources by `tests/test_native_coverage.py`:
+Every command in the Python service API has a handler in the generated
+Android runtime: `pydrud.services.native.UNIMPLEMENTED_COMMANDS` is empty,
+and `tests/test_native_coverage.py` fails the build if that ever stops
+being true.
 
-* **Bluetooth LE** — the whole `page.bluetooth` surface
-* **NFC** — the whole `page.nfc` surface
-* **Camera extras** — `flash`, `zoom`, `record`, `stop_recording`, `scan_codes`
-* **Misc** — `page.audio.listen()` (speech-to-text), `page.dialogs.color()`,
-  `page.location.watch()`/`stop()`, `page.notifications.create_channel()`
-
-A few widget properties are also inert for now (the widget renders, the
+A few widget properties are still inert (the widget renders, the
 refinement is ignored) — see `pydrud.compatibility.NATIVE_IGNORED_PROPS`,
 e.g. `Chart(labels=…)`, `CircularProgress(stroke=…)`, `Rating(half=True)`.
 

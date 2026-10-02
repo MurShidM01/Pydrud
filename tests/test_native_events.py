@@ -2,7 +2,7 @@
 Native events that used to fall on the floor.
 
 ``push_token``, ``audio_complete`` and ``protocol_error`` are emitted by the
-generated Java but had no handler in :class:`~pydrud.main.App`, so the
+generated Java but had no handler in :class:`~pydrud.runtime.app.App`, so the
 features they drive (token refresh, playback completion, a rejected render)
 silently did nothing.  These run against the real NDJSON protocol via
 :class:`~pydrud.testing.FakeDevice`.

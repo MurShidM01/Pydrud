@@ -293,7 +293,7 @@ class TestAppInternals(unittest.TestCase):
             app.page.set_system_ui(icon_brightness="rainbow")
 
     def test_module_name_resolution(self):
-        from pydrud.main import _module_name_for
+        from pydrud.runtime.app import _module_name_for
         import os
         root = os.path.abspath("/tmp/proj")
         self.assertEqual(

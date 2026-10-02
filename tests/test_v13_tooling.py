@@ -13,7 +13,7 @@ from click.testing import CliRunner
 from pydrud.commands import release
 from pydrud.commands.cli import main as cli
 from pydrud.commands.project import create_project
-from pydrud.packages import (
+from pydrud.commands.packages import (
     BLOCKED, REGISTRY, PackageError, Requirements, by_category, info,
     installed_summary, is_supported, normalise, render_pip_block, search,
     split_requirement, sync_gradle,

@@ -24,11 +24,11 @@ TEMPLATES = os.path.join(ROOT, "pydrud", "android", "templates", "android")
 
 #: Python modules that talk to the bridge.
 SENDERS = [
-    os.path.join("pydrud", "main.py"),
+    os.path.join("pydrud", "runtime", "app.py"),
     os.path.join("pydrud", "services", "native.py"),
-    os.path.join("pydrud", "navigation.py"),
+    os.path.join("pydrud", "runtime", "navigation.py"),
     os.path.join("pydrud", "data", "database.py"),
-    os.path.join("pydrud", "packages.py"),
+    os.path.join("pydrud", "commands", "packages.py"),
 ]
 
 #: Commands the bridge answers structurally rather than by name.
@@ -100,7 +100,7 @@ class TestNativeEventCoverage(unittest.TestCase):
     def test_every_native_event_is_handled_in_python(self):
         java = java_source()
         events = set(re.findall(r'sendEvent\(\s*"([a-z_]+)"', java))
-        main = read(os.path.join("pydrud", "main.py"))
+        main = read(os.path.join("pydrud", "runtime", "app.py"))
         missing = sorted(e for e in events if f'"{e}"' not in main)
         self.assertEqual(
             [], missing,

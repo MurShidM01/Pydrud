@@ -41,7 +41,8 @@ local.properties
 *.yml.bak
 pydrud.log
 .claude
-docs/
+# generated API reference (`pydrud docs`); hand-written docs are tracked
+docs/*.html
 CLAUDE.md
 *.zip
 
