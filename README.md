@@ -71,7 +71,8 @@ instead of treating every Python render as an unrelated tree.
 Subscriptions are represented by cancellable handles and can be retained by
 the owning `App`. State watchers may be marshalled through a scheduler, equal
 values can use explicit distinct semantics, and worker task failures remain
-failed futures instead of being silently converted into successful results.
+observable on the returned future. Legacy `.result()` stays non-raising by
+default, with strict propagation available via `propagate_exceptions=True`.
 
 For existing code, legacy watcher behavior remains available unless
 `distinct=True` is selected.
@@ -119,6 +120,7 @@ The development line adds regression and compatibility coverage for:
 * subscription/state scheduling behavior
 * generated-project compatibility defaults
 * generated Java static checks in CI
+* transaction-aware `FakeDevice` acknowledgements so AppTester matches the v2 bridge
 
 The PR still needs real Android build/device validation before these defaults
 should be treated as a fully certified production matrix.

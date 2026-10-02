@@ -36,9 +36,9 @@ yet.
 * **State scheduling is explicit.** Watchers can marshal callbacks through the
   app scheduler, and `distinct=True` enables equal-value suppression without
   changing the default behavior.
-* **Task failures propagate.** Worker exceptions remain visible through the
-  returned future instead of being silently converted to a successful
-  `None` result.
+* **Task failures stay observable.** Worker exceptions remain attached to the
+  returned future via `exception()`, while legacy `.result()` stays non-raising
+  by default; callers can opt into raising with `propagate_exceptions=True`.
 * **Android project defaults are modernized.** Generated projects move to SDK
   36, AGP 8.13.2, Gradle 8.13 and Chaquopy 17.0.0, with Python 3.11/JDK 17
   defaults.
@@ -53,6 +53,19 @@ yet.
   and components are capability-gated rather than always emitted.
 
 ### Fixed
+* **CI protocol parity.** The in-process `FakeDevice` now understands v2
+  render transactions and sends render acknowledgements, so AppTester exercises
+  the same transaction boundary as the native bridge.
+* **Backward-compatible protocol errors.** The low-level decoder now exposes
+  structured `ProtocolError` failures, while `BridgeProtocol.decode_message()`
+  preserves the legacy invalid-JSON -> `None` behavior.
+* **Backward-compatible subscriptions.** Subscription handles are callable,
+  preserving existing `off()` / `unsubscribe()` usage while supporting explicit
+  `.cancel()` / `.dispose()`.
+* **Task error compatibility.** Worker failures remain available from the
+  underlying future via `exception()`, while legacy `.result()` behavior stays
+  non-raising by default; strict propagation is available with
+  `propagate_exceptions=True`.
 * Reduced the chance of Python state racing ahead of the last native render
   acknowledgement during rapid successive updates.
 * Prevented duplicate widget identity from silently collapsing keyed diff
