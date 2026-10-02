@@ -28,10 +28,12 @@ from typing import Any, Callable, Optional
 class TaskRunner:
     """Runs callables (and coroutines) off the UI thread."""
 
-    def __init__(self, max_workers: int = 4, on_error: Optional[Callable] = None):
+    def __init__(self, max_workers: int = 4, on_error: Optional[Callable] = None,
+                 propagate_exceptions: bool = False):
         self._pool: Optional[ThreadPoolExecutor] = None
         self._max_workers = max(1, int(max_workers))
         self._on_error = on_error
+        self._propagate_exceptions = bool(propagate_exceptions)
         self._lock = threading.Lock()
         self._timers: list["Timer"] = []
         self._closed = False
@@ -61,7 +63,9 @@ class TaskRunner:
             return value
         except BaseException as exc:  # noqa: BLE001 - report, then preserve Future failure
             self._report(exc)
-            raise
+            if self._propagate_exceptions:
+                raise
+            return None
 
     # ── timers ───────────────────────────────────────────────────────────
 
