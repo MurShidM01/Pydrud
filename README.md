@@ -602,20 +602,37 @@ app.enable_hot_reload()  # Watch src/ for .py changes
 app.run()
 ```
 
-In-process hot reload (used when Python runs on the host, or inside a
-long-lived session) reloads the changed module, rebuilds the tree and sends
-incremental patches.
+## Hot Reload & Interactive Dev Runner
 
-Because Chaquopy embeds your Python *inside the APK*, host-side edits have to
-be shipped to the device. That is what watch mode does:
+Pydrud features Flutter-style **instant Hot Reload** and **Hot Restart** during `pydrud run`. When you edit Python files under `src/` (screens, components, state, config), changes are synced directly to the running Python runtime on the Android device in milliseconds — **without rebuilding the APK or reinstalling**:
 
 ```bash
-pydrud run --watch      # build → install → launch, then rebuild on every save
-pydrud watch            # the same loop for an already-installed app
+pydrud run              # build, install, launch and enter interactive dev runner
 ```
 
-Each save triggers an incremental Gradle build plus `adb install -r`, which
-normally takes a couple of seconds.
+### Interactive Flutter-style Key Commands
+
+During `pydrud run`, press single keys in your terminal:
+
+* **`r`** — **Hot Reload**: sync modified Python code, reload modules, preserve active state & forms, fast re-render (30–50ms).
+* **`R` (Shift+r)** — **Hot Restart**: reset all state & router back to root, reload all user modules from scratch.
+* **`t` / `p`** — **Dump Widget Tree**: print the current live widget tree directly in your terminal.
+* **`c`** — **Clear Screen**: clear terminal and refresh the banner.
+* **`h` / `?`** — **Help**: show the interactive key commands menu.
+* **`d`** — **Detach**: exit terminal runner while leaving the app running on device.
+* **`q`** — **Quit**: stop the app on the device and exit.
+
+### Realtime Runtime Error Cards
+
+When a Python runtime exception, syntax error, or unhandled error occurs during development, `pydrud run` captures and formats it with rich colors, exact file path, line number, and stack trace in the terminal TUI:
+
+```text
+  ╭── ❌ Python Runtime Error ──────────────────────────────────
+  │ File "src/app/screens/home.py", line 42, in home_screen
+  │   total = 100 / count.value
+  │ ZeroDivisionError: division by zero
+  ╰─────────────────────────────────────────────────────────────
+```
 
 ---
 
@@ -1230,10 +1247,10 @@ the target child `index`, so the renderer inserts views in the right place:
 | `pydrud init <name> --org com.example` | With custom package |
 | `pydrud build` | Build debug APK |
 | `pydrud build --release` | Build release APK |
-| `pydrud run` | Build + install + launch + live logcat |
+| `pydrud run` | Build + install + launch with Flutter-style Hot Reload & live logs |
 | `pydrud run --device <id>` | Target specific device |
-| `pydrud run --watch` | Rebuild + reinstall + relaunch on every file change |
-| `pydrud watch` | Same loop without rebuilding first |
+| `pydrud run --no-interactive` | Run without interactive keyboard mode (for CI/scripts) |
+| `pydrud watch` | Start interactive Hot Reload development runner |
 | `pydrud devices` | List connected devices (`adb devices -l`) |
 | `pydrud analyze` | Static analysis (missing keys, invalid styles) |
 | `pydrud analyze --path src` | Custom source directory |

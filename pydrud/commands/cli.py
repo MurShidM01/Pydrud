@@ -92,9 +92,10 @@ def sync(no_runtime):
 @main.command()
 @click.option("--device", default=None, help="Target device ID (adb).")
 @click.option("--release", is_flag=True, default=False, help="Build in release mode.")
-@click.option("--watch", is_flag=True, default=False, help="Rebuild, reinstall and relaunch whenever a source file changes.")
-def run(device, release, watch):
-    """Build the APK, install and launch on a connected device."""
+@click.option("--watch", is_flag=True, default=False, help="Legacy flag: watch mode with hot reload (default behavior).")
+@click.option("--no-interactive", is_flag=True, default=False, help="Disable interactive terminal shortcuts.")
+def run(device, release, watch, no_interactive):
+    """Build the APK, install, launch and start interactive Hot Reload on a connected device."""
     from pydrud.commands.builder import Builder
 
     root = _find_project_root()
@@ -103,7 +104,7 @@ def run(device, release, watch):
         sys.exit(1)
 
     builder = Builder(root)
-    builder.run(device=device, release=release, watch=watch)
+    builder.run(device=device, release=release, watch=watch, interactive=not no_interactive)
 
 
 @main.command()
@@ -148,8 +149,9 @@ def clean(device):
 @main.command()
 @click.option("--device", default=None, help="Target device ID (adb).")
 @click.option("--release", is_flag=True, default=False, help="Build in release mode.")
-def watch(device, release):
-    """Watch sources and rebuild/reinstall the app on every change."""
+@click.option("--no-interactive", is_flag=True, default=False, help="Disable interactive terminal shortcuts.")
+def watch(device, release, no_interactive):
+    """Start interactive Hot Reload development runner."""
     from pydrud.commands.builder import Builder
 
     root = _find_project_root()
@@ -158,11 +160,7 @@ def watch(device, release):
         sys.exit(1)
 
     builder = Builder(root)
-    apk = builder.build(release=release)
-    if not apk:
-        sys.exit(1)
-    builder._install_and_launch(apk, device)
-    builder.watch(device=device, release=release)
+    builder.run(device=device, release=release, watch=True, interactive=not no_interactive)
 
 
 @main.command()
