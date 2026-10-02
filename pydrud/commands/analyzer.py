@@ -15,8 +15,6 @@ Usage::
 from __future__ import annotations
 import ast
 import os
-import sys
-from typing import Any
 
 # ── Issue types ──────────────────────────────────────────────────────────────
 
@@ -134,7 +132,25 @@ def _analyze_file(source: str, filepath: str) -> list[dict]:
     issues.extend(_check_event_handlers(tree, filepath))
     issues.extend(_check_page_update_in_loops(tree, filepath))
 
-    return issues
+    return _dedupe(issues)
+
+
+def _dedupe(issues: list[dict]) -> list[dict]:
+    """Drop repeats of the same finding.
+
+    Nested loops are visited once per enclosing loop, so a widget inside two
+    ``for`` statements used to be reported twice.
+    """
+    seen: set = set()
+    unique: list[dict] = []
+    for issue in issues:
+        signature = (issue["file"], issue["line"], issue["severity"],
+                     issue["message"])
+        if signature in seen:
+            continue
+        seen.add(signature)
+        unique.append(issue)
+    return sorted(unique, key=lambda i: (i["file"], i["line"]))
 
 
 # ── Check 1: Missing widget keys ────────────────────────────────────────────

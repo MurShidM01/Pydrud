@@ -1,0 +1,857 @@
+package {{ package }};
+
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothGatt;
+import android.bluetooth.BluetoothGattCallback;
+import android.bluetooth.BluetoothGattCharacteristic;
+import android.bluetooth.BluetoothGattDescriptor;
+import android.bluetooth.BluetoothGattService;
+import android.bluetooth.BluetoothManager;
+import android.bluetooth.le.BluetoothLeScanner;
+import android.bluetooth.le.ScanCallback;
+import android.bluetooth.le.ScanFilter;
+import android.bluetooth.le.ScanResult;
+import android.bluetooth.le.ScanSettings;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.util.Log;
+
+import androidx.core.content.ContextCompat;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+/**
+ * ConnectivityServices — Bluetooth Low Energy and NFC.
+ *
+ * Backs {@code page.bluetooth} (scan / connect / GATT read, write, notify)
+ * and {@code page.nfc} (NDEF read and write). Peripheral notifications are
+ * pushed to Python as {@code bluetooth} events; tags discovered while a read
+ * is pending settle that read's {@code Result}.
+ *
+ * Every command answers exactly once, including permission failures, so a
+ * Python {@code Result} never hangs.
+ */
+public class ConnectivityServices {
+
+    private static final String TAG = "PydrudConnect";
+
+    private final {{ app_name }}Activity activity;
+    private final BridgeService bridge;
+    private final Handler main = new Handler(Looper.getMainLooper());
+
+    /** Connected peripherals, keyed by MAC address. */
+    private final Map<String, BluetoothGatt> connections = new HashMap<>();
+    /** Pending GATT operations, keyed by characteristic UUID. */
+    private final Map<String, String> pendingReads = new HashMap<>();
+    private final Map<String, String> pendingWrites = new HashMap<>();
+    private final Map<String, String> pendingConnects = new HashMap<>();
+
+    private BluetoothLeScanner scanner;
+    private ScanCallback scanCallback;
+    private String scanRequestId = "";
+    private final List<JSONObject> scanResults = new ArrayList<>();
+
+    private static final int ENABLE_BT_REQUEST = 9801;
+    private String enableRequestId = "";
+
+    /** NFC */
+    private android.nfc.NfcAdapter nfcAdapter;
+    private String nfcRequestId = "";
+    private JSONArray nfcPendingWrite;
+    private Runnable nfcTimeout;
+
+    public ConnectivityServices({{ app_name }}Activity activity,
+                                BridgeService bridge) {
+        this.activity = activity;
+        this.bridge = bridge;
+    }
+
+    /** Handle one command. Returns true when the command was recognised. */
+    public boolean handle(final String cmd, final JSONObject msg) {
+        final String requestId = msg.optString("request_id", "");
+        try {
+            switch (cmd) {
+                case "bt_enabled":    reply(requestId, isEnabled()); return true;
+                case "bt_enable":     btEnable(requestId); return true;
+                case "bt_scan":       btScan(requestId, msg); return true;
+                case "bt_scan_stop":  btScanStop(requestId); return true;
+                case "bt_connect":    btConnect(requestId, msg); return true;
+                case "bt_disconnect": btDisconnect(requestId, msg); return true;
+                case "bt_services":   btServices(requestId, msg); return true;
+                case "bt_read":       btRead(requestId, msg); return true;
+                case "bt_write":      btWrite(requestId, msg); return true;
+                case "bt_notify":     btNotify(requestId, msg); return true;
+                case "bt_bonded":     btBonded(requestId); return true;
+                case "nfc_available": reply(requestId, nfcAvailable()); return true;
+                case "nfc_read":      nfcRead(requestId, msg); return true;
+                case "nfc_write":     nfcWrite(requestId, msg); return true;
+                case "nfc_cancel":    nfcCancel(requestId); return true;
+                default:
+                    return false;
+            }
+        } catch (SecurityException e) {
+            fail(requestId, "bluetooth permission not granted");
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "command " + cmd + " failed", e);
+            fail(requestId, e.getMessage() == null ? "error" : e.getMessage());
+            return true;
+        }
+    }
+
+    // ── replies ──────────────────────────────────────────────────────────
+
+    private void reply(String requestId, Object value) {
+        if (requestId == null || requestId.isEmpty() || bridge == null) return;
+        JSONObject data = new JSONObject();
+        try {
+            data.put("request_id", requestId);
+            data.put("ok", true);
+            data.put("value", value == null ? JSONObject.NULL : value);
+        } catch (Exception ignored) {}
+        bridge.sendEvent("result", "", data);
+    }
+
+    private void fail(String requestId, String error) {
+        if (requestId == null || requestId.isEmpty() || bridge == null) return;
+        JSONObject data = new JSONObject();
+        try {
+            data.put("request_id", requestId);
+            data.put("ok", false);
+            data.put("error", error);
+        } catch (Exception ignored) {}
+        bridge.sendEvent("result", "", data);
+    }
+
+    // ── bluetooth plumbing ───────────────────────────────────────────────
+
+    private BluetoothAdapter adapter() {
+        BluetoothManager manager = (BluetoothManager)
+            activity.getSystemService(Context.BLUETOOTH_SERVICE);
+        return manager == null ? null : manager.getAdapter();
+    }
+
+    private boolean isEnabled() {
+        BluetoothAdapter adapter = adapter();
+        return adapter != null && adapter.isEnabled();
+    }
+
+    /**
+     * The runtime permissions BLE needs. Android 12 split them into
+     * BLUETOOTH_SCAN / BLUETOOTH_CONNECT; older versions use location.
+     */
+    private String missingPermission(boolean scanning) {
+        if (Build.VERSION.SDK_INT >= 31) {
+            String needed = scanning
+                ? "android.permission.BLUETOOTH_SCAN"
+                : "android.permission.BLUETOOTH_CONNECT";
+            return ContextCompat.checkSelfPermission(activity, needed)
+                == PackageManager.PERMISSION_GRANTED ? "" : needed;
+        }
+        if (scanning && ContextCompat.checkSelfPermission(activity,
+                android.Manifest.permission.ACCESS_FINE_LOCATION)
+                != PackageManager.PERMISSION_GRANTED) {
+            return android.Manifest.permission.ACCESS_FINE_LOCATION;
+        }
+        return "";
+    }
+
+    private void btEnable(final String requestId) {
+        BluetoothAdapter adapter = adapter();
+        if (adapter == null) {
+            fail(requestId, "no bluetooth adapter");
+            return;
+        }
+        if (adapter.isEnabled()) {
+            reply(requestId, true);
+            return;
+        }
+        enableRequestId = requestId;
+        activity.runOnUiThread(new Runnable() {
+            @Override public void run() {
+                try {
+                    activity.startActivityForResult(
+                        new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE),
+                        ENABLE_BT_REQUEST);
+                } catch (Exception e) {
+                    enableRequestId = "";
+                    fail(requestId, "cannot ask to enable bluetooth");
+                }
+            }
+        });
+    }
+
+    /** Forwarded by the Activity; true when we owned the request code. */
+    public boolean onActivityResult(int request, int result, Intent data) {
+        if (request != ENABLE_BT_REQUEST) return false;
+        String pending = enableRequestId;
+        enableRequestId = "";
+        if (!pending.isEmpty()) reply(pending, isEnabled());
+        return true;
+    }
+
+    // ── scanning ─────────────────────────────────────────────────────────
+
+    private void btScan(final String requestId, final JSONObject msg) {
+        String missing = missingPermission(true);
+        if (!missing.isEmpty()) {
+            fail(requestId, "missing permission: " + missing);
+            return;
+        }
+        BluetoothAdapter adapter = adapter();
+        if (adapter == null || !adapter.isEnabled()) {
+            fail(requestId, "bluetooth is off");
+            return;
+        }
+        scanner = adapter.getBluetoothLeScanner();
+        if (scanner == null) {
+            fail(requestId, "BLE scanning is not available");
+            return;
+        }
+        stopScanning();
+        scanResults.clear();
+        scanRequestId = requestId;
+
+        final List<ScanFilter> filters = new ArrayList<>();
+        JSONArray services = msg.optJSONArray("services");
+        if (services != null) {
+            for (int i = 0; i < services.length(); i++) {
+                try {
+                    filters.add(new ScanFilter.Builder()
+                        .setServiceUuid(new android.os.ParcelUuid(
+                            UUID.fromString(services.getString(i))))
+                        .build());
+                } catch (Exception ignored) { }
+            }
+        }
+        ScanSettings settings = new ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .build();
+
+        scanCallback = new ScanCallback() {
+            @Override
+            public void onScanResult(int callbackType, ScanResult result) {
+                addScanResult(result);
+            }
+
+            @Override
+            public void onBatchScanResults(List<ScanResult> results) {
+                for (ScanResult result : results) addScanResult(result);
+            }
+
+            @Override
+            public void onScanFailed(int errorCode) {
+                String pending = scanRequestId;
+                scanRequestId = "";
+                fail(pending, "scan failed with code " + errorCode);
+            }
+        };
+
+        try {
+            scanner.startScan(filters, settings, scanCallback);
+        } catch (SecurityException e) {
+            scanRequestId = "";
+            fail(requestId, "bluetooth permission not granted");
+            return;
+        }
+
+        long millis = (long) (msg.optDouble("seconds", 8.0) * 1000.0);
+        main.postDelayed(new Runnable() {
+            @Override public void run() { finishScan(); }
+        }, Math.max(500L, millis));
+    }
+
+    private void addScanResult(ScanResult result) {
+        if (result == null || result.getDevice() == null) return;
+        String address = result.getDevice().getAddress();
+        for (JSONObject known : scanResults) {
+            if (address.equals(known.optString("address"))) return;
+        }
+        JSONObject entry = new JSONObject();
+        try {
+            entry.put("address", address);
+            entry.put("name", safeName(result.getDevice()));
+            entry.put("rssi", result.getRssi());
+        } catch (Exception ignored) { }
+        scanResults.add(entry);
+        if (bridge != null) bridge.sendEvent("bluetooth", "", wrap("found", entry));
+    }
+
+    private String safeName(BluetoothDevice device) {
+        try {
+            String name = device.getName();
+            return name == null ? "" : name;
+        } catch (SecurityException e) {
+            return "";
+        }
+    }
+
+    private void finishScan() {
+        String pending = scanRequestId;
+        scanRequestId = "";
+        stopScanning();
+        if (pending.isEmpty()) return;
+        JSONArray found = new JSONArray();
+        for (JSONObject entry : scanResults) found.put(entry);
+        reply(pending, found);
+    }
+
+    private void stopScanning() {
+        if (scanner != null && scanCallback != null) {
+            try {
+                scanner.stopScan(scanCallback);
+            } catch (Exception ignored) { }
+        }
+        scanCallback = null;
+    }
+
+    private void btScanStop(final String requestId) {
+        finishScan();
+        reply(requestId, true);
+    }
+
+    // ── connections ──────────────────────────────────────────────────────
+
+    private void btConnect(final String requestId, final JSONObject msg) {
+        String missing = missingPermission(false);
+        if (!missing.isEmpty()) {
+            fail(requestId, "missing permission: " + missing);
+            return;
+        }
+        final String address = msg.optString("address", "");
+        BluetoothAdapter adapter = adapter();
+        if (adapter == null || address.isEmpty()) {
+            fail(requestId, "no bluetooth adapter or address");
+            return;
+        }
+        if (connections.containsKey(address)) {
+            reply(requestId, true);
+            return;
+        }
+        BluetoothDevice device;
+        try {
+            device = adapter.getRemoteDevice(address);
+        } catch (IllegalArgumentException e) {
+            fail(requestId, "invalid address " + address);
+            return;
+        }
+        pendingConnects.put(address, requestId);
+        BluetoothGatt gatt = device.connectGatt(activity, false, gattCallback());
+        if (gatt == null) {
+            pendingConnects.remove(address);
+            fail(requestId, "could not open a GATT connection");
+            return;
+        }
+        connections.put(address, gatt);
+    }
+
+    private void btDisconnect(final String requestId, final JSONObject msg) {
+        String address = msg.optString("address", "");
+        BluetoothGatt gatt = connections.remove(address);
+        if (gatt == null) {
+            reply(requestId, false);
+            return;
+        }
+        try {
+            gatt.disconnect();
+            gatt.close();
+        } catch (SecurityException ignored) { }
+        reply(requestId, true);
+    }
+
+    private void btServices(final String requestId, final JSONObject msg) {
+        BluetoothGatt gatt = connections.get(msg.optString("address", ""));
+        if (gatt == null) {
+            fail(requestId, "not connected");
+            return;
+        }
+        JSONArray services = new JSONArray();
+        try {
+            for (BluetoothGattService service : gatt.getServices()) {
+                JSONObject entry = new JSONObject();
+                entry.put("uuid", service.getUuid().toString());
+                JSONArray chars = new JSONArray();
+                for (BluetoothGattCharacteristic ch : service.getCharacteristics()) {
+                    JSONObject c = new JSONObject();
+                    c.put("uuid", ch.getUuid().toString());
+                    c.put("properties", ch.getProperties());
+                    chars.put(c);
+                }
+                entry.put("characteristics", chars);
+                services.put(entry);
+            }
+        } catch (Exception e) {
+            fail(requestId, String.valueOf(e.getMessage()));
+            return;
+        }
+        reply(requestId, services);
+    }
+
+    private BluetoothGattCharacteristic characteristic(
+            BluetoothGatt gatt, JSONObject msg) {
+        try {
+            BluetoothGattService service = gatt.getService(
+                UUID.fromString(msg.optString("service", "")));
+            if (service == null) return null;
+            return service.getCharacteristic(
+                UUID.fromString(msg.optString("characteristic", "")));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void btRead(final String requestId, final JSONObject msg) {
+        BluetoothGatt gatt = connections.get(msg.optString("address", ""));
+        if (gatt == null) {
+            fail(requestId, "not connected");
+            return;
+        }
+        BluetoothGattCharacteristic ch = characteristic(gatt, msg);
+        if (ch == null) {
+            fail(requestId, "unknown characteristic");
+            return;
+        }
+        pendingReads.put(ch.getUuid().toString(), requestId);
+        try {
+            if (!gatt.readCharacteristic(ch)) {
+                pendingReads.remove(ch.getUuid().toString());
+                fail(requestId, "read rejected by the peripheral");
+            }
+        } catch (SecurityException e) {
+            pendingReads.remove(ch.getUuid().toString());
+            fail(requestId, "bluetooth permission not granted");
+        }
+    }
+
+    private void btWrite(final String requestId, final JSONObject msg) {
+        BluetoothGatt gatt = connections.get(msg.optString("address", ""));
+        if (gatt == null) {
+            fail(requestId, "not connected");
+            return;
+        }
+        BluetoothGattCharacteristic ch = characteristic(gatt, msg);
+        if (ch == null) {
+            fail(requestId, "unknown characteristic");
+            return;
+        }
+        byte[] payload = bytesOf(msg.opt("value"));
+        ch.setValue(payload);
+        ch.setWriteType(msg.optBoolean("response", true)
+            ? BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            : BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
+        pendingWrites.put(ch.getUuid().toString(), requestId);
+        try {
+            if (!gatt.writeCharacteristic(ch)) {
+                pendingWrites.remove(ch.getUuid().toString());
+                fail(requestId, "write rejected by the peripheral");
+            }
+        } catch (SecurityException e) {
+            pendingWrites.remove(ch.getUuid().toString());
+            fail(requestId, "bluetooth permission not granted");
+        }
+    }
+
+    private byte[] bytesOf(Object value) {
+        if (value instanceof JSONArray) {
+            JSONArray array = (JSONArray) value;
+            byte[] out = new byte[array.length()];
+            for (int i = 0; i < array.length(); i++) {
+                out[i] = (byte) (array.optInt(i, 0) & 0xFF);
+            }
+            return out;
+        }
+        return String.valueOf(value == null ? "" : value).getBytes();
+    }
+
+    private void btNotify(final String requestId, final JSONObject msg) {
+        BluetoothGatt gatt = connections.get(msg.optString("address", ""));
+        if (gatt == null) {
+            fail(requestId, "not connected");
+            return;
+        }
+        BluetoothGattCharacteristic ch = characteristic(gatt, msg);
+        if (ch == null) {
+            fail(requestId, "unknown characteristic");
+            return;
+        }
+        boolean enabled = msg.optBoolean("enabled", true);
+        try {
+            gatt.setCharacteristicNotification(ch, enabled);
+            BluetoothGattDescriptor descriptor = ch.getDescriptor(
+                UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"));
+            if (descriptor != null) {
+                descriptor.setValue(enabled
+                    ? BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                    : BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE);
+                gatt.writeDescriptor(descriptor);
+            }
+            reply(requestId, enabled);
+        } catch (SecurityException e) {
+            fail(requestId, "bluetooth permission not granted");
+        }
+    }
+
+    private void btBonded(final String requestId) {
+        BluetoothAdapter adapter = adapter();
+        if (adapter == null) {
+            fail(requestId, "no bluetooth adapter");
+            return;
+        }
+        JSONArray out = new JSONArray();
+        try {
+            for (BluetoothDevice device : adapter.getBondedDevices()) {
+                JSONObject entry = new JSONObject();
+                entry.put("address", device.getAddress());
+                entry.put("name", safeName(device));
+                out.put(entry);
+            }
+        } catch (SecurityException e) {
+            fail(requestId, "bluetooth permission not granted");
+            return;
+        } catch (Exception ignored) { }
+        reply(requestId, out);
+    }
+
+    private JSONObject wrap(String kind, Object value) {
+        JSONObject data = new JSONObject();
+        try {
+            data.put("event", kind);
+            data.put("value", value);
+        } catch (Exception ignored) { }
+        return data;
+    }
+
+    private BluetoothGattCallback gattCallback() {
+        return new BluetoothGattCallback() {
+            @Override
+            public void onConnectionStateChange(BluetoothGatt gatt, int status,
+                                                int newState) {
+                String address = gatt.getDevice().getAddress();
+                if (newState == BluetoothGatt.STATE_CONNECTED) {
+                    try {
+                        gatt.discoverServices();
+                    } catch (SecurityException ignored) { }
+                    return;
+                }
+                if (newState == BluetoothGatt.STATE_DISCONNECTED) {
+                    connections.remove(address);
+                    String pending = pendingConnects.remove(address);
+                    if (pending != null) fail(pending, "disconnected");
+                    if (bridge != null) {
+                        bridge.sendEvent("bluetooth", "",
+                                         wrap("disconnected", address));
+                    }
+                }
+            }
+
+            @Override
+            public void onServicesDiscovered(BluetoothGatt gatt, int status) {
+                String address = gatt.getDevice().getAddress();
+                String pending = pendingConnects.remove(address);
+                if (pending != null) reply(pending, status == BluetoothGatt.GATT_SUCCESS);
+            }
+
+            @Override
+            public void onCharacteristicRead(BluetoothGatt gatt,
+                                             BluetoothGattCharacteristic ch,
+                                             int status) {
+                String pending = pendingReads.remove(ch.getUuid().toString());
+                if (pending == null) return;
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    fail(pending, "read failed with status " + status);
+                } else {
+                    reply(pending, toArray(ch.getValue()));
+                }
+            }
+
+            @Override
+            public void onCharacteristicWrite(BluetoothGatt gatt,
+                                              BluetoothGattCharacteristic ch,
+                                              int status) {
+                String pending = pendingWrites.remove(ch.getUuid().toString());
+                if (pending == null) return;
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    fail(pending, "write failed with status " + status);
+                } else {
+                    reply(pending, true);
+                }
+            }
+
+            @Override
+            public void onCharacteristicChanged(BluetoothGatt gatt,
+                                                BluetoothGattCharacteristic ch) {
+                if (bridge == null) return;
+                JSONObject data = new JSONObject();
+                try {
+                    data.put("event", "notify");
+                    data.put("address", gatt.getDevice().getAddress());
+                    data.put("characteristic", ch.getUuid().toString());
+                    data.put("value", toArray(ch.getValue()));
+                } catch (Exception ignored) { }
+                bridge.sendEvent("bluetooth", "", data);
+            }
+        };
+    }
+
+    private JSONArray toArray(byte[] value) {
+        JSONArray array = new JSONArray();
+        if (value == null) return array;
+        for (byte b : value) array.put(b & 0xFF);
+        return array;
+    }
+
+    // ── NFC ──────────────────────────────────────────────────────────────
+
+    private android.nfc.NfcAdapter nfc() {
+        if (nfcAdapter == null) {
+            nfcAdapter = android.nfc.NfcAdapter.getDefaultAdapter(activity);
+        }
+        return nfcAdapter;
+    }
+
+    private boolean nfcAvailable() {
+        android.nfc.NfcAdapter adapter = nfc();
+        return adapter != null && adapter.isEnabled();
+    }
+
+    private void nfcRead(final String requestId, final JSONObject msg) {
+        startNfc(requestId, null, msg.optDouble("timeout", 30.0));
+    }
+
+    private void nfcWrite(final String requestId, final JSONObject msg) {
+        JSONArray records = msg.optJSONArray("records");
+        if (records == null || records.length() == 0) {
+            fail(requestId, "no records to write");
+            return;
+        }
+        startNfc(requestId, records, msg.optDouble("timeout", 30.0));
+    }
+
+    private void startNfc(final String requestId, final JSONArray records,
+                          final double timeoutSeconds) {
+        if (!nfcAvailable()) {
+            fail(requestId, "NFC is unavailable or disabled");
+            return;
+        }
+        if (Build.VERSION.SDK_INT < 19) {
+            fail(requestId, "NFC reader mode needs Android 4.4+");
+            return;
+        }
+        cancelNfcTimeout();
+        nfcRequestId = requestId;
+        nfcPendingWrite = records;
+
+        activity.runOnUiThread(new Runnable() {
+            @Override public void run() {
+                try {
+                    nfc().enableReaderMode(activity,
+                        new android.nfc.NfcAdapter.ReaderCallback() {
+                            @Override
+                            public void onTagDiscovered(android.nfc.Tag tag) {
+                                onTag(tag);
+                            }
+                        },
+                        android.nfc.NfcAdapter.FLAG_READER_NFC_A
+                            | android.nfc.NfcAdapter.FLAG_READER_NFC_B
+                            | android.nfc.NfcAdapter.FLAG_READER_NFC_F
+                            | android.nfc.NfcAdapter.FLAG_READER_NFC_V
+                            | android.nfc.NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
+                        null);
+                } catch (Exception e) {
+                    String pending = nfcRequestId;
+                    nfcRequestId = "";
+                    fail(pending, String.valueOf(e.getMessage()));
+                }
+            }
+        });
+
+        nfcTimeout = new Runnable() {
+            @Override public void run() {
+                String pending = nfcRequestId;
+                nfcRequestId = "";
+                disableReaderMode();
+                if (!pending.isEmpty()) fail(pending, "timeout");
+            }
+        };
+        main.postDelayed(nfcTimeout,
+                         (long) (Math.max(1.0, timeoutSeconds) * 1000.0));
+    }
+
+    private void onTag(android.nfc.Tag tag) {
+        final String pending = nfcRequestId;
+        nfcRequestId = "";
+        cancelNfcTimeout();
+        disableReaderMode();
+        if (pending.isEmpty()) return;
+
+        JSONArray toWrite = nfcPendingWrite;
+        nfcPendingWrite = null;
+        try {
+            if (toWrite != null) {
+                writeTag(pending, tag, toWrite);
+            } else {
+                reply(pending, readTag(tag));
+            }
+        } catch (Exception e) {
+            fail(pending, String.valueOf(e.getMessage()));
+        }
+    }
+
+    private JSONObject readTag(android.nfc.Tag tag) throws Exception {
+        JSONObject out = new JSONObject();
+        out.put("id", bytesToHex(tag.getId()));
+        JSONArray techs = new JSONArray();
+        for (String tech : tag.getTechList()) techs.put(tech);
+        out.put("techs", techs);
+
+        JSONArray records = new JSONArray();
+        android.nfc.tech.Ndef ndef = android.nfc.tech.Ndef.get(tag);
+        if (ndef != null) {
+            ndef.connect();
+            android.nfc.NdefMessage message = ndef.getNdefMessage();
+            if (message != null) {
+                for (android.nfc.NdefRecord record : message.getRecords()) {
+                    JSONObject entry = new JSONObject();
+                    entry.put("tnf", record.getTnf());
+                    entry.put("type", new String(record.getType()));
+                    entry.put("value", decodeRecord(record));
+                    records.put(entry);
+                }
+            }
+            ndef.close();
+        }
+        out.put("records", records);
+        return out;
+    }
+
+    private String decodeRecord(android.nfc.NdefRecord record) {
+        byte[] payload = record.getPayload();
+        if (payload == null || payload.length == 0) return "";
+        try {
+            if (record.getTnf() == android.nfc.NdefRecord.TNF_WELL_KNOWN
+                    && java.util.Arrays.equals(record.getType(),
+                        android.nfc.NdefRecord.RTD_TEXT)) {
+                int languageLength = payload[0] & 0x3F;
+                boolean utf16 = (payload[0] & 0x80) != 0;
+                return new String(payload, languageLength + 1,
+                                  payload.length - languageLength - 1,
+                                  utf16 ? "UTF-16" : "UTF-8");
+            }
+            return new String(payload, "UTF-8");
+        } catch (Exception e) {
+            return bytesToHex(payload);
+        }
+    }
+
+    private void writeTag(String requestId, android.nfc.Tag tag,
+                          JSONArray records) throws Exception {
+        List<android.nfc.NdefRecord> ndefRecords = new ArrayList<>();
+        for (int i = 0; i < records.length(); i++) {
+            JSONObject entry = records.optJSONObject(i);
+            if (entry == null) continue;
+            String kind = entry.optString("type", "text");
+            String value = entry.optString("value", "");
+            if ("uri".equals(kind)) {
+                ndefRecords.add(android.nfc.NdefRecord.createUri(value));
+            } else if ("mime".equals(kind)) {
+                ndefRecords.add(android.nfc.NdefRecord.createMime(
+                    entry.optString("mime", "text/plain"), value.getBytes()));
+            } else {
+                ndefRecords.add(android.nfc.NdefRecord.createTextRecord(
+                    "en", value));
+            }
+        }
+        if (ndefRecords.isEmpty()) {
+            fail(requestId, "no records to write");
+            return;
+        }
+        android.nfc.NdefMessage message = new android.nfc.NdefMessage(
+            ndefRecords.toArray(new android.nfc.NdefRecord[0]));
+
+        android.nfc.tech.Ndef ndef = android.nfc.tech.Ndef.get(tag);
+        if (ndef != null) {
+            ndef.connect();
+            if (!ndef.isWritable()) {
+                ndef.close();
+                fail(requestId, "tag is read-only");
+                return;
+            }
+            if (ndef.getMaxSize() < message.toByteArray().length) {
+                ndef.close();
+                fail(requestId, "message is larger than the tag");
+                return;
+            }
+            ndef.writeNdefMessage(message);
+            ndef.close();
+            reply(requestId, true);
+            return;
+        }
+        android.nfc.tech.NdefFormatable formatable =
+            android.nfc.tech.NdefFormatable.get(tag);
+        if (formatable == null) {
+            fail(requestId, "tag does not support NDEF");
+            return;
+        }
+        formatable.connect();
+        formatable.format(message);
+        formatable.close();
+        reply(requestId, true);
+    }
+
+    private void nfcCancel(final String requestId) {
+        String pending = nfcRequestId;
+        nfcRequestId = "";
+        nfcPendingWrite = null;
+        cancelNfcTimeout();
+        disableReaderMode();
+        if (!pending.isEmpty()) fail(pending, "cancelled");
+        reply(requestId, true);
+    }
+
+    private void cancelNfcTimeout() {
+        if (nfcTimeout != null) {
+            main.removeCallbacks(nfcTimeout);
+            nfcTimeout = null;
+        }
+    }
+
+    private void disableReaderMode() {
+        try {
+            android.nfc.NfcAdapter adapter = nfc();
+            if (adapter != null) adapter.disableReaderMode(activity);
+        } catch (Exception ignored) { }
+    }
+
+    private String bytesToHex(byte[] value) {
+        if (value == null) return "";
+        StringBuilder out = new StringBuilder();
+        for (byte b : value) out.append(String.format("%02X", b));
+        return out.toString();
+    }
+
+    /** Release scanners, GATT connections and NFC reader mode. */
+    public void dispose() {
+        stopScanning();
+        for (BluetoothGatt gatt : connections.values()) {
+            try {
+                gatt.disconnect();
+                gatt.close();
+            } catch (Exception ignored) { }
+        }
+        connections.clear();
+        cancelNfcTimeout();
+        disableReaderMode();
+    }
+}

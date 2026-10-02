@@ -16,6 +16,19 @@ from pydrud.core.results import Result
 
 Invoke = Callable[..., Result]
 
+#: Commands this Python API exposes that the Android layer does not
+#: implement. As of 1.6.0 this is **empty**: Bluetooth LE, NFC, the camera
+#: extras, speech recognition, the colour picker, continuous location and
+#: notification channels all have native handlers.
+#:
+#: Anything listed here must *fail* rather than leave a
+#: :class:`~pydrud.core.results.Result` pending forever; ``BridgeService``
+#: answers the same way on-device, so tests, the previewer and the analyzer
+#: behave identically.
+#:
+#: Keep in sync with ``tests/test_native_coverage.py``.
+UNIMPLEMENTED_COMMANDS: frozenset = frozenset()
+
 
 class _Service:
     """Base class holding the page's ``invoke`` function."""
@@ -80,7 +93,8 @@ class Dialogs(_Service):
         return self._invoke("time_picker", initial=initial, use24h=use_24h)
 
     def color(self, *, initial: str = "#FF6366F1") -> Result:
-        """Colour picker. Resolves with an ARGB string or None."""
+        """Colour picker. Resolves with an ARGB string or None.
+        """
         return self._invoke("color_picker", initial=initial)
 
     def progress(self, message: str = "Please wait…", *,
@@ -222,6 +236,10 @@ class Permissions(_Service):
         "notifications": "android.permission.POST_NOTIFICATIONS",
         "calendar": "android.permission.READ_CALENDAR",
         "bluetooth": "android.permission.BLUETOOTH_CONNECT",
+        "bluetooth_scan": "android.permission.BLUETOOTH_SCAN",
+        "bluetooth_advertise": "android.permission.BLUETOOTH_ADVERTISE",
+        "background_location": "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "activity": "android.permission.ACTIVITY_RECOGNITION",
         "phone": "android.permission.CALL_PHONE",
         "sms": "android.permission.SEND_SMS",
     }
@@ -272,6 +290,8 @@ class Notifications(_Service):
 
     def create_channel(self, id: str, name: str, *,
                        importance: str = "default") -> Result:
+        """Create a notification channel (Android 8+ grouping).
+        """
         if importance not in ("min", "low", "default", "high"):
             raise ValueError("importance must be min/low/default/high")
         return self._invoke("notify_channel", id=id, name=name,
@@ -288,12 +308,15 @@ class Location(_Service):
                             timeout=int(timeout))
 
     def watch(self, *, interval: int = 5000, min_distance: float = 10) -> Result:
-        """Start location updates delivered as ``location`` events."""
+        """Start location updates delivered as ``location`` events.
+        """
         return self._invoke("location_watch", start=True,
                             interval=int(interval),
                             minDistance=float(min_distance))
 
     def stop(self) -> Result:
+        """Stop location updates started by :meth:`watch`.
+        """
         return self._invoke("location_watch", start=False)
 
 
@@ -578,23 +601,32 @@ class Camera(_Service):
         return self._invoke("camera_switch", key=key)
 
     def flash(self, mode: str = "auto", *, key: str = "") -> Result:
+        """Set the camera flash mode (``auto``/``on``/``off``/``torch``).
+        """
         if mode not in ("on", "off", "auto", "torch"):
             raise ValueError("mode must be on/off/auto/torch")
         return self._invoke("camera_flash", key=key, mode=mode)
 
     def zoom(self, ratio: float, *, key: str = "") -> Result:
+        """Set the camera zoom ratio (``1.0`` is wide).
+        """
         return self._invoke("camera_zoom", key=key, ratio=float(ratio))
 
     def record(self, *, key: str = "", path: str = "",
                max_seconds: int = 0) -> Result:
+        """Start recording video from the preview at ``key``.
+        """
         return self._invoke("camera_record", key=key, path=path,
                             max_seconds=int(max_seconds))
 
     def stop_recording(self, *, key: str = "") -> Result:
+        """Stop video recording; resolves with the file path.
+        """
         return self._invoke("camera_record_stop", key=key)
 
     def scan_codes(self, *, key: str = "", enabled: bool = True) -> Result:
-        """Turn on barcode/QR scanning — matches arrive as ``scan`` events."""
+        """Turn on barcode/QR scanning — matches arrive as ``scan`` events.
+        """
         return self._invoke("camera_scan", key=key, enabled=bool(enabled))
 
 
@@ -659,37 +691,53 @@ class Bluetooth(_Service):
     """Bluetooth Low Energy: scan, connect, read/write/notify."""
 
     def enabled(self) -> Result:
+        """Whether the Bluetooth adapter is currently on.
+        """
         return self._invoke("bt_enabled")
 
     def enable(self) -> Result:
-        """Ask the user to turn Bluetooth on."""
+        """Ask the user to turn Bluetooth on.
+        """
         return self._invoke("bt_enable")
 
     def scan(self, *, seconds: float = 8.0,
              services: Optional[Sequence[str]] = None) -> Result:
-        """Scan for peripherals. Resolves with a list of devices."""
+        """Scan for peripherals. Resolves with a list of devices.
+        """
         return self._invoke("bt_scan", seconds=float(seconds),
                             services=[str(s) for s in (services or [])])
 
     def stop_scan(self) -> Result:
+        """Stop a scan started by :meth:`scan`.
+        """
         return self._invoke("bt_scan_stop")
 
     def connect(self, address: str) -> Result:
+        """Connect to a peripheral by MAC address.
+        """
         return self._invoke("bt_connect", address=str(address))
 
     def disconnect(self, address: str) -> Result:
+        """Drop the connection to a peripheral.
+        """
         return self._invoke("bt_disconnect", address=str(address))
 
     def services(self, address: str) -> Result:
+        """List the GATT services a connected peripheral exposes.
+        """
         return self._invoke("bt_services", address=str(address))
 
     def read(self, address: str, service: str, characteristic: str) -> Result:
+        """Read a GATT characteristic.
+        """
         return self._invoke("bt_read", address=str(address),
                             service=str(service),
                             characteristic=str(characteristic))
 
     def write(self, address: str, service: str, characteristic: str,
               value: Any, *, response: bool = True) -> Result:
+        """Write bytes to a GATT characteristic.
+        """
         if isinstance(value, (bytes, bytearray)):
             value = list(value)
         return self._invoke("bt_write", address=str(address),
@@ -699,14 +747,16 @@ class Bluetooth(_Service):
 
     def notify(self, address: str, service: str, characteristic: str, *,
                enabled: bool = True) -> Result:
-        """Subscribe to notifications — they arrive as ``bluetooth`` events."""
+        """Subscribe to notifications — they arrive as ``bluetooth`` events.
+        """
         return self._invoke("bt_notify", address=str(address),
                             service=str(service),
                             characteristic=str(characteristic),
                             enabled=bool(enabled))
 
     def bonded(self) -> Result:
-        """Already-paired devices."""
+        """Already-paired devices.
+        """
         return self._invoke("bt_bonded")
 
 
@@ -714,15 +764,19 @@ class Nfc(_Service):
     """NFC tag reading and NDEF writing."""
 
     def available(self) -> Result:
+        """Whether this device has NFC hardware, enabled.
+        """
         return self._invoke("nfc_available")
 
     def read(self, *, timeout: float = 30.0) -> Result:
-        """Wait for a tag. Resolves with ``{"id", "techs", "records"}``."""
+        """Wait for a tag. Resolves with ``{"id", "techs", "records"}``.
+        """
         return self._invoke("nfc_read", timeout=float(timeout))
 
     def write(self, records: Sequence[dict], *,
               timeout: float = 30.0) -> Result:
-        """Write NDEF records, e.g. ``[{"type": "text", "value": "hi"}]``."""
+        """Write NDEF records, e.g. ``[{"type": "text", "value": "hi"}]``.
+        """
         items = []
         for record in records:
             kind = str(record.get("type", "text"))
@@ -735,6 +789,8 @@ class Nfc(_Service):
         return self._invoke("nfc_write", records=items, timeout=float(timeout))
 
     def cancel(self) -> Result:
+        """Cancel a pending NFC read/write.
+        """
         return self._invoke("nfc_cancel")
 
 
@@ -805,7 +861,8 @@ class Audio(_Service):
                             rate=float(rate), pitch=float(pitch))
 
     def listen(self, *, locale: str = "", prompt: str = "") -> Result:
-        """Speech-to-text. Resolves with the recognised string."""
+        """Speech-to-text. Resolves with the recognised string.
+        """
         return self._invoke("speech_listen", locale=locale, prompt=prompt)
 
 

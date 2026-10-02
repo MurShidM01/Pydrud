@@ -97,8 +97,9 @@ class ReactiveDict:
             return object.__getattribute__(self, name)
         try:
             return self._data[name]
-        except KeyError:
-            raise AttributeError(f"ReactiveDict has no key {name!r}")
+        except KeyError as exc:
+            raise AttributeError(
+                f"ReactiveDict has no key {name!r}") from exc
 
     def __setattr__(self, name: str, value: Any):
         if name.startswith("_"):

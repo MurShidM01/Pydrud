@@ -1,0 +1,151 @@
+"""Settings — appearance, design tokens, preferences and about."""
+
+from pydrud import (
+    Button, Card, Checkbox, Colors, Column, Container, Divider, EdgeInsets,
+    Elevation, Icon, Icons, ListTile, Radius, Row, SegmentedButton, Slider,
+    Spacing, Switch, Text, Theme,
+)
+
+from app.config import ACCENTS, APP_NAME, APP_VERSION, CORNERS, TEXT_SIZES
+from app.runtime import refresh
+from app.state import accent, agreed, corners, dark_mode, text_size, volume
+from app.ui import section, shell
+
+
+def settings_screen(page):
+    """Build the settings screen into *page*."""
+
+    def toggle_dark(event):
+        dark_mode.value = bool(event.get("value"))
+        # One call re-themes Python widgets *and* the native layer
+        # (ripples, inputs, system bars).
+        page.set_theme_mode("dark" if dark_mode.value else "light")
+        refresh()
+
+    def pick_accent(color):
+        def handler(_event):
+            accent.value = color
+            page.set_theme(color, dark=dark_mode.value)
+            refresh()
+        return handler
+
+    def set_volume(event):
+        volume.value = float(event.get("value", 0))
+        refresh()
+
+    def set_agreed(event):
+        agreed.value = bool(event.get("value"))
+        refresh()
+
+    def set_corners(event):
+        name = list(CORNERS)[int(event.value or 0)]
+        corners.value = name
+        # One Python call restyles the whole app, natively.
+        page.configure(**CORNERS[name])
+
+    def set_text_size(event):
+        name = list(TEXT_SIZES)[int(event.value or 0)]
+        text_size.value = name
+        page.configure(font_scale=TEXT_SIZES[name])
+
+    appearance = Card(key="appearance_card", padding=0, child=Column(
+        key="appearance_body", children=[
+            ListTile("Dark mode", key="dark_tile",
+                     subtitle="Follow the night, not the sun",
+                     leading=Icons.DARK_MODE,
+                     trailing=Switch("", key="dark_switch",
+                                     active=dark_mode.value)
+                     .on_change(toggle_dark)),
+            Divider(key="appearance_div", indent=Spacing.HUGE),
+            Container(key="accent_row", padding=EdgeInsets(
+                left=Spacing.LG, right=Spacing.LG,
+                top=Spacing.MD, bottom=Spacing.LG),
+                child=Column(key="accent_body", spacing=Spacing.SM, children=[
+                    Text("Accent colour", key="accent_title", size=15,
+                         weight=500, color=Theme.text),
+                    Row(key="accent_swatches", spacing=Spacing.SM, children=[
+                        Container(
+                            key=f"accent_{name}",
+                            width=40, height=40,
+                            bg=color,
+                            border_radius=Radius.PILL,
+                            alignment="center",
+                            style={"feedback": True,
+                                   "elevation": Elevation.HAIRLINE},
+                            child=Icon(Icons.CHECK, key=f"accent_{name}_tick",
+                                       size=18, color=Colors.on(color))
+                            if accent.value == color else None,
+                        ).on_click(pick_accent(color))
+                        for name, color in ACCENTS
+                    ]),
+                ])),
+        ]),
+    )
+
+    style_card = Card(key="style_card", padding=Spacing.LG, child=Column(
+        key="style_body", spacing=Spacing.MD, children=[
+            Text("Corners", key="corners_title", size=15, weight=500,
+                 color=Theme.text),
+            SegmentedButton(list(CORNERS), key="corners_picker",
+                            selected=list(CORNERS).index(corners.value))
+            .on_change(set_corners),
+            Text("Text size", key="text_size_title", size=15, weight=500,
+                 color=Theme.text),
+            SegmentedButton(list(TEXT_SIZES), key="text_size_picker",
+                            selected=list(TEXT_SIZES).index(text_size.value))
+            .on_change(set_text_size),
+            Text("Design tokens live in Python — Theme.configure() pushes "
+                 "them to the native renderer.",
+                 key="style_hint", size=12, color=Theme.text_secondary),
+        ]),
+    )
+
+    preferences = Card(key="prefs_card", padding=Spacing.LG, child=Column(
+        key="prefs_body", spacing=Spacing.MD, children=[
+            Row(key="volume_head", vertical_alignment="center", children=[
+                Text("Volume", key="volume_title", size=15, weight=500,
+                     color=Theme.text),
+                Container(key="volume_gap", expand=1),
+                Text(f"{int(volume.value)}%", key="volume_label", size=14,
+                     weight=600, color=Theme.primary),
+            ]),
+            Slider(volume.value, key="volume_slider", min=0, max=100)
+            .on_change(set_volume),
+            Divider(key="prefs_div"),
+            Checkbox("I agree to the terms", key="agree_box",
+                     checked=agreed.value).on_change(set_agreed),
+        ]),
+    )
+
+    about = Card(key="about_card", padding=0, child=Column(
+        key="about_body", children=[
+            ListTile("Version", key="about_version",
+                     subtitle=f"{APP_NAME} {APP_VERSION}", leading=Icons.INFO),
+            Divider(key="about_div", indent=Spacing.HUGE),
+            ListTile("Built with Pydrud", key="about_pydrud",
+                     subtitle="Native Android UI, written in Python",
+                     leading=Icons.CODE, trailing=Icons.CHEVRON_RIGHT,
+                     on_click=lambda _e: page.share.text(
+                         "I built this with Pydrud!")),
+        ]),
+    )
+
+    page.add(shell(
+        page,
+        key="settings",
+        title="Settings",
+        body=[
+            section("Appearance", "sec_appearance"),
+            appearance,
+            section("Style", "sec_style"),
+            style_card,
+            section("Preferences", "sec_prefs"),
+            preferences,
+            section("About", "sec_about"),
+            about,
+            Button("Save changes", key="save_btn", full_width=True,
+                   size="lg").on_click(
+                       lambda _e: page.snack_bar("Settings saved",
+                                                 action="OK")),
+        ],
+    ))

@@ -4,7 +4,7 @@ Integration tests for the Pydrud App lifecycle.
 
 import unittest
 from pydrud import App
-from pydrud.widgets import Text, Button, Container, Column
+from pydrud.widgets import Text
 from pydrud.core.state import State
 
 

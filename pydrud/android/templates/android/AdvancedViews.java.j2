@@ -49,12 +49,15 @@ import java.util.List;
 public class AdvancedViews {
 
     private final {{ app_name }}Activity activity;
-    private final EventDispatcher events;
+    private EventDispatcher events;
 
     public AdvancedViews({{ app_name }}Activity activity, EventDispatcher events) {
         this.activity = activity;
         this.events = events;
     }
+
+    /** Late-bind the dispatcher: {@link ViewFactory} is built before it exists. */
+    public void setEventDispatcher(EventDispatcher d) { this.events = d; }
 
     private int dp(float value) {
         return (int) (value * activity.getResources().getDisplayMetrics().density);

@@ -6,7 +6,7 @@ import json
 import unittest
 from pydrud.widgets import (
     Widget, Text, Button, Container, Column, Row, Center, Spacer,
-    TextField, Image, Icon, Checkbox, Switch, Style, EdgeInsets, Alignment,
+    TextField, Image, Icon, Checkbox, Switch, EdgeInsets,
 )
 
 

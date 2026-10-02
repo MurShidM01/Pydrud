@@ -2,6 +2,220 @@
 
 All notable changes to Pydrud are documented here.
 
+## [2.0.0] — A project you can grow into
+
+Two restructures, one release: the project `pydrud init` gives you, and the
+package Pydrud itself is. Nothing about writing an app changes —
+`from pydrud import App, Router, Column` is still the only import you need.
+
+### Changed — generated project layout (breaking for the scaffold)
+
+`pydrud init` used to hand you a 702-line `src/app/main.py`. That is a demo,
+not a project: the first thing every team did was take it apart. The same
+starter app — same widgets, same keys, same behaviour — now arrives as:
+
+```
+src/app/
+├── main.py        route registration + the start-up entry point (< 60 lines)
+├── config.py      routes, navigation destinations, design presets
+├── state.py       the State objects every screen shares
+├── runtime.py     the router and the live App handle (`refresh()`)
+├── jobs.py        background work run by WorkManager
+├── ui/            shell.py (the page shell) + components.py
+└── screens/       home.py, settings.py, gallery.py — one per destination
+```
+
+Existing projects are untouched: `pydrud sync` only regenerates `android/`,
+never your Python. To adopt the layout, scaffold a new project and move your
+screens across; `from app.runtime import refresh, router` replaces the
+module-level globals that used to live in `main.py`.
+
+### Changed — framework package layout (shimmed, not broken)
+
+The top level of the package now names layers instead of files:
+
+| Was | Is |
+| --- | --- |
+| `pydrud/main.py` (1 602 lines) | `pydrud/runtime/app.py` |
+| `pydrud/navigation.py` | `pydrud/runtime/navigation.py` |
+| `pydrud/packages.py` | `pydrud/commands/packages.py` (it is build tooling) |
+
+The old paths still import, with a `DeprecationWarning` naming the
+replacement; they are removed in 3.0. `pydrud/android/` is now a real
+package rather than an implicit namespace one.
+
+### Added
+* **`README.md` in every new project** — how to run it, what each directory
+  is for, and how to add a screen.
+* **`tests/test_app.py` in every new project** — three `AppTester` tests
+  that pass from the first commit, so a project starts out testable.
+* **`App.current()`** — the most recently created app, so screen code can
+  reach the running app without a module-level global.
+* **`docs/ARCHITECTURE.md`** — the layers, the render/ack contract, the
+  threading rule and the native-service convention.
+* **`CONTRIBUTING.md`** — how to set up, what to run before a PR, and the
+  rules a native command has to satisfy.
+* **`tests/test_package_layout.py`, `tests/test_scaffold_layout.py`,
+  `tests/test_tester_settle.py`** — the layout, the shims and the harness
+  are now pinned by tests (733 tests, 2 217 subtests in total).
+
+### Fixed
+* **`AppTester.settle()` returned too early.** It only checked that the
+  event queue was empty — which is also true while an event is still in
+  flight on the socket — so a `tap()` could silently do nothing and the
+  next assertion would read stale UI. It now waits for the app to handle
+  everything the device has sent *and* for the resulting render to be
+  acknowledged. Taps, typing and toggles are deterministic.
+* **`FakeDevice` text matching missed list tiles.** `shows()` now sees
+  `title`, `subtitle`, `message` and `placeholder` text, not just
+  `value`/`text`/`label`/`hint`.
+* **README** no longer advertises unimplemented native commands; they all
+  shipped in 1.6.0.
+
+## [1.6.0] — Every native command implemented
+
+The Python API always exposed Bluetooth, NFC, camera extras, speech and
+friends, but 24 of those commands had no handler on the Android side and
+answered `unsupported native command`. **`UNIMPLEMENTED_COMMANDS` is now
+empty.**
+
+### Added
+* **Bluetooth Low Energy** (`page.bluetooth`) — adapter state, enabling,
+  scanning with service filters, GATT connect/disconnect, service discovery,
+  characteristic read/write and notifications. Discovered peripherals and
+  notification payloads arrive as `bluetooth` events (`App.on_bluetooth`).
+  Android 12 `BLUETOOTH_SCAN`/`BLUETOOTH_CONNECT` and the older
+  location-based permission model are both handled, and every failure path
+  answers the request instead of leaving it pending.
+* **NFC** (`page.nfc`) — availability, NDEF read and write (text, URI and
+  MIME records) through reader mode, with a timeout and `cancel()`.
+  Read-only, too-small and non-NDEF tags each report a clear error.
+* **Camera extras** (`page.camera`) — `flash()` (torch), `zoom()` clamped to
+  what the lens supports, `record()`/`stop_record()` to MP4 via CameraX
+  video, and continuous barcode/QR `scan()` powered by ML Kit, which emits
+  `scan` events per code. Recordings finalise with a `recording` event
+  (`App.on_recording`).
+* **Speech recognition** (`page.speech.listen()`) — the system recogniser,
+  with locale and prompt, resolving with the best transcript.
+* **Colour picker** (`page.dialog.color()`) — an RGB dialog with a live
+  swatch, returning `#AARRGGBB`.
+* **Continuous location** (`page.location.watch()`) — GPS/network updates at
+  an interval and distance filter, delivered as `location` events
+  (`App.on_location`), stopped with `stop_watch()`.
+* **Notification channels** (`page.notifications.channel()`) — importance,
+  description, vibration, lights and badge, a no-op below Android 8.
+* New generated classes `CaptureServices.java` and
+  `ConnectivityServices.java`, dispatched from `BridgeService` and disposed
+  with the Activity. New Gradle dependencies: `androidx.camera:camera-video`
+  and `com.google.mlkit:barcode-scanning`.
+* New permission aliases: `bluetooth_scan`, `bluetooth_advertise`,
+  `bluetooth_legacy`, `bluetooth_admin`, `background_location`, `activity`.
+
+Existing apps pick all of this up with `pydrud sync`.
+
+## [1.5.2] — Build-time correctness
+
+A full audit of the generated Android layer and the Python↔Java contract.
+The theme is *fail fast and loudly*: every failure mode below used to be a
+silent hang, a no-op, or a two-minute Gradle error.
+
+### Fixed
+* **Keyed children could render in the wrong order.** `TreeDiff` computed
+  `move` indices against the *old* child list, but the native applier mutates
+  the parent as it walks the patch list, so a surviving child whose index was
+  shifted by an earlier insert/delete was never moved. The diff now tracks the
+  evolving order, and `tests/test_diff_applier.py` replays every patch through
+  a model of `ViewFactory.applyPatch` (named regressions plus a 2000-tree fuzz).
+* **`cache.set(key, value, ttl=0)` cached forever.** A zero ttl was treated as
+  "no expiry"; it now means "already expired". Expiry comparisons are
+  inclusive, and the index is read defensively so a cache written by an older
+  version can no longer raise `KeyError`.
+* **The newest installed NDK is now picked numerically.** `sorted()` on the
+  SDK's `ndk/` directory ranked `9.0.x` above `28.2.x`; the builder also had a
+  hardcoded fallback that disagreed with the pinned `COMPATIBILITY.ndk_version`
+  and is gone.
+* **`pydrud.yaml` parsing no longer reads nested keys.** Indented keys and list
+  items could shadow a real top-level setting, and inline `# comments` ended up
+  inside values. Unreadable files now warn instead of failing silently.
+* **`Store.mutate()` honours deletions.** A draft edited in place now replaces
+  the state, so `draft.pop("key")` actually removes the key.
+* **`Computed` is lazy again.** Invalidating a source recomputed the value
+  immediately even with no subscribers.
+* **Selector leak.** `Store.select()` kept every selector forever;
+  `Selector.dispose()` (and `Store.unselect()`) detach one.
+* **Animations ran for the wrong length of time.** `AnimationController`
+  re-derived its clock from the *eased* value each frame, so the curve was
+  applied repeatedly: `ease_in`/`bounce` animations never reached the end and
+  `ease_out` finished in 8 frames instead of 60. The controller now keeps a
+  linear clock and eases once per frame, so every curve takes exactly
+  `duration`. `animate_to()` also no longer rewrites `upper`, which used to
+  shrink the controller's range permanently.
+* **`pydrud analyze` reported nested-loop findings twice** (once per
+  enclosing loop). Findings are now de-duplicated and sorted by line, and a
+  test pins the analyzer's widget list against the exported widgets.
+* **Hot reload missed most saves.** The watchdog handler only listened for
+  `on_modified`, but vim/PyCharm (and most editors) save atomically by
+  renaming a temp file — those arrived as `on_moved` and were dropped, as were
+  newly created modules. The polling fallback ignored new files too.
+* **`Responsive.configure()` no longer half-applies a rejected call.**
+* **`pydrud run` no longer fails to compile.** `ViewFactory` called
+  `AdvancedViews.setEventDispatcher()` and `ViewFactory.isReusableType()`,
+  neither of which existed. Added the late-binding setter (matching
+  `MaterialViews`/`GestureBinder`) and the view-reuse predicate (`Canvas`,
+  `MapView`, `CameraPreview`, `ReorderableList`, `InfiniteList`).
+* **Unknown native commands no longer hang the app.** `BridgeService` now
+  answers any command no handler claimed with a failed `result`, so a
+  pending `Result` settles with `unsupported native command: …` instead of
+  never resolving.
+* **Three native events had no Python handler.** `push_token`,
+  `audio_complete` and `protocol_error` were emitted by the Java layer and
+  dropped. Added `App.on_push_token()`, `App.on_audio_complete()`, and
+  protocol errors are now routed to the app's error handler.
+* Unused imports, empty f-strings, exception chaining (`raise … from`) and
+  other lint findings across `pydrud/` and `tools/`.
+
+### Added
+* **`pydrud.android.javacheck`** — cross-class symbol resolution for the
+  generated Java: unqualified calls, calls on fields/locals of Pydrud types,
+  static calls and constructor arities, with no false positives on framework
+  types or chained calls.
+* **Build pre-flight.** `pydrud run`/`pydrud build` resolve the project's own
+  `*.java` before invoking Gradle and abort in under a second with the exact
+  missing symbol, suggesting `pydrud sync`.
+* **Staleness warning.** Projects now record `pydrud_version:` in
+  `pydrud.yaml`; building with a different installed version warns and points
+  at `pydrud sync`, which re-stamps it.
+* **`UNIMPLEMENTED_COMMANDS`** documents the 24 Python service calls (BLE,
+  NFC, camera extras, speech, colour picker, location watch, notification
+  channels) the Android runtime does not implement yet; their docstrings say
+  so, and a test keeps the list in sync with the Java sources.
+* New test suites: `test_java_symbols`, `test_native_coverage`,
+  `test_native_events`, `test_build_preflight` — covering symbol resolution,
+  command/event/widget parity between Python and Java, and the build guards.
+
+* **Awkward project names generated invalid Java.** `pydrud init 2cool`
+  wrote `public class 2coolActivity`; names are now normalised to real Java
+  and Python identifiers (`App2cool`, `app_2cool`), including non-ASCII and
+  punctuation-only names.
+* **The recorded Gradle version was wrong.** `pydrud.yaml` said 8.13 while
+  the wrapper downloaded 8.14.4; the wrapper, the properties file and the
+  compatibility matrix now share one value.
+* **Unbounded bridge buffering.** A stream with no line break could grow the
+  reader's buffer without limit; it is now dropped with a reported error
+  (mirroring the native 2 MiB frame cap).
+* **SQL identifiers are validated.** Table and column names cannot be bound
+  as parameters, so `Database`/`Model`/`Query` now reject anything that is
+  not a plain identifier instead of splicing it into the statement.
+
+### Changed
+* `tools/check_java.py` now runs the symbol check after parsing, so CI fails
+  on an unresolved cross-class call.
+* `buildPython` selection explains a version mismatch ("the app ships Python
+  3.11, you have 3.12 — Chaquopy will skip .pyc") instead of leaving the raw
+  Gradle warning unexplained.
+* `NATIVE_IGNORED_PROPS` records the widget properties the renderer does not
+  read yet, pinned in both directions by `tests/test_widget_props.py`.
+
 ## [Unreleased] — Runtime architecture and Android hardening
 
 This development line focuses on making the Python-to-Android runtime more

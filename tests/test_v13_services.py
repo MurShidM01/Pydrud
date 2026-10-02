@@ -189,7 +189,7 @@ class TestDeepLinks(ServiceTestCase):
         self.assertEqual(seen, ["myapp://late"])
 
     def test_router_resolves_the_link(self):
-        from pydrud.navigation import Router
+        from pydrud.runtime.navigation import Router
 
         visited = []
         router = Router()

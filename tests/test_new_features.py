@@ -7,9 +7,9 @@ from __future__ import annotations
 import unittest
 
 from pydrud import (
-    App, AppBar, Button, Card, Checkbox, Colors, Column, Container, Dropdown,
+    App, AppBar, Button, Card, Colors, Column, Container, Dropdown,
     FloatingActionButton, GridView, Icon, Icons, ListView, Padding, Positioned,
-    ProgressBar, Radio, Row, Router, Scaffold, SizedBox, Slider, Stack, State,
+    ProgressBar, Radio, Router, Scaffold, SizedBox, Slider, Stack, State,
     Text, Theme,
 )
 from pydrud.core.diff import TreeDiff
@@ -293,7 +293,7 @@ class TestAppInternals(unittest.TestCase):
             app.page.set_system_ui(icon_brightness="rainbow")
 
     def test_module_name_resolution(self):
-        from pydrud.main import _module_name_for
+        from pydrud.runtime.app import _module_name_for
         import os
         root = os.path.abspath("/tmp/proj")
         self.assertEqual(

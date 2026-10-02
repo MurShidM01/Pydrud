@@ -9,7 +9,7 @@ inflating ten thousand of them, and a span-aware ``TextView``.
 from __future__ import annotations
 
 import re
-from typing import Any, Callable, Optional, Sequence, Union
+from typing import Callable, Optional, Sequence, Union
 
 from pydrud.widgets.base import Widget
 from pydrud.widgets.theme import Colors

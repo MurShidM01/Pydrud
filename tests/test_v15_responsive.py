@@ -263,7 +263,7 @@ class TestAppMetricsEvents(ResponsiveTestCase):
     """The ``metrics`` bridge event must refresh MediaQuery and re-render."""
 
     def test_metrics_event_updates_and_rerenders(self):
-        from pydrud.main import App
+        from pydrud.runtime.app import App
 
         app = App(title="t")
         renders = []
@@ -281,7 +281,7 @@ class TestAppMetricsEvents(ResponsiveTestCase):
         self.assertEqual(len(renders), 1)
 
     def test_identical_metrics_do_not_rerender(self):
-        from pydrud.main import App
+        from pydrud.runtime.app import App
 
         app = App(title="t")
         renders = []
@@ -293,7 +293,7 @@ class TestAppMetricsEvents(ResponsiveTestCase):
         self.assertEqual(len(renders), 1)
 
     def test_ready_event_still_initialises_metrics(self):
-        from pydrud.main import App
+        from pydrud.runtime.app import App
 
         app = App(title="t")
         app.render = lambda *a, **k: None                # type: ignore

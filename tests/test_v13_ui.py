@@ -11,7 +11,7 @@ from pydrud import (
     Text, Tween, curve, parse_url,
 )
 from pydrud.core.controllers import Sequence_
-from pydrud.navigation import TRANSITIONS, Route
+from pydrud.runtime.navigation import TRANSITIONS, Route
 
 
 def props(widget) -> dict:

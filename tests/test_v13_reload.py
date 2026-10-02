@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 
 from pydrud import App, State, Store, Text
-from pydrud.navigation import Router
+from pydrud.runtime.navigation import Router
 
 
 class TestStateSnapshots(unittest.TestCase):

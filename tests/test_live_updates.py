@@ -12,7 +12,7 @@ from __future__ import annotations
 import pathlib
 import unittest
 
-from pydrud import App, Column, Row, State, Tabs, Text
+from pydrud import App, Column, State, Tabs, Text
 from pydrud.core.diff import TreeDiff
 from pydrud.widgets.material import ExpansionTile
 from tests.fake_device import FakeDevice, run_app

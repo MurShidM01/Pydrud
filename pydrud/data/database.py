@@ -33,9 +33,10 @@ on the UI thread: use ``page.run_task(...)`` for anything bulk, or
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import threading
-from typing import Any, Callable, Iterable, Iterator, Optional, Sequence
+from typing import Any, Iterable, Iterator, Optional, Sequence
 
 _PY_TO_SQL = {
     int: "INTEGER",
@@ -46,6 +47,28 @@ _PY_TO_SQL = {
     dict: "TEXT",   # stored as JSON
     list: "TEXT",   # stored as JSON
 }
+
+
+#: SQLite identifiers (table and column names) cannot be parameterised, so
+#: they are interpolated into the SQL text. Everything that reaches that
+#: interpolation goes through :func:`_ident` first.
+_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _ident(name: str) -> str:
+    """Validate a table/column name before it is spliced into SQL.
+
+    Values are always bound as parameters, but identifiers cannot be — a
+    column name taken from user input (a sort key in a URL, a dynamic
+    filter) would otherwise be an injection point. Anything that is not a
+    plain identifier is rejected loudly.
+    """
+    text = str(name)
+    if not _IDENT_RE.match(text):
+        raise ValueError(
+            f"invalid SQL identifier {name!r} — table and column names must "
+            "match [A-Za-z_][A-Za-z0-9_]*")
+    return text
 
 
 class Field:
@@ -195,29 +218,31 @@ class Database:
     def insert(self, table: str, values: dict) -> int:
         if not values:
             raise ValueError("insert() needs at least one column")
-        cols = ", ".join(f'"{c}"' for c in values)
+        cols = ", ".join(f'"{_ident(c)}"' for c in values)
         marks = ", ".join("?" for _ in values)
-        cur = self.execute(f'INSERT INTO "{table}" ({cols}) VALUES ({marks})',
+        cur = self.execute(
+            f'INSERT INTO "{_ident(table)}" ({cols}) VALUES ({marks})',
                            list(values.values()))
         return int(cur.lastrowid or 0)
 
     def update(self, table: str, values: dict, where: dict) -> int:
         if not values:
             return 0
-        sets = ", ".join(f'"{c}" = ?' for c in values)
+        sets = ", ".join(f'"{_ident(c)}" = ?' for c in values)
         clause, params = _where_clause(where)
-        cur = self.execute(f'UPDATE "{table}" SET {sets}{clause}',
+        cur = self.execute(f'UPDATE "{_ident(table)}" SET {sets}{clause}',
                            list(values.values()) + params)
         return cur.rowcount
 
     def delete(self, table: str, where: dict) -> int:
         clause, params = _where_clause(where)
-        cur = self.execute(f'DELETE FROM "{table}"{clause}', params)
+        cur = self.execute(f'DELETE FROM "{_ident(table)}"{clause}', params)
         return cur.rowcount
 
     def count(self, table: str, where: Optional[dict] = None) -> int:
         clause, params = _where_clause(where or {})
-        return int(self.scalar(f'SELECT COUNT(*) FROM "{table}"{clause}',
+        return int(self.scalar(
+            f'SELECT COUNT(*) FROM "{_ident(table)}"{clause}',
                                params) or 0)
 
     def tables(self) -> list[str]:
@@ -227,7 +252,8 @@ class Database:
         return [r["name"] for r in rows]
 
     def columns(self, table: str) -> list[str]:
-        return [r["name"] for r in self.query(f'PRAGMA table_info("{table}")')]
+        return [r["name"]
+                for r in self.query(f'PRAGMA table_info("{_ident(table)}")')]
 
     # ── transactions ─────────────────────────────────────────────────────
 
@@ -368,11 +394,13 @@ def _where_clause(where: dict) -> tuple[str, list]:
             if not values:
                 parts.append("0")
                 continue
-            parts.append(f'"{key}" IN ({", ".join("?" for _ in values)})')
+            parts.append(
+                f'"{_ident(key)}" IN ({", ".join("?" for _ in values)})')
             params.extend(values)
             continue
         if suffix == "isnull":
-            parts.append(f'"{key}" IS {"NULL" if value else "NOT NULL"}')
+            parts.append(
+                f'"{_ident(key)}" IS {"NULL" if value else "NOT NULL"}')
             continue
         if suffix == "contains":
             value = f"%{value}%"
@@ -382,7 +410,7 @@ def _where_clause(where: dict) -> tuple[str, list]:
             value = f"%{value}"
         if isinstance(value, bool):
             value = int(value)
-        parts.append(f'"{key}" {op} ?')
+        parts.append(f'"{_ident(key)}" {op} ?')
         params.append(value)
     return " WHERE " + " AND ".join(parts), params
 
@@ -430,9 +458,9 @@ class Query:
             parts = []
             for col in self._order:
                 if col.startswith("-"):
-                    parts.append(f'"{col[1:]}" DESC')
+                    parts.append(f'"{_ident(col[1:])}" DESC')
                 else:
-                    parts.append(f'"{col.lstrip("+")}" ASC')
+                    parts.append(f'"{_ident(col.lstrip("+"))}" ASC')
             sql += " ORDER BY " + ", ".join(parts)
         if self._limit is not None:
             sql += f" LIMIT {self._limit} OFFSET {self._offset}"
@@ -475,7 +503,7 @@ class Query:
         payload = {k: fields[k].to_db(v) if k in fields else v
                    for k, v in values.items()}
         clause, params = _where_clause(self._where)
-        sets = ", ".join(f'"{c}" = ?' for c in payload)
+        sets = ", ".join(f'"{_ident(c)}" = ?' for c in payload)
         cur = self._model._db().execute(
             f'UPDATE "{self._model.__table__}" SET {sets}{clause}',
             list(payload.values()) + params)
@@ -530,6 +558,11 @@ class ModelMeta(type):
         cls.__fields__ = fields
         if name != "Model" and not namespace.get("__table__"):
             cls.__table__ = name.lower() + "s"
+        if name != "Model":
+            # Fail at class-definition time rather than on the first query.
+            _ident(cls.__table__)
+            for field_name in fields:
+                _ident(field_name)
         return cls
 
 

@@ -1,4 +1,3 @@
-import json
 import pytest
 
 from pydrud.core.elements import ElementTree

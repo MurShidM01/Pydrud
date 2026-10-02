@@ -80,13 +80,17 @@ class _Batch:
         self._owner = owner
 
     def __enter__(self):
-        self._owner._muted += 1
+        with self._owner._notify_lock:
+            self._owner._muted += 1
         return self._owner
 
     def __exit__(self, *exc):
-        self._owner._muted -= 1
-        if self._owner._muted == 0 and self._owner._dirty:
-            self._owner._dirty = False
+        with self._owner._notify_lock:
+            self._owner._muted -= 1
+            flush = self._owner._muted == 0 and self._owner._dirty
+            if flush:
+                self._owner._dirty = False
+        if flush:
             self._owner._emit()
         return False
 
@@ -188,12 +192,15 @@ class Store(_Observable):
                action: str = "mutate") -> "Store":
         """Mutate via a function receiving a *copy* of the state.
 
-        Return a dict of changes, or mutate the copy in place and return None.
+        Return a dict of changes (merged into the state), or mutate the copy
+        in place and return anything else — the edited draft then *replaces*
+        the state, so keys the draft deleted really disappear.
         """
         draft = copy.deepcopy(self._state)
         returned = fn(draft)
-        changes = returned if isinstance(returned, dict) else draft
-        return self.update(changes, action=action)
+        if isinstance(returned, dict):
+            return self.update(returned, action=action)
+        return self.replace(draft, action=action)
 
     def action(self, fn: Callable) -> Callable:
         """Decorator turning ``fn(state, *args)`` into a dispatchable action."""
@@ -223,6 +230,11 @@ class Store(_Observable):
         selector = Selector(self, key_or_fn)
         self._selectors.append(selector)
         return selector
+
+    def unselect(self, selector: "Selector") -> None:
+        """Detach a selector so the store stops holding on to it."""
+        if selector in self._selectors:
+            self._selectors.remove(selector)
 
     def _notify_selectors(self, previous: dict) -> None:
         for selector in list(self._selectors):
@@ -274,6 +286,15 @@ class Selector:
             self.key = key_or_fn
             self._project = lambda state: state.get(key_or_fn)
         self._listeners: list[Callable[[Any], Any]] = []
+
+    def dispose(self) -> None:
+        """Drop all listeners and detach from the store.
+
+        Selectors created per render would otherwise accumulate in the store
+        for the lifetime of the app.
+        """
+        self._listeners.clear()
+        self._store.unselect(self)
 
     @property
     def value(self) -> Any:
@@ -344,10 +365,19 @@ class Computed(Generic[T]):
         return not self._valid
 
     def invalidate(self) -> None:
+        """Mark the cache stale; recompute now only if someone is listening.
+
+        Without subscribers the value stays lazy, which is the whole point of
+        :class:`Computed` — an expensive derivation must not run on every
+        source change when nothing reads the result.
+        """
         was = self._cache
+        had_value = self._valid
         self._valid = False
+        if not self._subscribers:
+            return
         new = self.value
-        if new != was:
+        if not had_value or new != was:
             for cb in list(self._subscribers):
                 try:
                     cb(new)

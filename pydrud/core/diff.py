@@ -147,23 +147,33 @@ def _diff_children(
 ):
     """Keyed children diff.
 
-    Children present in both trees (matched by key) are diffed in place and
-    emitted as ``move`` patches when their index changed. Children only in
-    the old tree are deleted; children only in the new tree are created at
-    their target index.
+    Children are matched by key: survivors are diffed in place, children
+    only in the old tree are deleted and children only in the new tree are
+    created at their target index.
+
+    Positions are tracked against an *evolving* list rather than the
+    original one. The native applier executes patches in order — ``create``
+    inserts at ``index`` and ``move`` removes then re-inserts at ``index``
+    — so every insertion and deletion shifts the children after it. Using
+    the original indices meant a child that kept its old index but was
+    pushed along by an earlier insert was never moved, and the row ended up
+    in the wrong order on the device (e.g. prepending one item while
+    replacing another).
     """
     old_list = [w.unwrap() for w in old_list]
     new_list = [w.unwrap() for w in new_list]
     old_by_key = _index_unique(old_list, parent_key)
     new_by_key = _index_unique(new_list, parent_key)
-    old_index = {w.key: i for i, w in enumerate(old_list)}
 
     # 1. Deletions (old children that disappeared).
     for widget in old_list:
         if widget.key not in new_by_key:
             patches.append(Patch("delete", widget.key, parent_key=parent_key))
 
-    # 2. Creations / updates / moves.
+    # The order the native side is left in once the deletions are applied.
+    order = [w.key for w in old_list if w.key in new_by_key]
+
+    # 2. Creations / moves / updates, left to right.
     for index, new_w in enumerate(new_list):
         old_w = old_by_key.get(new_w.key)
         if old_w is None:
@@ -171,12 +181,18 @@ def _diff_children(
                 Patch("create", new_w.key, parent_key=parent_key,
                       index=index, tree=new_w.to_dict())
             )
+            order.insert(index, new_w.key)
             continue
 
-        if old_index.get(new_w.key) != index:
+        current = order.index(new_w.key)
+        if current != index:
             patches.append(
                 Patch("move", new_w.key, parent_key=parent_key, index=index)
             )
+            order.pop(current)
+            order.insert(index, new_w.key)
+        # ``replace`` keeps the view at its current position, so the move
+        # above must happen first — hence diffing the node last.
         _diff_node(old_w, new_w, patches, parent_key=parent_key, index=index)
 
 

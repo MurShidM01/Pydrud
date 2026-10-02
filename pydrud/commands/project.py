@@ -5,6 +5,7 @@ Pydrud project scaffold — generates a complete Android + Python project tree.
 from __future__ import annotations
 import os
 import re
+import unicodedata
 import shutil
 import sys
 
@@ -134,8 +135,14 @@ _JAVA_KEYWORDS = {
 
 def _slugify(name: str) -> str:
     """Convert a project name to a valid Python module name."""
-    s = name.strip().lower().replace("-", "_").replace(" ", "_")
-    return re.sub(r"[^a-z0-9_]", "", s) or "my_app"
+    ascii_name = unicodedata.normalize("NFKD", str(name)).encode(
+        "ascii", "ignore").decode("ascii")
+    s = ascii_name.strip().lower().replace("-", "_").replace(" ", "_")
+    slug = re.sub(r"[^a-z0-9_]", "", s)
+    if not re.search(r"[a-z0-9]", slug):
+        return "my_app"
+    # A Python module (and a Java package segment) cannot start with a digit.
+    return f"app_{slug}" if slug[0].isdigit() else slug
 
 
 def _detect_sdk() -> str:
@@ -167,19 +174,50 @@ def _detect_sdk() -> str:
 
 
 def _camel(name: str) -> str:
-    """Convert ``my_app`` or ``my-app`` to ``MyApp``."""
-    return "".join(word.capitalize() for word in name.replace("-", "_").split("_"))
+    """Convert ``my_app`` / ``my-app`` to a valid Java class prefix.
+
+    The result names generated classes (``MyAppActivity``) and is spliced
+    into the manifest, so it must be a legal Java identifier: ``2cool``
+    produced ``public class 2coolActivity``, which does not compile.
+    Separators are dropped, invalid characters are stripped and a leading
+    digit is prefixed.
+    """
+    ascii_name = unicodedata.normalize("NFKD", str(name)).encode(
+        "ascii", "ignore").decode("ascii")
+    words = re.split(r"[^A-Za-z0-9]+", ascii_name)
+    camel = "".join(word[:1].upper() + word[1:] for word in words if word)
+    camel = re.sub(r"[^A-Za-z0-9_]", "", camel)
+    if not camel:
+        return "MyApp"
+    if camel[0].isdigit():
+        camel = "App" + camel
+    return camel
+
+
+def _version_key(name: str) -> tuple:
+    """Sort key that orders ``9.0.1`` *before* ``28.2.3`` (numeric, not text)."""
+    return tuple(int(part) if part.isdigit() else -1
+                 for part in str(name).split("."))
 
 
 def _detect_ndk(sdk_dir: str) -> str:
-    """Detect the latest installed NDK version from the SDK directory."""
+    """Detect the newest installed NDK version from the SDK directory.
+
+    Directory names are compared numerically: a plain ``sorted()`` would
+    rank ``"9.0.9519653"`` above ``"28.2.13676358"`` and hand Gradle an NDK
+    that is years too old.
+    """
     ndk_dir = os.path.join(sdk_dir, "ndk") if sdk_dir else ""
     if ndk_dir and os.path.isdir(ndk_dir):
         try:
-            versions = sorted(os.listdir(ndk_dir))
+            versions = sorted(
+                (n for n in os.listdir(ndk_dir)
+                 if os.path.isdir(os.path.join(ndk_dir, n))),
+                key=_version_key,
+            )
             if versions:
                 return versions[-1]
-        except Exception:
+        except OSError:
             pass
     return COMPATIBILITY.ndk_version
 
@@ -192,61 +230,100 @@ _JAVA_TEMPLATES = (
     "ViewCreator", "MaterialViews", "PydrudTheme", "PydrudIcons",
     "PydrudNavigation", "GestureBinder", "NativeServices", "PlatformServices", "AdvancedViews",
     "PydrudWorker", "PydrudForegroundService",
+    "CaptureServices", "ConnectivityServices",
 )
 
 
-#: CPython versions Chaquopy 15 accepts as ``buildPython``.
+#: CPython versions Chaquopy accepts as ``buildPython``, newest first.
 BUILD_PYTHON_VERSIONS = ("3.13", "3.12", "3.11", "3.10")
 
 #: The Python version the app itself runs on the device.
 APP_PYTHON_VERSION = COMPATIBILITY.python_version
 
 
+def _python_version_of(exe: str, args: list[str] | None = None) -> str:
+    """Return ``"3.11"`` for an interpreter, or ``""`` when it will not run."""
+    import subprocess
+
+    try:
+        probe = subprocess.run(
+            [exe, *(args or []), "-c",
+             "import sys; print('%d.%d' % sys.version_info[:2]); "
+             "print(sys.executable)"],
+            capture_output=True, text=True, timeout=15,
+        )
+    except Exception:
+        return ""
+    if probe.returncode != 0:
+        return ""
+    lines = [line.strip() for line in probe.stdout.splitlines() if line.strip()]
+    return lines[0] if lines else ""
+
+
 def _detect_build_python(target: str = APP_PYTHON_VERSION) -> str:
     """Pick an interpreter Chaquopy can actually use for ``buildPython``.
 
-    Chaquopy 15 supports CPython 3.8 - 3.12 here; anything newer makes it
-    skip bytecode compilation with a warning. It can only pre-compile to
-    ``.pyc`` when ``buildPython`` matches the app's own Python version,
-    so ``target`` (the version the APK ships) is tried first — otherwise
-    the build prints "buildPython version ... is incompatible" and ships
-    plain source. Falls back to whatever ``python`` happens to be.
-    """
-    import subprocess
+    Chaquopy only pre-compiles the app to ``.pyc`` when ``buildPython``
+    is the *same* minor version as the Python the APK ships (``target``).
+    Otherwise the build prints
 
+        Warning: Failed to compile to .pyc format: [python.exe] is not a
+        valid Python 3.11 command: it is version 3.12.
+
+    and ships plain source — the app still works, it just starts a little
+    slower. ``target`` is therefore tried first, then any other supported
+    version, and the user is told what happened instead of being left to
+    decode Chaquopy's warning.
+    """
     preferred = [target] if target else []
     supported = preferred + [v for v in BUILD_PYTHON_VERSIONS
                              if v not in preferred]
-    candidates = [f"python{v}" for v in supported]
+    candidates = [(f"python{v}", []) for v in supported]
     if os.name == "nt":
-        candidates = [f"py -{v}" for v in supported] + candidates
+        candidates = [("py", [f"-{v}"]) for v in supported] + candidates
 
-    for candidate in candidates:
-        parts = candidate.split()
-        exe = shutil.which(parts[0])
+    for command, args in candidates:
+        exe = shutil.which(command)
         if not exe:
             continue
-        try:
-            found = subprocess.run(
-                [exe, *parts[1:], "-c", "import sys; print(sys.executable)"],
-                capture_output=True, text=True, timeout=15,
-            )
-        except Exception:
+        version = _python_version_of(exe, args)
+        if not version or version not in supported:
             continue
-        path = found.stdout.strip()
-        if found.returncode == 0 and path:
-            return path.replace("\\", "/")
+        resolved = _resolve_executable(exe, args)
+        if version != target:
+            print(info(
+                f"  buildPython: using Python {version} "
+                f"(the app ships Python {target}), so Chaquopy will skip "
+                f".pyc pre-compilation — harmless, just a slower first "
+                f"start. Install Python {target} or set PYDRUD_PYTHON "
+                f"to silence it."))
+        return resolved
 
-    current = f"{sys.version_info.major}.{sys.version_info.minor}"
     fallback = (shutil.which("python") or shutil.which("python3")
                 or sys.executable)
-    if current not in BUILD_PYTHON_VERSIONS:
-        print(info(
-            f"  buildPython: no Chaquopy-compatible Python found "
-            f"(need {BUILD_PYTHON_VERSIONS[-1]}-{BUILD_PYTHON_VERSIONS[0]}, "
-            f"ideally {target}); using {fallback}. "
-            f"Set PYDRUD_PYTHON to override."))
+    print(info(
+        f"  buildPython: no Chaquopy-compatible Python found "
+        f"(need {BUILD_PYTHON_VERSIONS[-1]}-{BUILD_PYTHON_VERSIONS[0]}, "
+        f"ideally {target}); using {fallback}. "
+        f"Set PYDRUD_PYTHON to override."))
     return fallback.replace("\\", "/")
+
+
+def _resolve_executable(exe: str, args: list[str]) -> str:
+    """The real interpreter path behind ``py -3.11`` / ``python3.11``."""
+    import subprocess
+
+    try:
+        probe = subprocess.run(
+            [exe, *args, "-c", "import sys; print(sys.executable)"],
+            capture_output=True, text=True, timeout=15,
+        )
+        path = probe.stdout.strip()
+        if probe.returncode == 0 and path:
+            return path.replace("\\", "/")
+    except Exception:
+        pass
+    return exe.replace("\\", "/")
 
 
 def _normalise_color(value: str | None) -> str | None:
@@ -403,6 +480,7 @@ def create_project(
     ctx = {
         "project_name": name,
         "app_name": android_app_name,
+        "pydrud_version": _version(),
         "seed_color": seed_color,
         "pydrud_app_name": pydrud_app_name,
         "package": package,
@@ -441,9 +519,7 @@ def create_project(
     print(f"    Directory:  {project_dir}\n")
 
     # ── 1.  Python source ────────────────────────────────────────────────
-    _ensure_dir(f"{project_dir}/src/app")
-    _write_template("python/main.py.j2", f"{project_dir}/src/app/main.py", ctx)
-    _write_template("python/app.py.j2", f"{project_dir}/src/app/__init__.py", ctx)
+    _render_app_package(project_dir, ctx)
 
     # ── 1b. Bundle pydrud source into the project so Chaquopy can import
     #        it at runtime without needing pip install or network access.
@@ -510,12 +586,50 @@ def create_project(
     # Write a small Python runner script at the top-level
     _write_template("python/run.py.j2", f"{project_dir}/run.py", ctx)
 
+    # ── 5.  Docs and tests ────────────────────────────────────────────────
+    _write_template("README.md.j2", f"{project_dir}/README.md", ctx)
+    _ensure_dir(f"{project_dir}/tests")
+    _write_template("python/project_tests/test_app.py.j2",
+                    f"{project_dir}/tests/test_app.py", ctx)
+    with open(f"{project_dir}/tests/__init__.py", "w", encoding="utf-8") as f:
+        f.write("")
+
     print(ok(f"Project '{name}' created!"))
     print()
-    print(f"  Next steps:")
+    print("  Next steps:")
     print(f"    $ cd {_slugify(name)}")
-    print(f"    $ pydrud run")
+    print("    $ pydrud run")
     print()
+
+
+#: The generated ``src/app`` package: template → path inside ``src/app``.
+#: One module per concern, so a real app grows by adding files instead of
+#: by growing a single ``main.py``.
+_APP_MODULES = (
+    ("python/app.py.j2",                   "__init__.py"),
+    ("python/main.py.j2",                  "main.py"),
+    ("python/app/config.py.j2",            "config.py"),
+    ("python/app/state.py.j2",             "state.py"),
+    ("python/app/runtime.py.j2",           "runtime.py"),
+    ("python/app/jobs.py.j2",              "jobs.py"),
+    ("python/app/ui/__init__.py.j2",       "ui/__init__.py"),
+    ("python/app/ui/shell.py.j2",          "ui/shell.py"),
+    ("python/app/ui/components.py.j2",     "ui/components.py"),
+    ("python/app/screens/__init__.py.j2",  "screens/__init__.py"),
+    ("python/app/screens/home.py.j2",      "screens/home.py"),
+    ("python/app/screens/settings.py.j2",  "screens/settings.py"),
+    ("python/app/screens/gallery.py.j2",   "screens/gallery.py"),
+)
+
+
+def _render_app_package(project_dir: str, ctx: dict) -> None:
+    """Write the structured ``src/app`` package."""
+    for folder in ("", "ui", "screens"):
+        _ensure_dir(os.path.join(project_dir, "src", "app", folder))
+    for template, relative in _APP_MODULES:
+        _write_template(template,
+                        os.path.join(project_dir, "src", "app", *relative.split("/")),
+                        ctx)
 
 
 # ── Upgrading an existing project ────────────────────────────────────────────
@@ -580,8 +694,39 @@ def sync_project(project_dir: str, *, update_runtime: bool = True) -> bool:
     if update_runtime:
         _bundle_pydrud_source(project_dir)
 
+    _stamp_version(project_dir)
     print(ok("Project synced — run `pydrud run` to rebuild."))
     return True
+
+
+def _stamp_version(project_dir: str) -> None:
+    """Record which Pydrud generated the native layer, in ``pydrud.yaml``.
+
+    ``pydrud run`` compares this with the installed version and tells the
+    user to ``pydrud sync`` when they drift apart — the generated Java and
+    the Python runtime are two halves of one protocol.
+    """
+    path = os.path.join(project_dir, "pydrud.yaml")
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return
+    stamp = f'pydrud_version: "{_version()}"'
+    for index, line in enumerate(lines):
+        if line.strip().startswith("pydrud_version:"):
+            lines[index] = stamp
+            break
+    else:
+        insert_at = 1 if lines and lines[0].startswith("#") else 0
+        lines.insert(insert_at, stamp)
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+    except OSError:
+        pass
 
 
 def _version() -> str:

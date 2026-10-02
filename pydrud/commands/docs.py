@@ -12,8 +12,7 @@ from __future__ import annotations
 import html
 import inspect
 import os
-import pkgutil
-from typing import Any, Optional
+from typing import Any
 
 _CSS = """
 :root { --bg:#0b1020; --panel:#121a33; --ink:#e6e9f5; --muted:#99a2c0;
@@ -114,13 +113,13 @@ def build_docs(project_dir: str = ".", output: str = "docs") -> str:
     os.makedirs(out_dir, exist_ok=True)
     version = getattr(pydrud, "__version__", "")
 
-    modules = ["pydrud", "pydrud.main", "pydrud.navigation",
+    modules = ["pydrud", "pydrud.runtime.app", "pydrud.runtime.navigation",
                "pydrud.widgets", "pydrud.widgets.canvas",
                "pydrud.widgets.advanced", "pydrud.core.store",
                "pydrud.core.controllers", "pydrud.core.tasks",
                "pydrud.core.results", "pydrud.data.database",
                "pydrud.data.cache", "pydrud.services.native",
-               "pydrud.services.http", "pydrud.packages", "pydrud.testing"]
+               "pydrud.services.http", "pydrud.commands.packages", "pydrud.testing"]
 
     pages: list[tuple[str, str]] = []
     for name in modules:
@@ -152,7 +151,8 @@ def build_docs(project_dir: str = ".", output: str = "docs") -> str:
         os.path.abspath(pydrud.__file__))), "README.md")
     overview = ["<h2>Overview</h2>"]
     if os.path.exists(readme):
-        text = open(readme, encoding="utf-8").read()[:6000]
+        with open(readme, encoding="utf-8") as handle:
+            text = handle.read()[:6000]
         overview.append(f'<p class="doc">{html.escape(text)}</p>')
     else:
         overview.append("<ul>" + "".join(

@@ -1,0 +1,430 @@
+package {{ package }};
+
+import android.app.AlertDialog;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.graphics.Color;
+import android.os.Build;
+import android.util.Log;
+import android.widget.LinearLayout;
+import android.widget.SeekBar;
+import android.widget.TextView;
+
+import androidx.core.content.ContextCompat;
+
+import org.json.JSONObject;
+
+/**
+ * CaptureServices — camera extras, speech recognition, colour picking,
+ * continuous location and notification channels.
+ *
+ * These are the commands {@code page.camera}, {@code page.speech},
+ * {@code page.dialog.color()}, {@code page.location.watch()} and
+ * {@code page.notifications.channel()} send over the bridge. Like every
+ * other service class, each command answers exactly once with a
+ * {@code result} event so the Python {@code Result} always settles.
+ */
+public class CaptureServices {
+
+    private static final String TAG = "PydrudCapture";
+
+    private final {{ app_name }}Activity activity;
+    private final BridgeService bridge;
+
+    /** Request code for the speech-recognition activity. */
+    private static final int SPEECH_REQUEST = 9701;
+    private String speechRequestId = "";
+
+    private android.location.LocationListener locationListener;
+
+    public CaptureServices({{ app_name }}Activity activity, BridgeService bridge) {
+        this.activity = activity;
+        this.bridge = bridge;
+    }
+
+    /** Handle one command. Returns true when the command was recognised. */
+    public boolean handle(final String cmd, final JSONObject msg) {
+        final String requestId = msg.optString("request_id", "");
+        try {
+            switch (cmd) {
+                case "camera_flash":       cameraFlash(requestId, msg); return true;
+                case "camera_zoom":        cameraZoom(requestId, msg); return true;
+                case "camera_record":      cameraRecord(requestId, msg); return true;
+                case "camera_record_stop": cameraRecordStop(requestId); return true;
+                case "camera_scan":        cameraScan(requestId, msg); return true;
+                case "speech_listen":      speechListen(requestId, msg); return true;
+                case "color_picker":       colorPicker(requestId, msg); return true;
+                case "location_watch":     locationWatch(requestId, msg); return true;
+                case "notify_channel":     notifyChannel(requestId, msg); return true;
+                default:
+                    return false;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "command " + cmd + " failed", e);
+            fail(requestId, e.getMessage() == null ? "error" : e.getMessage());
+            return true;
+        }
+    }
+
+    // ── replies ──────────────────────────────────────────────────────────
+
+    private void reply(String requestId, Object value) {
+        if (requestId == null || requestId.isEmpty() || bridge == null) return;
+        JSONObject data = new JSONObject();
+        try {
+            data.put("request_id", requestId);
+            data.put("ok", true);
+            data.put("value", value == null ? JSONObject.NULL : value);
+        } catch (Exception ignored) {}
+        bridge.sendEvent("result", "", data);
+    }
+
+    private void fail(String requestId, String error) {
+        if (requestId == null || requestId.isEmpty() || bridge == null) return;
+        JSONObject data = new JSONObject();
+        try {
+            data.put("request_id", requestId);
+            data.put("ok", false);
+            data.put("error", error);
+        } catch (Exception ignored) {}
+        bridge.sendEvent("result", "", data);
+    }
+
+    // ── camera extras ────────────────────────────────────────────────────
+
+    private void cameraFlash(final String requestId, final JSONObject msg) {
+        final String mode = msg.optString("mode", "off");
+        final boolean on = "on".equals(mode) || "torch".equals(mode)
+            || "auto".equals(mode);
+        activity.runOnUiThread(new Runnable() {
+            @Override public void run() {
+                if (activity.setTorch(on)) {
+                    reply(requestId, mode);
+                } else {
+                    fail(requestId, "no flash unit on this camera");
+                }
+            }
+        });
+    }
+
+    private void cameraZoom(final String requestId, final JSONObject msg) {
+        final float ratio = (float) msg.optDouble("ratio", 1.0);
+        activity.runOnUiThread(new Runnable() {
+            @Override public void run() {
+                reply(requestId, (double) activity.setZoom(ratio));
+            }
+        });
+    }
+
+    private void cameraRecord(final String requestId, final JSONObject msg) {
+        final String path = msg.optString("path", "");
+        final boolean audio = msg.optBoolean("audio", true);
+        if (ContextCompat.checkSelfPermission(activity,
+                android.Manifest.permission.CAMERA)
+                != PackageManager.PERMISSION_GRANTED) {
+            fail(requestId, "camera permission not granted");
+            return;
+        }
+        activity.runOnUiThread(new Runnable() {
+            @Override public void run() {
+                String file = activity.startRecording(path, audio,
+                    new androidx.core.util.Consumer<String>() {
+                        @Override public void accept(String saved) {
+                            JSONObject data = new JSONObject();
+                            try {
+                                data.put("path", saved == null ? "" : saved);
+                                data.put("ok", saved != null);
+                            } catch (Exception ignored) { }
+                            bridge.sendEvent("recording", "", data);
+                        }
+                    });
+                if (file == null || file.isEmpty()) {
+                    fail(requestId, "camera is not running");
+                } else {
+                    reply(requestId, file);
+                }
+            }
+        });
+    }
+
+    private void cameraRecordStop(final String requestId) {
+        activity.runOnUiThread(new Runnable() {
+            @Override public void run() {
+                reply(requestId, activity.stopRecording());
+            }
+        });
+    }
+
+    private void cameraScan(final String requestId, final JSONObject msg) {
+        final String key = msg.optString("key", "");
+        final boolean enabled = msg.optBoolean("enabled", true);
+        activity.setScanning(key, enabled);
+        reply(requestId, enabled);
+    }
+
+    // ── speech recognition ───────────────────────────────────────────────
+
+    private void speechListen(final String requestId, final JSONObject msg) {
+        if (!android.speech.SpeechRecognizer.isRecognitionAvailable(activity)) {
+            fail(requestId, "speech recognition is not available");
+            return;
+        }
+        final String locale = msg.optString("locale", "");
+        final String prompt = msg.optString("prompt", "");
+        speechRequestId = requestId;
+        activity.runOnUiThread(new Runnable() {
+            @Override public void run() {
+                try {
+                    Intent intent = new Intent(
+                        android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+                    intent.putExtra(
+                        android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                        android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+                    if (!locale.isEmpty()) {
+                        intent.putExtra(
+                            android.speech.RecognizerIntent.EXTRA_LANGUAGE, locale);
+                    }
+                    if (!prompt.isEmpty()) {
+                        intent.putExtra(
+                            android.speech.RecognizerIntent.EXTRA_PROMPT, prompt);
+                    }
+                    activity.startActivityForResult(intent, SPEECH_REQUEST);
+                } catch (Exception e) {
+                    speechRequestId = "";
+                    fail(requestId, "no speech recogniser installed");
+                }
+            }
+        });
+    }
+
+    /**
+     * Forwarded by the Activity. Returns true when the result belonged to a
+     * speech request this class started.
+     */
+    public boolean onActivityResult(int request, int result, Intent data) {
+        if (request != SPEECH_REQUEST) return false;
+        String pending = speechRequestId;
+        speechRequestId = "";
+        if (pending.isEmpty()) return true;
+        if (result != android.app.Activity.RESULT_OK || data == null) {
+            fail(pending, "cancelled");
+            return true;
+        }
+        java.util.ArrayList<String> matches = data.getStringArrayListExtra(
+            android.speech.RecognizerIntent.EXTRA_RESULTS);
+        if (matches == null || matches.isEmpty()) {
+            fail(pending, "nothing recognised");
+        } else {
+            reply(pending, matches.get(0));
+        }
+        return true;
+    }
+
+    // ── colour picker ────────────────────────────────────────────────────
+
+    private void colorPicker(final String requestId, final JSONObject msg) {
+        final int initial = parseColor(msg.optString("initial", "#FF6366F1"));
+        activity.runOnUiThread(new Runnable() {
+            @Override public void run() {
+                LinearLayout layout = new LinearLayout(activity);
+                layout.setOrientation(LinearLayout.VERTICAL);
+                int pad = Math.round(16 * activity.getResources()
+                    .getDisplayMetrics().density);
+                layout.setPadding(pad, pad, pad, pad);
+
+                final TextView swatch = new TextView(activity);
+                swatch.setHeight(Math.round(56 * activity.getResources()
+                    .getDisplayMetrics().density));
+                swatch.setBackgroundColor(initial);
+                layout.addView(swatch);
+
+                final SeekBar[] bars = new SeekBar[3];
+                final String[] labels = {"R", "G", "B"};
+                final int[] values = {Color.red(initial), Color.green(initial),
+                                      Color.blue(initial)};
+                for (int i = 0; i < 3; i++) {
+                    TextView label = new TextView(activity);
+                    label.setText(labels[i]);
+                    layout.addView(label);
+                    SeekBar bar = new SeekBar(activity);
+                    bar.setMax(255);
+                    bar.setProgress(values[i]);
+                    final int index = i;
+                    bar.setOnSeekBarChangeListener(
+                        new SeekBar.OnSeekBarChangeListener() {
+                            @Override public void onProgressChanged(
+                                    SeekBar seekBar, int progress, boolean user) {
+                                values[index] = progress;
+                                swatch.setBackgroundColor(Color.rgb(
+                                    values[0], values[1], values[2]));
+                            }
+                            @Override public void onStartTrackingTouch(SeekBar b) { }
+                            @Override public void onStopTrackingTouch(SeekBar b) { }
+                        });
+                    bars[index] = bar;
+                    layout.addView(bar);
+                }
+
+                new AlertDialog.Builder(activity)
+                    .setTitle(msg.optString("title", "Pick a colour"))
+                    .setView(layout)
+                    .setPositiveButton("OK",
+                        new android.content.DialogInterface.OnClickListener() {
+                            @Override public void onClick(
+                                    android.content.DialogInterface dialog, int which) {
+                                reply(requestId, String.format("#FF%02X%02X%02X",
+                                    values[0], values[1], values[2]));
+                            }
+                        })
+                    .setNegativeButton("Cancel",
+                        new android.content.DialogInterface.OnClickListener() {
+                            @Override public void onClick(
+                                    android.content.DialogInterface dialog, int which) {
+                                fail(requestId, "cancelled");
+                            }
+                        })
+                    .setOnCancelListener(
+                        new android.content.DialogInterface.OnCancelListener() {
+                            @Override public void onCancel(
+                                    android.content.DialogInterface dialog) {
+                                fail(requestId, "cancelled");
+                            }
+                        })
+                    .show();
+            }
+        });
+    }
+
+    private int parseColor(String value) {
+        try {
+            return Color.parseColor(value);
+        } catch (Exception e) {
+            return Color.parseColor("#FF6366F1");
+        }
+    }
+
+    // ── continuous location ──────────────────────────────────────────────
+
+    private void locationWatch(final String requestId, final JSONObject msg) {
+        final boolean start = msg.optBoolean("start", true);
+        final android.location.LocationManager manager =
+            (android.location.LocationManager)
+                activity.getSystemService(Context.LOCATION_SERVICE);
+        if (manager == null) {
+            fail(requestId, "no location service");
+            return;
+        }
+        if (!start) {
+            stopLocationUpdates(manager);
+            reply(requestId, false);
+            return;
+        }
+        if (ContextCompat.checkSelfPermission(activity,
+                android.Manifest.permission.ACCESS_FINE_LOCATION)
+                != PackageManager.PERMISSION_GRANTED) {
+            fail(requestId, "location permission not granted");
+            return;
+        }
+        final long interval = (long) (msg.optDouble("interval", 5.0) * 1000.0);
+        final float distance = (float) msg.optDouble("distance", 0.0);
+        final String provider = msg.optBoolean("highAccuracy", true)
+            && manager.isProviderEnabled(
+                android.location.LocationManager.GPS_PROVIDER)
+            ? android.location.LocationManager.GPS_PROVIDER
+            : android.location.LocationManager.NETWORK_PROVIDER;
+
+        activity.runOnUiThread(new Runnable() {
+            @Override public void run() {
+                try {
+                    stopLocationUpdates(manager);
+                    locationListener = new android.location.LocationListener() {
+                        @Override
+                        public void onLocationChanged(android.location.Location loc) {
+                            emitLocation(loc);
+                        }
+                        @Override
+                        public void onStatusChanged(String p, int status,
+                                                    android.os.Bundle extras) { }
+                        @Override public void onProviderEnabled(String p) { }
+                        @Override public void onProviderDisabled(String p) { }
+                    };
+                    manager.requestLocationUpdates(provider, interval, distance,
+                                                   locationListener);
+                    reply(requestId, true);
+                } catch (SecurityException e) {
+                    fail(requestId, "location permission not granted");
+                } catch (Exception e) {
+                    fail(requestId, String.valueOf(e.getMessage()));
+                }
+            }
+        });
+    }
+
+    private void stopLocationUpdates(android.location.LocationManager manager) {
+        if (locationListener == null) return;
+        try {
+            manager.removeUpdates(locationListener);
+        } catch (Exception ignored) { }
+        locationListener = null;
+    }
+
+    private void emitLocation(android.location.Location loc) {
+        if (loc == null || bridge == null) return;
+        JSONObject data = new JSONObject();
+        try {
+            data.put("latitude", loc.getLatitude());
+            data.put("longitude", loc.getLongitude());
+            data.put("accuracy", loc.getAccuracy());
+            data.put("altitude", loc.getAltitude());
+            data.put("speed", loc.getSpeed());
+            data.put("bearing", loc.getBearing());
+            data.put("time", loc.getTime());
+        } catch (Exception ignored) { }
+        bridge.sendEvent("location", "", data);
+    }
+
+    // ── notification channels ────────────────────────────────────────────
+
+    private void notifyChannel(final String requestId, final JSONObject msg) {
+        final String id = msg.optString("id", "");
+        if (id.isEmpty()) {
+            fail(requestId, "a channel id is required");
+            return;
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            // Channels do not exist before Android 8 — nothing to create.
+            reply(requestId, id);
+            return;
+        }
+        NotificationManager manager = (NotificationManager)
+            activity.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (manager == null) {
+            fail(requestId, "no notification manager");
+            return;
+        }
+        NotificationChannel channel = new NotificationChannel(
+            id, msg.optString("name", id), importanceOf(
+                msg.optString("importance", "default")));
+        String description = msg.optString("description", "");
+        if (!description.isEmpty()) channel.setDescription(description);
+        channel.enableVibration(msg.optBoolean("vibrate", true));
+        channel.enableLights(msg.optBoolean("lights", true));
+        channel.setShowBadge(msg.optBoolean("badge", true));
+        manager.createNotificationChannel(channel);
+        reply(requestId, id);
+    }
+
+    private int importanceOf(String name) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return 3;
+        switch (name) {
+            case "min":    return NotificationManager.IMPORTANCE_MIN;
+            case "low":    return NotificationManager.IMPORTANCE_LOW;
+            case "high":   return NotificationManager.IMPORTANCE_HIGH;
+            case "urgent": return NotificationManager.IMPORTANCE_HIGH;
+            default:       return NotificationManager.IMPORTANCE_DEFAULT;
+        }
+    }
+}

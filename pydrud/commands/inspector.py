@@ -14,7 +14,7 @@ import os
 import socket
 import sys
 import time
-from typing import Any, Optional
+from typing import Optional
 
 BOX = {"tl": "┌", "tr": "┐", "bl": "└", "br": "┘", "h": "─", "v": "│",
        "t": "├", "l": "└"}

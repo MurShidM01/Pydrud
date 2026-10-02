@@ -12,7 +12,10 @@ template with a representative context and parses the result with
     python tools/check_java.py                       # all templates
     python tools/check_java.py android/ViewFactory.java.j2
 
-It checks syntax, not types: cross-class calls still need a real build.
+It then resolves every call between the generated classes with
+``pydrud.android.javacheck``, so a missing method on a sibling class
+(``advanced.setEventDispatcher(d)``) is reported here rather than two
+minutes into a Gradle build.
 """
 
 from __future__ import annotations
@@ -59,7 +62,23 @@ def check(name: str) -> tuple[bool, str]:
     return True, f"{len(source.splitlines())} lines"
 
 
+def symbol_check(names: list[str]) -> int:
+    """Cross-class symbol resolution over the whole generated source set."""
+    from pydrud.android.javacheck import check_sources
+
+    env = Environment(loader=FileSystemLoader(str(TEMPLATES)),
+                      keep_trailing_newline=True)
+    rendered = {name: env.get_template(name).render(**CONTEXT)
+                for name in names}
+    problems = check_sources(rendered)
+    for problem in problems:
+        print(f"FAIL {problem}")
+    print(f"{len(problems)} unresolved symbol(s)")
+    return 1 if problems else 0
+
+
 def main() -> int:
+    sys.path.insert(0, str(REPO))
     names = sys.argv[1:]
     if not names:
         names = sorted(
@@ -71,7 +90,10 @@ def main() -> int:
         print(f"{'OK  ' if ok else 'FAIL'} {name:<44} {detail}")
         failures += not ok
     print(f"\n{len(names) - failures}/{len(names)} templates parse")
-    return 1 if failures else 0
+    if failures:
+        return 1
+    print()
+    return symbol_check(names)
 
 
 if __name__ == "__main__":

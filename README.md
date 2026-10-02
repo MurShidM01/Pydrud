@@ -139,7 +139,7 @@ should be treated as a fully certified production matrix.
 | No XML, no Java | Even `themes.xml` is generated from the Python palette — `pydrud init --accent "#FF0EA5E9"` |
 | Data Layer | SQLite `Database`, `Model` ORM with migrations, and a TTL `Cache` |
 | PyPI on Android | 119 verified packages installable with `pydrud pip add` |
-| Background & Hardware | WorkManager jobs, foreground services, push, camera, sensors, biometrics, BLE, NFC, audio |
+| Background & Hardware | WorkManager jobs, foreground services, push, camera preview/capture, sensors, biometrics, audio |
 | Design system | `Theme` + `Tokens` — colours, radii, sizes, depth, motion and type live in Python and drive the native renderer |
 | Responsive | Live device metrics (rotation, split screen, insets, font scale) drive breakpoints, percent units and adaptive widgets |
 | Customisable navigation | Bottom navigation and tabs Pydrud draws itself — indicator, labels, colours, motion, shape, badges |
@@ -272,12 +272,23 @@ the release plumbing you need to put an app on the Play Store.
 | **Navigation** | Pattern routes (`/items/:id`, `/files/*rest`), query strings, guards and redirects, nested navigators, deep links and 7 screen transitions |
 | **PyPI packages** | `pydrud pip add yt-dlp` — 119 verified Android-compatible packages wired into Chaquopy automatically |
 | **Background** | WorkManager jobs with constraints, foreground services with progress, FCM push and notification routing |
-| **Hardware** | Camera preview + capture + scanning, sensors, biometrics, Bluetooth LE, NFC, audio record/play, TTS and speech-to-text |
+| **Hardware** | Camera preview + capture + torch/zoom/video/barcode scanning, Bluetooth LE, NFC, sensors, biometrics, audio record/play, speech-to-text and TTS — every documented native command has a handler |
 | **Security** | `page.secure` — EncryptedSharedPreferences-backed keystore storage |
 | **Graphics** | `Canvas` with paths, gradients, transforms, sparklines and pies; `AnimationController` + `Tween` + `Sequence_` for explicit animations |
 | **Widgets** | `CameraPreview`, `MapView`, `RichText`, `Markdown`, `ReorderableList`, virtualising `InfiniteList` |
 | **Release** | `pydrud keygen` (upload keystore), `pydrud icons` (every density + adaptive + splash), `pydrud permissions`, R8 shrinking |
 | **DX** | Stateful hot reload (your counters survive a save), `pydrud inspect` widget inspector, `pydrud docs` offline API reference |
+
+### Native coverage
+
+Every command in the Python service API has a handler in the generated
+Android runtime: `pydrud.services.native.UNIMPLEMENTED_COMMANDS` is empty,
+and `tests/test_native_coverage.py` fails the build if that ever stops
+being true.
+
+A few widget properties are still inert (the widget renders, the
+refinement is ignored) — see `pydrud.compatibility.NATIVE_IGNORED_PROPS`,
+e.g. `Chart(labels=…)`, `CircularProgress(stroke=…)`, `Rating(half=True)`.
 
 ### Data layer
 
@@ -425,6 +436,7 @@ def dashboard(page):
 | **Scaffold overlays** | `Scaffold(floating_action_button=...)` renders a real floating FAB via absolute positioning |
 | **page.toast / snack_bar / vibrate / close** | Direct access to common Android affordances |
 | **Lifecycle hooks** | `app.on_lifecycle("resume"/"pause"/"stop"/"destroy", cb)` |
+| **Push & audio hooks** | `app.on_push(cb)`, `app.on_push_token(cb)` (FCM token refresh) and `app.on_audio_complete(cb)` |
 | **Error isolation** | An exception in one event handler is reported via `app.on_error(...)` instead of killing the app |
 | **Self-bootstrapping Gradle** | Generated projects build without a checked-in `gradle-wrapper.jar` — the launcher downloads Gradle once |
 | **Unique package names** | `pydrud init app1 --org com.acme` → `com.acme.app1` (apps no longer overwrite each other) |

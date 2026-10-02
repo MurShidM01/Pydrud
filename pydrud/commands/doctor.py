@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import sys
 
-from pydrud.utils.colors import ok, fail, warn, info, header
+from pydrud.utils.colors import ok, fail, warn, header
 
 _MIN_JAVA_VERSION = 17
 _MIN_SDK_VERSION = 33

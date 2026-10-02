@@ -36,6 +36,9 @@ PERMISSIONS = {
     "sms": "RECEIVE_SMS",
     "bluetooth": "BLUETOOTH_CONNECT",
     "bluetooth_scan": "BLUETOOTH_SCAN",
+    "bluetooth_advertise": "BLUETOOTH_ADVERTISE",
+    "bluetooth_legacy": "BLUETOOTH",
+    "bluetooth_admin": "BLUETOOTH_ADMIN",
     "nfc": "NFC",
     "biometric": "USE_BIOMETRIC",
     "activity": "ACTIVITY_RECOGNITION",
@@ -115,7 +118,7 @@ def create_keystore(project_dir: str, *, alias: str = "release",
     os.chmod(properties, 0o600)
 
     print(f"  [ok] Keystore:   android/{filename}")
-    print(f"  [ok] Properties: android/keystore.properties (chmod 600)")
+    print("  [ok] Properties: android/keystore.properties (chmod 600)")
     print("\n  Back up both files somewhere safe — losing them means you can "
           "never update\n  this app on Google Play again.")
     print("\n  Next: pydrud build --release --bundle   # signed .aab for Play")
@@ -129,7 +132,9 @@ def signing_status(project_dir: str) -> dict:
         return {"configured": False, "reason": "no keystore.properties",
                 "signed_with": "debug key"}
     values = {}
-    for line in open(properties, encoding="utf-8"):
+    with open(properties, encoding="utf-8") as handle:
+        property_lines = handle.readlines()
+    for line in property_lines:
         if "=" in line and not line.strip().startswith("#"):
             key, _, value = line.partition("=")
             values[key.strip()] = value.strip()
@@ -154,7 +159,8 @@ def generate_icons(project_dir: str, *, source: Optional[str] = None,
     name, so a brand-new project still looks deliberate on the home screen.
     """
     try:
-        from PIL import Image, ImageDraw, ImageFont
+        # Availability probe — the helpers below import what they need.
+        from PIL import Image  # noqa: F401
     except ImportError:                                  # pragma: no cover
         print("  [x] Pillow is required: pip install pillow")
         return []
@@ -230,7 +236,7 @@ def generate_icons(project_dir: str, *, source: Optional[str] = None,
     written.append(splash)
 
     print(f"  [ok] Launcher icons for {len(ICON_SIZES)} densities")
-    print(f"  [ok] Adaptive icon + splash drawable")
+    print("  [ok] Adaptive icon + splash drawable")
     if splash_text:
         print(f"  [i]  Splash text '{splash_text}' — set it in themes.xml")
     return written

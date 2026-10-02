@@ -6,7 +6,7 @@ import unittest
 
 from pydrud import (
     Computed, ReactiveList, Result, ResultError, State, Store, TaskRunner,
-    Timer, debounce, throttle,
+    debounce, throttle,
 )
 from pydrud.core.tasks import Timer as CoreTimer
 from pydrud.widgets.forms import (

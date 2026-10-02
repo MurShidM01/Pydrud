@@ -11,7 +11,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from pydrud import (
-    Button, Chip, Column, GestureDetector, ListTile, Scaffold, Switch, Tab,
+    Button, Chip, Column, GestureDetector, ListTile, Scaffold, Tab,
     Tabs, Text, TextField,
 )
 from pydrud.testing import AppTester
