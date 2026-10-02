@@ -19,8 +19,12 @@ MAX_FRAME_BYTES = 2 * 1024 * 1024
 DEFAULT_RENDER_TIMEOUT = 5.0
 
 
-class ProtocolError(RuntimeError):
-    """A structured protocol violation."""
+class ProtocolError(ValueError):
+    """A structured protocol violation.
+
+    Subclasses ``ValueError`` for compatibility with the pre-v2 decoder,
+    which exposed JSON parsing failures as value errors.
+    """
 
 
 @dataclass(frozen=True, slots=True)

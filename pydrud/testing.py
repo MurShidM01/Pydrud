@@ -182,6 +182,22 @@ class FakeDevice:
                 self.patch_batches.append(patches)
                 for patch in patches:
                     self._apply_patch(patch)
+            elif cmd == "render_transaction":
+                # Mirror the production BridgeService transaction contract:
+                # apply atomically, then ACK the exact revision so Python can
+                # advance its confirmed snapshot.
+                kind = msg.get("kind", "")
+                if kind == "snapshot":
+                    self.root = RenderedNode(msg["tree"])
+                    self.full_renders += 1
+                elif kind == "patch":
+                    patches = msg.get("patches", [])
+                    self.patch_batches.append(patches)
+                    for patch in patches:
+                        self._apply_patch(patch)
+                else:
+                    raise ValueError(f"unknown render transaction kind: {kind!r}")
+                self._send_event_ack(msg)
             elif cmd == "finish_activity":
                 self._activity_finished = True
             request_id = msg.get("request_id")
@@ -190,6 +206,16 @@ class FakeDevice:
             self._auto_respond(msg, request_id)
 
     # ── native service emulation ─────────────────────────────────────────
+
+    def _send_event_ack(self, message: dict) -> None:
+        self._send({
+            "type": "render_ack",
+            "key": "",
+            "data": {
+                "transaction_id": message.get("transaction_id", ""),
+                "revision": message.get("revision", 0),
+            },
+        })
 
     def on_command(self, cmd: str, value: Any) -> "FakeDevice":
         """Answer ``cmd`` with *value* (or ``value(msg)`` when callable)."""

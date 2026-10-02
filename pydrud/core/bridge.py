@@ -113,12 +113,16 @@ class BridgeProtocol:
 
     @staticmethod
     def decode_message(line: str) -> Optional[dict]:
-        """Decode a JSON message from Android.
+        """Decode an Android event while preserving the legacy API contract.
 
-        Invalid JSON is treated as a protocol error rather than silently
-        disappearing, which lets callers decide whether to close or resync.
+        The low-level decode_envelope decoder raises ProtocolError for
+        malformed frames. The public bridge API historically returned None
+        for malformed input, so keep that behavior here.
         """
-        return decode_envelope(line)
+        try:
+            return decode_envelope(line)
+        except ProtocolError:
+            return None
 
     @staticmethod
     def encode_render(patches: list[dict]) -> str:
