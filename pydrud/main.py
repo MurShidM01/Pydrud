@@ -377,6 +377,23 @@ class App:
         self._event_dispatcher.register_tree(tree)
         return tree
 
+    def _materialize_elements(self, tree: Widget) -> None:
+        """Refresh persistent logical element metadata without touching Views."""
+        def walk(widget: Widget, parent_key: Optional[str] = None, index: int = 0):
+            props = widget._serialise_props()
+            element, _ = self._elements.upsert(
+                widget.key,
+                widget._widget_type,
+                parent_key=parent_key,
+                index=index,
+                desired_props=props,
+            )
+            element.listeners = set(widget.event_handlers)
+            element.children = [child.key for child in widget.children]
+            for i, child in enumerate(widget.children):
+                walk(child, widget.key, i)
+        walk(tree)
+
     # ── Hot Reload ─────────────────────────────────────────────────────────
 
     def enable_hot_reload(self, watch_dirs: list[str] | None = None) -> None:
@@ -785,6 +802,10 @@ class App:
             self._resolve_result(data)
             return
 
+        if etype in ("render_ack", "render_nack"):
+            self._handle_render_confirmation(etype, data)
+            return
+
         if etype == "ready":
             self._handle_ready(data)
             return
@@ -862,8 +883,40 @@ class App:
         except Exception as exc:
             self._report_error(exc)
 
+    def _handle_render_confirmation(self, event_type: str, data: dict) -> None:
+        tx_id = str(data.get("transaction_id", ""))
+        tx = self._inflight.pop(tx_id, None)
+        if tx is None:
+            return
+        revision = int(data.get("revision", 0) or 0)
+        if revision != tx.revision:
+            self._report_error(RuntimeError(
+                f"Render confirmation mismatch for {tx_id}: "
+                f"expected {tx.revision}, got {revision}"
+            ))
+            return
+        if event_type == "render_ack":
+            self._confirmed_revision = revision
+            if self._desired_tree is not None:
+                self._snapshot = self._desired_tree.clone()
+            return
+
+        self._confirmed_revision = int(data.get("native_revision", 0) or 0)
+        if self._desired_tree is None or not (self._connected and self._transport):
+            return
+        self._desired_revision = max(self._desired_revision, self._confirmed_revision) + 1
+        recovery = RenderTransaction.create(
+            revision=self._desired_revision,
+            base_revision=self._confirmed_revision,
+            kind="snapshot",
+            payload={"tree": self._desired_tree.to_dict()},
+        )
+        self._inflight[recovery.tx_id] = recovery
+        self._send(self._bridge.encode_transaction(recovery))
+
     def _handle_ready(self, d: dict) -> None:
-        """First contact: store the device metrics and render for real."""
+        """First contact: negotiate native capabilities, then render."""
+        self._native_capabilities = dict(d.get("capabilities") or {})
         self._apply_metrics(d)
         # Device metrics may change the layout — re-render with real sizes.
         self.render()
