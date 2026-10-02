@@ -589,13 +589,20 @@ class App:
         Widget mutations from a worker thread must go through this, exactly
         like ``runOnUiThread`` on Android.
         """
+        if self._ui_thread_id == threading.get_ident():
+            try:
+                fn(*args, **kwargs)
+            except Exception as exc:
+                self._report_error(exc)
+            return
         if not self._running:
-            # No event loop yet (tests, CLI, headless renders): run inline so
-            # callers never silently lose work.
             fn(*args, **kwargs)
             return
-        self._ui_queue.put((fn, args, kwargs))
-        self._event_queue.put("__ui__")
+        try:
+            self._ui_queue.put_nowait((fn, args, kwargs))
+            self._event_queue.put_nowait("__ui__")
+        except queue.Full as exc:
+            raise RuntimeError("Pydrud UI queue is full") from exc
 
     def _drain_ui_queue(self) -> None:
         while True:
@@ -737,7 +744,8 @@ class App:
             self._event_queue.put(None)  # Sentinel: stop the event loop.
 
     def _event_loop(self):
-        """Process incoming events from the queue on the main thread."""
+        """Process incoming events on the single Python UI actor."""
+        self._ui_thread_id = threading.get_ident()
         try:
             while self._running:
                 try:
@@ -748,8 +756,10 @@ class App:
                     break
                 self._handle_raw_event(raw)
         finally:
+            self._ui_thread_id = None
             self._connected = False
             self._cancel_pending()
+            self._inflight.clear()
             if self._transport:
                 try:
                     self._transport.close()
