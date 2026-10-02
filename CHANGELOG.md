@@ -53,6 +53,17 @@ yet.
   and components are capability-gated rather than always emitted.
 
 ### Fixed
+* **CI protocol parity.** The in-process `FakeDevice` now understands v2
+  render transactions and sends render acknowledgements, so AppTester exercises
+  the same transaction boundary as the native bridge.
+* **Backward-compatible protocol errors.** Invalid JSON protocol frames remain
+  `ValueError`-compatible while carrying the new structured protocol error type.
+* **Backward-compatible subscriptions.** Subscription handles are callable,
+  preserving existing `off()` / `unsubscribe()` usage while supporting explicit
+  `.cancel()` / `.dispose()`.
+* **Task error compatibility.** Legacy `TaskRunner` behavior still reports
+  worker errors without raising from `.result()`; strict propagation is available
+  with `propagate_exceptions=True`.
 * Reduced the chance of Python state racing ahead of the last native render
   acknowledgement during rapid successive updates.
 * Prevented duplicate widget identity from silently collapsing keyed diff
