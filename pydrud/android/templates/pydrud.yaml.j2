@@ -3,6 +3,12 @@ app_name: "{{ project_name }}"
 package: "{{ package }}"
 min_sdk: {{ min_sdk }}
 target_sdk: {{ target_sdk }}
+compile_sdk: {{ compile_sdk }}
 ndk: {{ ndk }}
-python_version: "3.11"
+python_version: "{{ python_version }}"
+framework_version: "{{ pydrud_runtime_version | default("2.0.0") }}"
+protocol_version: {{ protocol_version | default(2) }}
+chaquopy_version: "{{ chaquopy_version | default("17.0.0") }}"
+agp_version: "{{ agp_version | default("8.13.2") }}"
+gradle_version: "{{ gradle_version | default("8.13") }}"
 assets_dir: "assets"
