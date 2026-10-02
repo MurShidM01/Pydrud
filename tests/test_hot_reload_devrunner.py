@@ -7,13 +7,11 @@ from __future__ import annotations
 import json
 import os
 import socket
-import sys
 import tempfile
-import time
 import unittest
 
-from pydrud import App, State, Store, Text, Column
-from pydrud.core.devserver import DevServer, DEFAULT_DEV_PORT
+from pydrud import App, State, Text
+from pydrud.core.devserver import DevServer
 from pydrud.runtime.navigation import Router
 from pydrud.utils import tui
 from pydrud.commands.devrunner import DevRunner, _KeyReader

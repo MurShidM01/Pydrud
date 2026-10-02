@@ -9,7 +9,6 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 
 from pydrud.utils.colors import ok, fail, info, warn, header, print_step
 
