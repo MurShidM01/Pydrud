@@ -1,0 +1,161 @@
+"""Gallery — a tour of the component library, in three tabs."""
+
+from pydrud import (
+    Animation, Avatar, Badge, Button, Card, Chart, Chip, Column, Container,
+    Divider, Dismissible, FadeIn, GestureDetector, Icon, Icons, ListTile,
+    ProgressBar, Radius, Rating, Row, SearchBar, SegmentedButton, SizedBox,
+    Spacing, Tab, Tabs, Text, Theme,
+)
+
+from app.runtime import refresh
+from app.state import counter, interests, query, rating, tab_index
+from app.ui import shell
+
+
+def showcase_screen(page):
+    """Build the gallery screen into *page*."""
+
+    def select_tab(event):
+        tab_index.value = int(event.value or 0)
+        refresh()
+
+    def toggle_interest(name):
+        def handler(event):
+            chosen = set(interests.value)
+            if event.value:
+                chosen.add(name)
+            else:
+                chosen.discard(name)
+            interests.value = chosen
+            refresh()
+        return handler
+
+    def set_rating(event):
+        rating.value = float(event.value or 0)
+        refresh()
+
+    def search(event):
+        query.value = str(event.value or "")
+        refresh()
+
+    def confirm_delete(_event):
+        page.dialog.confirm(
+            "Delete this item?", title="Are you sure?",
+        ).then(lambda yes: page.toast("Deleted" if yes else "Kept"))
+
+    def save_note(_event):
+        page.storage.set("note", query.value)
+        page.haptics.impact("light")
+        page.snack_bar("Saved to device storage", action="OK")
+
+    components_tab = Column(key="tab_components", spacing=Spacing.LG,
+                            children=[
+        SizedBox(height=Spacing.MD),
+        SearchBar(query.value, key="showcase_search",
+                  hint="Search components").on_change(search),
+        Row(key="showcase_people", spacing=Spacing.MD,
+            vertical_alignment="center", children=[
+                Avatar(initials="AD", key="avatar_ad"),
+                Avatar(icon=Icons.PERSON, key="avatar_icon",
+                       bg=Theme.secondary),
+                Badge(3, key="avatar_badge",
+                      child=Icon(Icons.NOTIFICATIONS, key="bell", size=26,
+                                 color=Theme.text_secondary)),
+                Container(key="people_gap", expand=1),
+                Rating(rating.value, key="showcase_rating",
+                       size=22).on_change(set_rating),
+            ]),
+        Row(key="showcase_chips", spacing=Spacing.SM, scroll=True, children=[
+            Chip(name, key=f"chip_{name}", variant="filter",
+                 selected=name in interests.value).on_change(
+                     toggle_interest(name))
+            for name in ("Python", "Android", "Flutter", "Kotlin")
+        ]),
+        Card(key="showcase_list", padding=0, child=Column(
+            key="showcase_list_body", children=[
+                ListTile("Profile", key="tile_profile",
+                         subtitle="Name and photo", leading=Icons.PERSON,
+                         trailing=Icons.CHEVRON_RIGHT),
+                Divider(key="tile_divider", indent=Spacing.HUGE),
+                ListTile("Notifications", key="tile_notify",
+                         subtitle="Sounds and badges",
+                         leading=Icons.NOTIFICATIONS,
+                         trailing=Icons.CHEVRON_RIGHT),
+            ])),
+        Dismissible(key="swipe_row", background=Theme.error,
+                    child=Card(key="swipe_card", child=Row(
+                        key="swipe_body", spacing=Spacing.MD,
+                        vertical_alignment="center", children=[
+                            Icon(Icons.DRAG, key="swipe_icon", size=20,
+                                 color=Theme.text_secondary),
+                            Text("Swipe me away", key="swipe_text", size=15,
+                                 color=Theme.text),
+                        ])),
+                    on_dismiss=lambda _e: page.toast("Dismissed")),
+    ])
+
+    data_tab = Column(key="tab_data", spacing=Spacing.LG, children=[
+        SizedBox(height=Spacing.MD),
+        Card(key="chart_card", padding=Spacing.LG, child=Column(
+            key="chart_body", spacing=Spacing.MD, children=[
+                Text("Weekly taps", key="chart_title", size=16, weight=600,
+                     color=Theme.text),
+                Chart([counter.value, 3, 7, 4, 9, 6, 8], key="showcase_chart",
+                      kind="bar", labels=["M", "T", "W", "T", "F", "S", "S"]),
+            ])),
+        Card(key="goal_card", padding=Spacing.LG, child=Column(
+            key="goal_body", spacing=Spacing.SM, children=[
+                Row(key="goal_head", vertical_alignment="center", children=[
+                    Text("Daily goal", key="goal_title", size=15, weight=500,
+                         color=Theme.text),
+                    Container(key="goal_gap", expand=1),
+                    Text(f"{min(counter.value, 10)}/10", key="goal_label",
+                         size=14, weight=600, color=Theme.primary),
+                ]),
+                ProgressBar(min(counter.value / 10, 1.0), key="goal_bar"),
+            ])),
+        SegmentedButton(["Day", "Week", "Month"], key="range_picker",
+                        selected=1),
+    ])
+
+    actions_tab = Column(key="tab_actions", spacing=Spacing.MD, children=[
+        SizedBox(height=Spacing.MD),
+        FadeIn(key="actions_intro", animation=Animation.normal(),
+               child=Text("Native power, from Python.", key="actions_text",
+                          size=16, weight=600, color=Theme.text)),
+        Button("Confirm dialog", key="dialog_btn", full_width=True,
+               variant="tonal").on_click(confirm_delete),
+        Button("Save to storage", key="storage_btn", full_width=True,
+               variant="tonal").on_click(save_note),
+        Button("Share this app", key="share_btn", full_width=True,
+               variant="outlined").on_click(
+                   lambda _e: page.share.text("Built with Pydrud!")),
+        GestureDetector(
+            key="gesture_box",
+            child=Container(key="gesture_card", bg=Theme.surface_variant,
+                            width="match",
+                            padding=Spacing.XL, border_radius=Radius.LG,
+                            alignment="center",
+                            child=Text("Double-tap or swipe me",
+                                       key="gesture_text", size=14,
+                                       color=Theme.text_secondary)),
+            on_double_tap=lambda _e: page.toast("Double tap!"),
+            on_swipe_left=lambda _e: page.toast("Swiped left"),
+            on_swipe_right=lambda _e: page.toast("Swiped right"),
+        ),
+    ])
+
+    page.add(shell(
+        page,
+        key="showcase",
+        title="Gallery",
+        body=[Tabs(
+            [
+                Tab("Components", content=components_tab),
+                Tab("Data", content=data_tab),
+                Tab("Actions", content=actions_tab),
+            ],
+            key="showcase_tabs",
+            selected=tab_index.value,
+        ).on_change(select_tab)],
+    ))

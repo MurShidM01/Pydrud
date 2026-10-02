@@ -1,0 +1,77 @@
+"""Reusable pieces shared by the screens.
+
+Small helpers keep every screen consistent: one section header, one stat
+tile, one empty state. That consistency is most of what makes a UI feel
+designed rather than assembled.
+"""
+
+from pydrud import (
+    Card, Colors, Column, Container, EdgeInsets, Icon, Radius, Row, SizedBox,
+    Spacing, Text, Theme,
+)
+
+
+def section(title, key, *, action=None):
+    """A quiet, all-caps section label — the spine of a tidy settings page."""
+    children = [Text(title.upper(), key=f"{key}_label", size=12, weight=700,
+                     color=Theme.text_secondary,
+                     style={"font": {"letterSpacing": 0.08}})]
+    if action is not None:
+        children.extend([Container(key=f"{key}_spacer", expand=1), action])
+    return Container(
+        key=key,
+        width="match",
+        padding=EdgeInsets(left=Spacing.XS, top=Spacing.SM, bottom=Spacing.XXS),
+        child=Row(key=f"{key}_row", vertical_alignment="center",
+                  children=children),
+    )
+
+
+def stat(label, value, icon, key, color=None):
+    """One compact metric tile."""
+    tint = color or Theme.primary
+    return Card(
+        key=key,
+        expand=1,
+        padding=Spacing.LG,
+        child=Column(key=f"{key}_body", spacing=Spacing.XS, children=[
+            Container(
+                key=f"{key}_chip",
+                bg=Colors.with_opacity(tint, 0.14),
+                border_radius=Radius.SM,
+                padding=Spacing.SM,
+                child=Icon(icon, key=f"{key}_icon", size=18, color=tint),
+            ),
+            SizedBox(height=Spacing.XS),
+            Text(value, key=f"{key}_value", size=22, weight=700,
+                 color=Theme.text),
+            Text(label, key=f"{key}_label", size=12,
+                 color=Theme.text_secondary),
+        ]),
+    )
+
+
+def empty_state(title, subtitle, icon, key):
+    """What the user sees before they have any data — never a blank box."""
+    return Container(
+        key=key,
+        width="match",
+        padding=EdgeInsets(top=Spacing.XL, bottom=Spacing.XL),
+        child=Column(key=f"{key}_body", spacing=Spacing.XS,
+                     horizontal_alignment="center", children=[
+                         Container(
+                             key=f"{key}_badge",
+                             bg=Theme.surface_variant,
+                             border_radius=Radius.PILL,
+                             padding=Spacing.LG,
+                             child=Icon(icon, key=f"{key}_icon", size=24,
+                                        color=Theme.text_secondary),
+                         ),
+                         SizedBox(height=Spacing.SM),
+                         Text(title, key=f"{key}_title", size=15, weight=600,
+                              color=Theme.text),
+                         Text(subtitle, key=f"{key}_sub", size=13,
+                              color=Theme.text_secondary,
+                              text_align="center"),
+                     ]),
+    )

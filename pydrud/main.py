@@ -42,6 +42,16 @@ class App:
         App(target=main).run()
     """
 
+    #: The most recently created :class:`App`. Screen code can reach the
+    #: running app through :meth:`current` without threading it through
+    #: every function. ``None`` before the first app is constructed.
+    _active: "Optional[App]" = None
+
+    @classmethod
+    def current(cls) -> "Optional[App]":
+        """The most recently created app, or ``None``."""
+        return cls._active
+
     def __init__(
         self,
         *,
@@ -53,6 +63,7 @@ class App:
         hot_reload: bool = False,
         **kwargs,
     ):
+        App._active = self
         self.target = target
         self.title = title
         self.host = host
@@ -79,6 +90,9 @@ class App:
         self._transport: Optional[socket.socket] = None
         # ── Thread-safe event queue ─────────────────────────────────
         self._event_queue: queue.Queue = queue.Queue(maxsize=1024)
+        #: Number of event lines fully handled by the event loop. Test
+        #: harnesses use it to tell "nothing queued yet" from "all done".
+        self._events_handled = 0
         self._shutdown_event = threading.Event()
         self._reader_thread: Optional[threading.Thread] = None
         self._running = False
@@ -824,7 +838,10 @@ class App:
                     continue
                 if raw is None:
                     break
-                self._handle_raw_event(raw)
+                try:
+                    self._handle_raw_event(raw)
+                finally:
+                    self._events_handled += 1
         finally:
             self._ui_thread_id = None
             self._connected = False

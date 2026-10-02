@@ -2,6 +2,52 @@
 
 All notable changes to Pydrud are documented here.
 
+## [1.7.0] — A project you can grow into
+
+`pydrud init` used to hand you a 700-line `src/app/main.py`. That is a demo,
+not a project: the first thing every team did was take it apart. The starter
+app now ships as the structure a real app wants, and the test harness tells
+the truth about when an interaction has landed.
+
+### Changed — generated project layout (breaking for the scaffold)
+The same starter app, same widgets, same keys, now laid out as:
+
+```
+src/app/
+├── main.py        route registration + the start-up entry point (< 60 lines)
+├── config.py      routes, navigation destinations, design presets
+├── state.py       the State objects every screen shares
+├── runtime.py     the router and the live App handle (`refresh()`)
+├── jobs.py        background work run by WorkManager
+├── ui/            shell.py (the page shell) + components.py
+└── screens/       home.py, settings.py, gallery.py — one per destination
+```
+
+Existing projects are untouched: `pydrud sync` only regenerates `android/`,
+never your Python. To adopt the layout, scaffold a new project and move your
+screens across — `from app.runtime import refresh, router` replaces the
+module-level globals that used to live in `main.py`.
+
+### Added
+* **`README.md` in every new project** — how to run it, what each directory
+  is for, and how to add a screen.
+* **`tests/test_app.py` in every new project** — three `AppTester` tests that
+  pass from the first commit, so a project starts out testable.
+* **`App.current()`** — the most recently created app. Screen code can reach
+  the running app (`refresh()`) without a module-level global, which is what
+  makes the split above possible.
+
+### Fixed
+* **`AppTester.settle()` returned too early.** It only checked that the event
+  queue was empty, which is also true while an event is still in flight on
+  the socket — so a `tap()` could silently do nothing and the next assertion
+  would read stale UI. It now waits for the app to handle everything the
+  device has sent *and* for the resulting render to be acknowledged. Taps,
+  typing and toggles are deterministic.
+* **`FakeDevice` text matching missed list tiles.** `shows()` now sees
+  `title`, `subtitle`, `message` and `placeholder` text, not just
+  `value`/`text`/`label`/`hint`.
+
 ## [1.6.0] — Every native command implemented
 
 The Python API always exposed Bluetooth, NFC, camera extras, speech and

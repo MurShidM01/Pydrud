@@ -1,0 +1,40 @@
+"""Tests for {{ project_name }}.
+
+``AppTester`` boots the app against a fake device, so these run anywhere —
+no emulator, no Gradle. Run them with ``pydrud test`` or ``pytest``.
+"""
+
+import os
+import sys
+import unittest
+
+sys.path.insert(0, os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
+
+from pydrud.testing import AppTester  # noqa: E402
+
+from app.main import main  # noqa: E402
+
+
+class TestApp(unittest.TestCase):
+    def setUp(self):
+        self.app = AppTester(main, title="{{ project_name }}").start()
+
+    def tearDown(self):
+        self.app.stop()
+
+    def test_home_screen_renders(self):
+        self.assertTrue(self.app.shows("TAPS TODAY"))
+
+    def test_counter_increments(self):
+        self.app.tap("tap_btn")
+        self.assertEqual(self.app.prop("counter_value", "value"), "1")
+
+    def test_adding_a_todo(self):
+        self.app.type_in("todo_input", "Buy milk")
+        self.app.tap("todo_add")
+        self.assertTrue(self.app.shows("Buy milk"))
+
+
+if __name__ == "__main__":
+    unittest.main()

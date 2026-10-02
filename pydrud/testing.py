@@ -73,7 +73,8 @@ class RenderedNode:
         """Every string shown on screen, in render order."""
         out = []
         for node in self.walk():
-            for field in ("value", "text", "label", "hint"):
+            for field in ("value", "text", "label", "hint", "title",
+                          "subtitle", "message", "placeholder"):
                 v = node.props.get(field)
                 if isinstance(v, str) and v:
                     out.append(v)
@@ -103,6 +104,9 @@ class FakeDevice:
         self.commands: list[dict] = []
         self.patch_batches: list[list[dict]] = []
         self.full_renders = 0
+        #: Event lines written to the app. Harnesses compare this with the
+        #: app's handled count so they can wait for events still in flight.
+        self.events_sent = 0
 
         self._conn: Optional[socket.socket] = None
         self._thread: Optional[threading.Thread] = None
@@ -323,6 +327,7 @@ class FakeDevice:
         if self._conn is None:
             raise RuntimeError("FakeDevice: no app connected")
         self._conn.sendall((json.dumps(payload) + "\n").encode("utf-8"))
+        self.events_sent += 1
 
     def send_ready(self) -> None:
         self._send({
@@ -605,15 +610,34 @@ class AppTester:
         return self
 
     def settle(self, timeout: float = 1.0) -> "AppTester":
-        """Wait until the app has drained its event queue."""
+        """Wait until the app has handled everything this test has sent.
+
+        An empty queue is not enough on its own: an event can still be in
+        flight on the socket, which used to make taps look like no-ops.
+        So we first wait for the app's handled-event counter to catch up
+        with the number of lines the device has written, then for the
+        queue to drain (handlers may enqueue follow-up work).
+        """
         deadline = time.time() + timeout
+        target = self.device.events_sent
         while time.time() < deadline:
-            if self.app._event_queue.empty():
+            if self._quiet(target):
                 time.sleep(0.01)
-                if self.app._event_queue.empty():
+                if self._quiet(target):
                     return self
             time.sleep(0.005)
         return self
+
+    def _quiet(self, target: int) -> bool:
+        """True when nothing is in flight in either direction."""
+        app = self.app
+        if app._events_handled < target or not app._event_queue.empty():
+            return False
+        # A handler may have requested a render that the device has not
+        # applied yet; waiting for it is what makes `prop()` reliable
+        # immediately after `tap()`.
+        return not getattr(app, "_render_pending", False) \
+            and not getattr(app, "_inflight", None)
 
     # ── assertions / queries ─────────────────────────────────────────────
 

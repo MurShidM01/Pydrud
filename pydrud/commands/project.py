@@ -519,9 +519,7 @@ def create_project(
     print(f"    Directory:  {project_dir}\n")
 
     # ── 1.  Python source ────────────────────────────────────────────────
-    _ensure_dir(f"{project_dir}/src/app")
-    _write_template("python/main.py.j2", f"{project_dir}/src/app/main.py", ctx)
-    _write_template("python/app.py.j2", f"{project_dir}/src/app/__init__.py", ctx)
+    _render_app_package(project_dir, ctx)
 
     # ── 1b. Bundle pydrud source into the project so Chaquopy can import
     #        it at runtime without needing pip install or network access.
@@ -588,12 +586,50 @@ def create_project(
     # Write a small Python runner script at the top-level
     _write_template("python/run.py.j2", f"{project_dir}/run.py", ctx)
 
+    # ── 5.  Docs and tests ────────────────────────────────────────────────
+    _write_template("README.md.j2", f"{project_dir}/README.md", ctx)
+    _ensure_dir(f"{project_dir}/tests")
+    _write_template("python/project_tests/test_app.py.j2",
+                    f"{project_dir}/tests/test_app.py", ctx)
+    with open(f"{project_dir}/tests/__init__.py", "w", encoding="utf-8") as f:
+        f.write("")
+
     print(ok(f"Project '{name}' created!"))
     print()
     print("  Next steps:")
     print(f"    $ cd {_slugify(name)}")
     print("    $ pydrud run")
     print()
+
+
+#: The generated ``src/app`` package: template → path inside ``src/app``.
+#: One module per concern, so a real app grows by adding files instead of
+#: by growing a single ``main.py``.
+_APP_MODULES = (
+    ("python/app.py.j2",                   "__init__.py"),
+    ("python/main.py.j2",                  "main.py"),
+    ("python/app/config.py.j2",            "config.py"),
+    ("python/app/state.py.j2",             "state.py"),
+    ("python/app/runtime.py.j2",           "runtime.py"),
+    ("python/app/jobs.py.j2",              "jobs.py"),
+    ("python/app/ui/__init__.py.j2",       "ui/__init__.py"),
+    ("python/app/ui/shell.py.j2",          "ui/shell.py"),
+    ("python/app/ui/components.py.j2",     "ui/components.py"),
+    ("python/app/screens/__init__.py.j2",  "screens/__init__.py"),
+    ("python/app/screens/home.py.j2",      "screens/home.py"),
+    ("python/app/screens/settings.py.j2",  "screens/settings.py"),
+    ("python/app/screens/gallery.py.j2",   "screens/gallery.py"),
+)
+
+
+def _render_app_package(project_dir: str, ctx: dict) -> None:
+    """Write the structured ``src/app`` package."""
+    for folder in ("", "ui", "screens"):
+        _ensure_dir(os.path.join(project_dir, "src", "app", folder))
+    for template, relative in _APP_MODULES:
+        _write_template(template,
+                        os.path.join(project_dir, "src", "app", *relative.split("/")),
+                        ctx)
 
 
 # ── Upgrading an existing project ────────────────────────────────────────────

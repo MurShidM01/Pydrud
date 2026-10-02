@@ -1,0 +1,38 @@
+"""Static configuration: routes, destinations and design presets.
+
+Keeping these in one place means a new screen is a two-line change here
+plus one file in ``app/screens/``.
+"""
+
+from pydrud import Colors, Icons, NavItem
+
+#: Display name, used in the app bar and the about card.
+APP_NAME = "{{ project_name }}"
+APP_VERSION = "1.0.0"
+
+#: Route names, in bottom-navigation order. The first is the start
+#: destination: hardware back always returns there.
+ROUTES = ("home", "showcase", "settings")
+
+DESTINATIONS = [
+    NavItem("Home", icon=Icons.HOME, route="home"),
+    NavItem("Gallery", icon=Icons.DASHBOARD, route="showcase"),
+    NavItem("Settings", icon=Icons.SETTINGS, route="settings"),
+]
+
+ACCENTS = [
+    ("Brand", "{{ seed_color | default("#FF6366F1") }}"),
+    ("Teal", Colors.SECONDARY),
+    ("Rose", Colors.ERROR),
+    ("Amber", Colors.ACCENT),
+]
+
+# Design tokens are plain Python values. Changing one restyles every
+# widget — on the Python side *and* in the native renderer.
+CORNERS = {
+    "Sharp":   {"radius_card": 4,  "radius_button": 4,  "radius_input": 6},
+    "Rounded": {"radius_card": 16, "radius_button": 14, "radius_input": 14},
+    "Soft":    {"radius_card": 28, "radius_button": 24, "radius_input": 22},
+}
+
+TEXT_SIZES = {"Small": 0.92, "Normal": 1.0, "Large": 1.12}

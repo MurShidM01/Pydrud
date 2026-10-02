@@ -1,0 +1,54 @@
+# {{ project_name }}
+
+A native Android app written in Python with
+[Pydrud](https://github.com/MurShidM01/Pydrud) {{ pydrud_version }}.
+
+## Run it
+
+```bash
+pydrud run              # build, install and launch on a connected device
+pydrud run --watch      # the same, with hot reload on every save
+python run.py           # headless: build the widget tree on your computer
+pydrud test             # run the tests in tests/
+```
+
+## Project layout
+
+```
+{{ project_name }}/
+├── run.py                  dev runner (headless / bridge client)
+├── pydrud.yaml             SDK, NDK, package name, versions
+├── pydrud.toml             Python packages bundled into the APK
+├── assets/                 images and fonts shipped with the app
+├── android/                the generated native layer — `pydrud sync` refreshes it
+├── tests/                  app tests driven by pydrud.testing.AppTester
+└── src/
+    ├── pydrud_config.py    runtime configuration for the device
+    └── app/
+        ├── main.py         route registration + start-up entry point
+        ├── config.py       routes, navigation destinations, design presets
+        ├── state.py        the State objects every screen shares
+        ├── runtime.py      the router and the live App handle (`refresh()`)
+        ├── jobs.py         background work (WorkManager)
+        ├── ui/             page shell + reusable components
+        └── screens/        one module per screen
+```
+
+## Add a screen
+
+1. Create `src/app/screens/profile.py` with a `profile_screen(page)` function.
+2. Export it from `src/app/screens/__init__.py`.
+3. Register it in `src/app/main.py`: `router.define("profile", profile_screen)`.
+4. Add a `NavItem` to `DESTINATIONS` in `src/app/config.py` if it belongs in
+   the navigation bar.
+
+## Useful commands
+
+| Command | What it does |
+| --- | --- |
+| `pydrud sync` | regenerate `android/` after upgrading Pydrud |
+| `pydrud analyze` | static checks on your Python UI code |
+| `pydrud pip add requests` | bundle a Python package into the APK |
+| `pydrud permissions add camera` | add a permission to the manifest |
+| `pydrud build --release` | signed release build |
+| `pydrud doctor` | check your toolchain |

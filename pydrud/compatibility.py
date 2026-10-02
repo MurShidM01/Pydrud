@@ -26,7 +26,7 @@ class Compatibility:
 
 
 COMPATIBILITY = Compatibility(
-    framework_version="1.6.0",
+    framework_version="1.7.0",
     protocol_version=2,
     android_runtime_version="2.0.0",
     agp_version="8.13.2",
