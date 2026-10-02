@@ -1326,6 +1326,25 @@ public class ViewFactory {
      * wrapper around an icon stays a compact 48dp target instead of
      * stretching across the whole screen.
      */
+    /**
+     * Widget kinds that are expensive to rebuild and hold internal state
+     * worth keeping (scroll position, camera session, WebView page, canvas
+     * surface). These are re-used in place when a diff re-creates the same
+     * key with the same type; everything else is cheap enough to rebuild.
+     */
+    private static boolean isReusableType(String type) {
+        switch (type) {
+            case "Canvas":
+            case "MapView":
+            case "CameraPreview":
+            case "ReorderableList":
+            case "InfiniteList":
+                return true;
+            default:
+                return false;
+        }
+    }
+
     private static boolean fillsWidthByDefault(String type) {
         switch (type) {
             case "Column": case "Row": case "Card":
