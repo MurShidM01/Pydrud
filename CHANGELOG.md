@@ -32,6 +32,13 @@ silent hang, a no-op, or a two-minute Gradle error.
   immediately even with no subscribers.
 * **Selector leak.** `Store.select()` kept every selector forever;
   `Selector.dispose()` (and `Store.unselect()`) detach one.
+* **Animations ran for the wrong length of time.** `AnimationController`
+  re-derived its clock from the *eased* value each frame, so the curve was
+  applied repeatedly: `ease_in`/`bounce` animations never reached the end and
+  `ease_out` finished in 8 frames instead of 60. The controller now keeps a
+  linear clock and eases once per frame, so every curve takes exactly
+  `duration`. `animate_to()` also no longer rewrites `upper`, which used to
+  shrink the controller's range permanently.
 * **Hot reload missed most saves.** The watchdog handler only listened for
   `on_modified`, but vim/PyCharm (and most editors) save atomically by
   renaming a temp file — those arrived as `on_moved` and were dropped, as were

@@ -87,6 +87,13 @@ class AnimationController:
         self._runner = runner
         self._on_ui = on_ui
         self._value = self.lower
+        #: Linear 0-1 clock for the current run. The eased value is derived
+        #: from it; deriving the clock back from the eased value (as earlier
+        #: releases did) applied the curve once per frame, which made
+        #: ``ease_in`` never finish and ``ease_out`` finish 7x too early.
+        self._t = 0.0
+        self._from = self.lower
+        self._to = self.upper
         self._direction = 1
         self._repeat = False
         self._ping_pong = False
@@ -107,8 +114,7 @@ class AnimationController:
     @property
     def progress(self) -> float:
         """Linear 0-1 progress, before easing."""
-        span = (self.upper - self.lower) or 1.0
-        return (self._value - self.lower) / span
+        return self._t
 
     @property
     def running(self) -> bool:
@@ -135,18 +141,26 @@ class AnimationController:
     # ── driving ──────────────────────────────────────────────────────────
 
     def forward(self, *, from_: Optional[float] = None) -> "AnimationController":
-        """Animate towards 1."""
+        """Animate towards :attr:`upper`."""
         if from_ is not None:
             self._value = float(from_)
         self._direction = 1
+        self._retarget(self.upper)
         return self._start()
 
     def reverse(self, *, from_: Optional[float] = None) -> "AnimationController":
-        """Animate back towards 0."""
+        """Animate back towards :attr:`lower`."""
         if from_ is not None:
             self._value = float(from_)
         self._direction = -1
+        self._retarget(self.lower)
         return self._start()
+
+    def _retarget(self, target: float) -> None:
+        """Start a fresh 0-1 run from the current value towards *target*."""
+        self._from = self._value
+        self._to = float(target)
+        self._t = 0.0
 
     def toggle(self) -> "AnimationController":
         """Reverse when at (or heading to) the end, otherwise go forward."""
@@ -158,6 +172,8 @@ class AnimationController:
         self._repeat = True
         self._ping_pong = bool(reverse)
         self._direction = 1
+        self._value = self.lower
+        self._retarget(self.upper)
         return self._start()
 
     def animate_to(self, target: float,
@@ -167,7 +183,9 @@ class AnimationController:
         if duration:
             self.duration = float(duration)
         self._direction = 1 if target >= self._value else -1
-        self.upper = target if self._direction > 0 else self.upper
+        # NB: the controller's range is *not* rewritten — an earlier release
+        # moved ``upper`` to the target, permanently shrinking the range.
+        self._retarget(target)
         return self._start()
 
     def stop(self) -> "AnimationController":
@@ -186,6 +204,9 @@ class AnimationController:
     def reset(self, value: Optional[float] = None) -> "AnimationController":
         self.stop()
         self._value = self.lower if value is None else float(value)
+        self._t = 0.0
+        self._from = self._value
+        self._to = self.upper
         self._emit()
         return self
 
@@ -214,16 +235,12 @@ class AnimationController:
         if not self._running:
             return
         step = (1.0 / self.fps) / self.duration
-        span = self.upper - self.lower
-        progress = self.progress + step * self._direction
-        if progress >= 1.0:
-            progress, finished = 1.0, True
-        elif progress <= 0.0:
-            progress, finished = 0.0, True
-        else:
-            finished = False
+        self._t = min(1.0, self._t + step)
+        finished = self._t >= 1.0
 
-        self._value = self.lower + self._curve(progress) * span
+        self._value = self._from + self._curve(self._t) * (self._to - self._from)
+        if finished:
+            self._value = self._to
         self._emit()
 
         if not finished:
@@ -231,8 +248,11 @@ class AnimationController:
         if self._repeat:
             if self._ping_pong:
                 self._direction *= -1
+                self._retarget(self.lower if self._direction < 0
+                               else self.upper)
             else:
                 self._value = self.lower
+                self._retarget(self.upper)
             return
         self.stop()
         for callback in list(self._completers):
