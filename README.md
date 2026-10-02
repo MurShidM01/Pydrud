@@ -71,7 +71,8 @@ instead of treating every Python render as an unrelated tree.
 Subscriptions are represented by cancellable handles and can be retained by
 the owning `App`. State watchers may be marshalled through a scheduler, equal
 values can use explicit distinct semantics, and worker task failures remain
-failed futures instead of being silently converted into successful results.
+observable on the returned future. Legacy `.result()` stays non-raising by
+default, with strict propagation available via `propagate_exceptions=True`.
 
 For existing code, legacy watcher behavior remains available unless
 `distinct=True` is selected.
