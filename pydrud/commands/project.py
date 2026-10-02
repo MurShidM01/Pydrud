@@ -11,6 +11,7 @@ import sys
 from jinja2 import Environment, PackageLoader, select_autoescape
 
 from pydrud.utils.colors import ok, fail, info, header
+from pydrud.compatibility import COMPATIBILITY
 
 
 # Jinja2 environment — templates live under ``android/templates/``.
@@ -180,7 +181,7 @@ def _detect_ndk(sdk_dir: str) -> str:
                 return versions[-1]
         except Exception:
             pass
-    return "29.0.14206865"
+    return COMPATIBILITY.ndk_version
 
 
 #: Every Java class that makes up the generated native layer, with the
@@ -195,10 +196,10 @@ _JAVA_TEMPLATES = (
 
 
 #: CPython versions Chaquopy 15 accepts as ``buildPython``.
-BUILD_PYTHON_VERSIONS = ("3.12", "3.11", "3.10", "3.9", "3.8")
+BUILD_PYTHON_VERSIONS = ("3.13", "3.12", "3.11", "3.10")
 
 #: The Python version the app itself runs on the device.
-APP_PYTHON_VERSION = "3.11"
+APP_PYTHON_VERSION = COMPATIBILITY.python_version
 
 
 def _detect_build_python(target: str = APP_PYTHON_VERSION) -> str:
@@ -358,7 +359,7 @@ def create_project(
     name: str,
     org: str = "com.example",
     min_sdk: int = 24,
-    target_sdk: int = 35,
+    target_sdk: int = COMPATIBILITY.target_sdk,
     pip_packages=None,
     firebase: bool = False,
     permissions=None,
@@ -409,10 +410,12 @@ def create_project(
         "min_sdk": min_sdk,
         "target_sdk": target_sdk,
         "build_tools_version": "36.0.0",  # match what we have
-        "compile_sdk": target_sdk,
-        "gradle_version": "8.7",
-        "chaquopy_version": "15.0.1",
-        "python_version": "3.11",
+        "compile_sdk": max(int(target_sdk), COMPATIBILITY.compile_sdk),
+        "gradle_version": COMPATIBILITY.gradle_version,
+        "chaquopy_version": COMPATIBILITY.chaquopy_version,
+        "python_version": COMPATIBILITY.python_version,
+        "pydrud_runtime_version": COMPATIBILITY.android_runtime_version,
+        "protocol_version": COMPATIBILITY.protocol_version,
         "sdk_dir": sdk_dir,
         "python_executable": python_exe,
         "ndk": ndk_version,
