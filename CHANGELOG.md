@@ -60,6 +60,16 @@ package rather than an implicit namespace one.
   are now pinned by tests (733 tests, 2 217 subtests in total).
 
 ### Fixed
+* **`pydrud sync` ignored Android identity and toolchain edits.** It used the
+  stale package/activity discovered in generated Java and refreshed only Java
+  plus theme resources. `pydrud.yaml` is now the Android source of truth:
+  sync migrates package/name changes and regenerates the manifest, Gradle
+  files/wrapper, SDK/NDK settings, version metadata, ABIs, assets, permissions,
+  deep links and generated Python metadata. TOML dependencies/theme settings
+  and `src/app/` remain untouched.
+* **Permission CLI edits disappeared after sync.** `pydrud permissions` now
+  records its changes in the YAML manifest as well as applying them
+  immediately to `AndroidManifest.xml`.
 * **`AppTester.settle()` returned too early.** It only checked that the
   event queue was empty — which is also true while an event is still in
   flight on the socket — so a `tap()` could silently do nothing and the

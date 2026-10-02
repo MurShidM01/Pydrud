@@ -34,7 +34,7 @@ public class BridgeService {
 
     private static final String TAG = "PydrudBridge";
     private static final int PORT = 8595;
-    private static final int PROTOCOL_VERSION = 2;
+    private static final int PROTOCOL_VERSION = {{ protocol_version | default(2) }};
     private static final int MAX_FRAME_BYTES = 2 * 1024 * 1024;
 
     private final {{ app_name }}Activity activity;

@@ -13,6 +13,7 @@ from jinja2 import Environment, PackageLoader, select_autoescape
 
 from pydrud.utils.colors import ok, fail, info, header
 from pydrud.compatibility import COMPATIBILITY
+from pydrud.commands.project_config import load_project_config
 
 
 # Jinja2 environment — templates live under ``android/templates/``.
@@ -32,6 +33,8 @@ def _write_template(template_name: str, dest: str, ctx: dict):
     """Render a Jinja2 template and write it to *dest*."""
     template = _env.get_template(template_name)
     content = template.render(**ctx)
+    if content and not content.endswith("\n"):
+        content += "\n"
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     with open(dest, "w", encoding="utf-8") as f:
         f.write(content)
@@ -391,24 +394,262 @@ def _theme_colors(seed: str | None = None) -> dict:
     return {"light": palette(False), "dark": palette(True), "seed": seed}
 
 
-def _project_seed(project_dir: str) -> str | None:
-    """Read ``[theme] seed`` from pydrud.toml, if the user set one."""
+def _toml_section(project_dir: str, wanted: str) -> dict[str, str]:
+    """Read a small scalar section from ``pydrud.toml``.
+
+    TOML remains the home of Python dependencies and the theme seed. Android
+    identity and build settings are authoritative in ``pydrud.yaml``; the
+    legacy ``[app]`` table is only used as a fallback for older projects.
+    """
     path = os.path.join(project_dir, "pydrud.toml")
     if not os.path.isfile(path):
-        return None
+        return {}
+    values: dict[str, str] = {}
     try:
         with open(path, encoding="utf-8") as handle:
             section = False
             for line in handle:
                 stripped = line.strip()
-                if stripped.startswith("["):
-                    section = stripped == "[theme]"
-                elif section and stripped.startswith("seed"):
-                    _, _, value = stripped.partition("=")
-                    return value.strip().strip('"\'') or None
+                if not stripped or stripped.startswith("#"):
+                    continue
+                if stripped.startswith("[") and stripped.endswith("]"):
+                    section = stripped == f"[{wanted}]"
+                    continue
+                if section and "=" in stripped:
+                    key, value = stripped.split("=", 1)
+                    values[key.strip()] = value.split(" #", 1)[0].strip().strip('"\'')
     except OSError:
-        return None
-    return None
+        return {}
+    return values
+
+
+def _project_seed(project_dir: str) -> str | None:
+    """Read ``[theme] seed`` from pydrud.toml, if the user set one."""
+    return _toml_section(project_dir, "theme").get("seed") or None
+
+
+class ProjectConfigError(ValueError):
+    """A user-editable project setting is invalid."""
+
+
+def _config_string(config: dict, key: str, default: str = "") -> str:
+    value = config.get(key, default)
+    if isinstance(value, list):
+        raise ProjectConfigError(f"'{key}' must be a scalar value")
+    return str(value).strip()
+
+
+def _config_int(config: dict, key: str, default: int, *, minimum: int = 0) -> int:
+    value = _config_string(config, key, str(default))
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ProjectConfigError(f"'{key}' must be an integer, got {value!r}") from exc
+    if parsed < minimum:
+        raise ProjectConfigError(f"'{key}' must be at least {minimum}")
+    return parsed
+
+
+def _config_bool(config: dict, key: str, default: bool = False) -> bool:
+    value = _config_string(config, key, "true" if default else "false").lower()
+    if value in {"true", "yes", "on", "1"}:
+        return True
+    if value in {"false", "no", "off", "0", ""}:
+        return False
+    raise ProjectConfigError(
+        f"'{key}' must be true or false, got {value!r}")
+
+
+def _config_list(config: dict, key: str, default=()) -> list[str]:
+    if key not in config:
+        return list(default)
+    value = config[key]
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    text = str(value).strip()
+    if not text:
+        return []
+    # A comma-separated scalar is accepted for compatibility with the old
+    # flat parser, though generated manifests always use a real YAML list.
+    return [item.strip().strip('"\'') for item in text.split(",") if item.strip()]
+
+
+def _validate_package(package: str) -> str:
+    parts = package.split(".")
+    if len(parts) < 2 or any(
+            not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", part)
+            or part in _JAVA_KEYWORDS for part in parts):
+        raise ProjectConfigError(
+            f"'package' must be a Java package such as com.example.my_app, got {package!r}")
+    return package
+
+
+def _gradle_value(project_dir: str, pattern: str, default: str) -> str:
+    """Read a generated Gradle value so old projects retain it on migration."""
+    path = os.path.join(project_dir, "android", "app", "build.gradle.kts")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            match = re.search(pattern, handle.read())
+    except OSError:
+        match = None
+    return match.group(1) if match else default
+
+
+def _manifest_permissions(project_dir: str) -> list[str]:
+    """Recover explicit permissions from a pre-manifest-config project."""
+    import xml.etree.ElementTree as ET
+
+    path = os.path.join(project_dir, "android", "app", "src", "main",
+                        "AndroidManifest.xml")
+    try:
+        root = ET.parse(path).getroot()
+    except (OSError, ET.ParseError):
+        return []
+    attribute = "{http://schemas.android.com/apk/res/android}name"
+    built_in = {"INTERNET", "ACCESS_NETWORK_STATE"}
+    return [
+        name.rsplit(".", 1)[-1]
+        for node in root.findall("uses-permission")
+        if (name := node.get(attribute, "")) and name.rsplit(".", 1)[-1] not in built_in
+    ]
+
+
+def _sync_context(project_dir: str, found: dict) -> dict:
+    """Resolve the complete Android template context from ``pydrud.yaml``."""
+    config = load_project_config(project_dir)
+    legacy_app = _toml_section(project_dir, "app")
+
+    display_name = (_config_string(config, "app_name")
+                    or legacy_app.get("name")
+                    or os.path.basename(os.path.abspath(project_dir)))
+    if not display_name:
+        raise ProjectConfigError("'app_name' cannot be empty")
+    package = _validate_package(
+        _config_string(config, "package")
+        or legacy_app.get("package")
+        or found["package"])
+
+    min_sdk = _config_int(config, "min_sdk", COMPATIBILITY.min_sdk, minimum=1)
+    target_sdk = _config_int(config, "target_sdk", COMPATIBILITY.target_sdk,
+                             minimum=1)
+    compile_sdk = _config_int(
+        config, "compile_sdk", max(target_sdk, COMPATIBILITY.compile_sdk),
+        minimum=1)
+    if min_sdk > target_sdk:
+        raise ProjectConfigError("'min_sdk' cannot be greater than 'target_sdk'")
+    if compile_sdk < target_sdk:
+        raise ProjectConfigError("'compile_sdk' cannot be lower than 'target_sdk'")
+
+    version_code_default = int(_gradle_value(
+        project_dir, r"versionCode\s*=\s*(\d+)", "1"))
+    version_name_default = _gradle_value(
+        project_dir, r'versionName\s*=\s*"([^"]+)"', "1.0.0")
+    version_code = _config_int(
+        config, "version_code", version_code_default, minimum=1)
+    version_name = _config_string(
+        config, "version_name", version_name_default) or version_name_default
+
+    pydrud_app_name = _slugify(display_name)
+    android_app_name = _camel(display_name)
+    scheme = (_config_string(config, "scheme")
+              or legacy_app.get("scheme")
+              or pydrud_app_name.replace("_", ""))
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9+.-]*", scheme):
+        raise ProjectConfigError(
+            f"'scheme' must be a valid Android URI scheme, got {scheme!r}")
+
+    permissions = _config_list(
+        config, "permissions",
+        _manifest_permissions(project_dir) if "permissions" not in config else ())
+    from pydrud.commands.release import resolve_permission
+    permissions = list(dict.fromkeys(
+        resolved for name in permissions
+        if (resolved := resolve_permission(name))
+        not in {"INTERNET", "ACCESS_NETWORK_STATE"}
+    ))
+
+    capability_names = set(_config_list(config, "capabilities"))
+    known_capabilities = {
+        "foreground_service", "boot_receiver", "wake_lock", "haptics",
+        "notifications",
+    }
+    unknown = capability_names - known_capabilities
+    if unknown:
+        raise ProjectConfigError(
+            "Unknown capabilities: " + ", ".join(sorted(unknown)))
+    capability_permissions = {
+        "foreground_service": {"FOREGROUND_SERVICE", "FOREGROUND_SERVICE_DATA_SYNC"},
+        "boot_receiver": {"RECEIVE_BOOT_COMPLETED"},
+        "wake_lock": {"WAKE_LOCK"},
+        "haptics": {"VIBRATE"},
+        "notifications": {"POST_NOTIFICATIONS"},
+    }
+    generated_permissions = set().union(*(
+        capability_permissions[name] for name in capability_names
+    )) if capability_names else set()
+    permissions = [name for name in permissions if name not in generated_permissions]
+
+    abi_filters_list = _config_list(
+        config, "abi_filters", ("arm64-v8a", "armeabi-v7a", "x86_64"))
+    if not abi_filters_list:
+        raise ProjectConfigError("'abi_filters' must contain at least one ABI")
+
+    assets_dir = _config_string(config, "assets_dir", "assets") or "assets"
+    assets_dir = assets_dir.replace("\\", "/").strip("/")
+    if not assets_dir or any(part == ".." for part in assets_dir.split("/")):
+        raise ProjectConfigError("'assets_dir' must stay inside the project")
+
+    python_version = _config_string(
+        config, "python_version", COMPATIBILITY.python_version)
+    old_python = _gradle_value(
+        project_dir,
+        r'buildPython\(System\.getenv\("PYDRUD_PYTHON"\)\s*\?:\s*"([^"]+)"\)',
+        sys.executable.replace("\\", "/"))
+    seed = _normalise_color(_project_seed(project_dir))
+
+    from pydrud.commands.packages import Requirements
+
+    return {
+        "project_name": display_name,
+        "app_name": android_app_name,
+        "pydrud_app_name": pydrud_app_name,
+        "package": package,
+        "package_path": package.replace(".", "/"),
+        "min_sdk": min_sdk,
+        "target_sdk": target_sdk,
+        "compile_sdk": compile_sdk,
+        "ndk": _config_string(config, "ndk", COMPATIBILITY.ndk_version),
+        "python_version": python_version,
+        "python_executable": old_python,
+        "pydrud_runtime_version": _config_string(
+            config, "framework_version", COMPATIBILITY.android_runtime_version),
+        "protocol_version": _config_int(
+            config, "protocol_version", COMPATIBILITY.protocol_version,
+            minimum=1),
+        "chaquopy_version": _config_string(
+            config, "chaquopy_version", COMPATIBILITY.chaquopy_version),
+        "agp_version": _config_string(
+            config, "agp_version", COMPATIBILITY.agp_version),
+        "gradle_version": _config_string(
+            config, "gradle_version", COMPATIBILITY.gradle_version),
+        "assets_dir": assets_dir,
+        "version_code": version_code,
+        "version_name": version_name,
+        "scheme": scheme,
+        "app_links_host": _config_string(config, "app_links_host"),
+        "abi_filters_list": abi_filters_list,
+        "abi_filters": ", ".join(f'"{abi}"' for abi in abi_filters_list),
+        "permissions": permissions,
+        "capabilities_list": sorted(capability_names),
+        "capabilities": {name: name in capability_names
+                         for name in known_capabilities},
+        "firebase": _config_bool(
+            config, "firebase", found.get("firebase", False)
+            or os.path.isfile(os.path.join(project_dir, "google-services.json"))),
+        "shrink": "true" if _config_bool(config, "shrink", False) else "false",
+        "pip_packages": Requirements(project_dir).requirement_strings(),
+        "seed_color": seed,
+    }
 
 
 def _render_native_layer(project_dir: str, java_package_path: str, ctx: dict):
@@ -521,13 +762,16 @@ def create_project(
         "version_code": 1,
         "version_name": "1.0.0",
         "permissions": list(permissions or []),
+        "capabilities_list": [],
         "capabilities": {"foreground_service": False, "boot_receiver": False, "wake_lock": False, "haptics": False, "notifications": False},
         # ABIs shipped in the APK. 32-bit arm is still common on budget
         # devices; x86_64 keeps the emulator working.
+        "abi_filters_list": ["arm64-v8a", "armeabi-v7a", "x86_64"],
         "abi_filters": ", ".join(
             f'"{abi}"' for abi in ("arm64-v8a", "armeabi-v7a", "x86_64")),
         "scheme": pydrud_app_name.replace("_", ""),
         "app_links_host": "",
+        "assets_dir": "assets",
     }
 
     print(header(f"\n  Creating Pydrud project: {name}"))
@@ -651,11 +895,137 @@ def _render_app_package(project_dir: str, ctx: dict) -> None:
 # ── Upgrading an existing project ────────────────────────────────────────────
 
 
-def _discover_project(project_dir: str) -> dict | None:
-    """Work out the package, app name and scheme of an existing project.
+def _remove_generated_java(project_dir: str, found: dict) -> None:
+    """Remove stale generated classes before a package/name migration.
 
-    Everything is read back from the generated tree itself, so no config
-    file has to be kept in sync.
+    Only files owned by Pydrud are removed. Any hand-written Java class in the
+    old package is retained, and now-empty package directories are pruned.
+    """
+    java_root = os.path.join(project_dir, "android", "app", "src", "main", "java")
+    old_dir = os.path.join(java_root, *found["package_path"].split("/"))
+    generated = {f"{name}.java" for name in _JAVA_TEMPLATES}
+    generated.update({"PydrudMessagingService.java",
+                      f"{found['app_name']}Activity.java"})
+    for filename in generated:
+        try:
+            os.remove(os.path.join(old_dir, filename))
+        except FileNotFoundError:
+            pass
+    current = old_dir
+    while os.path.normpath(current) != os.path.normpath(java_root):
+        try:
+            os.rmdir(current)
+        except OSError:
+            break
+        current = os.path.dirname(current)
+
+
+def _render_managed_android(project_dir: str, ctx: dict) -> None:
+    """Regenerate every Android file controlled by ``pydrud.yaml``."""
+    _render_native_layer(project_dir, ctx["package_path"], ctx)
+    main_dir = os.path.join(project_dir, "android", "app", "src", "main")
+    _ensure_dir(main_dir)
+    _write_template("android/AndroidManifest.xml.j2",
+                    os.path.join(main_dir, "AndroidManifest.xml"), ctx)
+
+    android_dir = os.path.join(project_dir, "android")
+    _write_template("android/build.gradle.kts.j2",
+                    os.path.join(android_dir, "build.gradle.kts"), ctx)
+    _write_template("android/app/build.gradle.kts.j2",
+                    os.path.join(android_dir, "app", "build.gradle.kts"), ctx)
+    _write_template("android/proguard-rules.pro.j2",
+                    os.path.join(android_dir, "app", "proguard-rules.pro"), ctx)
+    _write_template("android/settings.gradle.kts.j2",
+                    os.path.join(android_dir, "settings.gradle.kts"), ctx)
+    _write_template("android/gradle.properties.j2",
+                    os.path.join(android_dir, "gradle.properties"), ctx)
+    _write_template("android/gradlew.j2", os.path.join(android_dir, "gradlew"), ctx)
+    _write_template("android/gradlew.bat.j2",
+                    os.path.join(android_dir, "gradlew.bat"), ctx)
+    _write_template("android/gradle/wrapper/gradle-wrapper.properties.j2",
+                    os.path.join(android_dir, "gradle", "wrapper",
+                                 "gradle-wrapper.properties"), ctx)
+    try:
+        os.chmod(os.path.join(android_dir, "gradlew"), 0o755)
+    except OSError:
+        pass
+
+
+def _sync_generated_metadata(project_dir: str, ctx: dict) -> None:
+    """Refresh generated non-app metadata without touching ``src/app``."""
+    _write_template("python/pydrud_config.py.j2",
+                    os.path.join(project_dir, "src", "pydrud_config.py"), ctx)
+    _write_template("python/setup.py.j2",
+                    os.path.join(project_dir, "setup.py"), ctx)
+
+
+def _sync_toml_identity(project_dir: str, ctx: dict) -> None:
+    """Keep the legacy TOML identity mirror aligned with YAML.
+
+    Dependencies, theme settings, comments and unknown TOML sections are
+    preserved verbatim.
+    """
+    path = os.path.join(project_dir, "pydrud.toml")
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return
+
+    replacements = {
+        "name": ctx["project_name"],
+        "package": ctx["package"],
+        "scheme": ctx["scheme"],
+    }
+
+    def assignment(key: str) -> str:
+        escaped = replacements[key].replace("\\", "\\\\").replace('"', '\\"')
+        return f'{key} = "{escaped}"'
+
+    in_app = False
+    app_found = False
+    seen: set[str] = set()
+    app_end: int | None = None
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            if in_app:
+                app_end = index
+            in_app = stripped == "[app]"
+            app_found = app_found or in_app
+            continue
+        if not in_app or "=" not in stripped or stripped.startswith("#"):
+            continue
+        key = stripped.split("=", 1)[0].strip()
+        if key in replacements:
+            lines[index] = assignment(key)
+            seen.add(key)
+    if in_app:
+        app_end = len(lines)
+
+    if app_found and app_end is not None:
+        missing = [key for key in ("name", "package", "scheme") if key not in seen]
+        lines[app_end:app_end] = [assignment(key) for key in missing]
+    elif not app_found:
+        block = ["[app]"] + [assignment(key)
+                             for key in ("name", "package", "scheme")]
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.extend(block)
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+    except OSError:
+        pass
+
+
+def _discover_project(project_dir: str) -> dict | None:
+    """Locate the currently generated package and activity.
+
+    This identifies stale files which may need migrating; desired values are
+    resolved separately from ``pydrud.yaml``.
     """
     java_root = os.path.join(project_dir, "android", "app", "src", "main", "java")
     if not os.path.isdir(java_root):
@@ -678,11 +1048,12 @@ def _discover_project(project_dir: str) -> dict | None:
 
 
 def sync_project(project_dir: str, *, update_runtime: bool = True) -> bool:
-    """Refresh an existing project's native layer from this Pydrud version.
+    """Apply ``pydrud.yaml`` to the complete generated Android project.
 
-    Rewrites the generated Java renderer, the theme resources and the
-    bundled Python runtime. Your own code under ``src/app/`` is never
-    touched, so upgrading is safe:
+    Package, app name, SDK/toolchain versions, release metadata, assets,
+    permissions and deep-link settings all flow from the system-level YAML
+    manifest. The generated Java package is migrated when identity changes.
+    User code under ``src/app/`` is never touched.
 
         $ pydrud sync && pydrud run
     """
@@ -691,21 +1062,27 @@ def sync_project(project_dir: str, *, update_runtime: bool = True) -> bool:
         print(fail("No generated Android sources found — is this a Pydrud project?"))
         return False
 
-    project_name = os.path.basename(os.path.abspath(project_dir))
-    pydrud_app_name = _slugify(project_name)
-    ctx = {
-        "project_name": project_name,
-        "pydrud_app_name": pydrud_app_name,
-        "scheme": pydrud_app_name.replace("_", ""),
-        **found,
-    }
+    try:
+        ctx = _sync_context(project_dir, found)
+    except (ProjectConfigError, ValueError) as exc:
+        print(fail(f"Invalid pydrud.yaml: {exc}"))
+        return False
 
-    print(header(f"\n  Syncing {project_name} with Pydrud {_version()}"))
+    print(header(f"\n  Syncing {ctx['project_name']} with Pydrud {_version()}"))
     print(f"    Package:  {ctx['package']}")
 
-    _render_native_layer(project_dir, ctx["package_path"], ctx)
+    identity_changed = (found["package"] != ctx["package"]
+                        or found["app_name"] != ctx["app_name"])
+    _remove_generated_java(project_dir, found)
+    _render_managed_android(project_dir, ctx)
+    _sync_generated_metadata(project_dir, ctx)
+    _sync_toml_identity(project_dir, ctx)
+
     count = len(_JAVA_TEMPLATES) + 1 + (1 if ctx["firebase"] else 0)
-    print(info(f"  Rewrote {count} Java classes + theme resources"))
+    detail = "all Android configuration"
+    if identity_changed:
+        detail += " + package migration"
+    print(info(f"  Rewrote {count} Java classes + {detail}"))
 
     if update_runtime:
         _bundle_pydrud_source(project_dir)

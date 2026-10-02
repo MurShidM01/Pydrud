@@ -74,10 +74,10 @@ def init(name, org, min_sdk, target_sdk, accent):
 @click.option("--no-runtime", is_flag=True, default=False,
               help="Only refresh the Java layer, keep the bundled Python runtime.")
 def sync(no_runtime):
-    """Upgrade an existing project to this version of Pydrud.
+    """Apply pydrud.yaml and upgrade the generated Android project.
 
-    Rewrites the generated Android renderer, theme resources and the
-    bundled runtime. Your app code in ``src/app/`` is left alone.
+    Rewrites managed Java, manifest, Gradle, theme and generated metadata,
+    plus the bundled runtime. Your app code in ``src/app/`` is left alone.
     """
     from pydrud.commands.project import sync_project
 
