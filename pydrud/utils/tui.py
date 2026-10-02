@@ -1,23 +1,44 @@
 """
 Terminal UI (TUI) components and formatting for Pydrud CLI.
 
-Provides a clean, modern, and attractive Flutter-like interactive experience:
-  • Header banners with rounded Unicode borders
+Provides one clean visual language for every Pydrud command:
+  • Responsive command banners, sections, tables and completion summaries
+  • Consistent success, information, warning and error states
   • Hot reload & hot restart badges with elapsed timings
-  • Syntax error & runtime exception cards with syntax highlighting
-  • Key command bars & help overlays
+  • Syntax/runtime error cards, key command bars and help overlays
+  • Automatic colour fallback for redirected output and NO_COLOR terminals
 """
 
 from __future__ import annotations
 
+import os
+import re
 import shutil
 import sys
-from typing import Optional
+import textwrap
+from typing import Iterable, Optional, Sequence
 
 # ── Color Palette ────────────────────────────────────────────────────────────
 
+def _supports_color() -> bool:
+    forced = os.environ.get("PYDRUD_COLOR", "").strip().lower()
+    if forced in {"1", "true", "yes", "always"}:
+        return True
+    if forced in {"0", "false", "no", "never"}:
+        return False
+    if "NO_COLOR" in os.environ or os.environ.get("TERM") == "dumb":
+        return False
+    try:
+        return bool(sys.stdout.isatty())
+    except Exception:
+        return False
+
+
+_COLOR_ENABLED = _supports_color()
+
+
 def _s(code: str) -> str:
-    return f"\033[{code}m"
+    return f"\033[{code}m" if _COLOR_ENABLED else ""
 
 RESET       = _s("0")
 BOLD        = _s("1")
@@ -36,22 +57,187 @@ WHITE       = _s("37")
 GRAY        = _s("90")
 
 # 256-Color Vibrant Palette
-C_PRIMARY   = "\033[38;5;39m"    # Sky Blue
-C_SUCCESS   = "\033[38;5;78m"    # Emerald Green
-C_WARN      = "\033[38;5;214m"   # Amber / Orange
-C_ERROR     = "\033[38;5;203m"   # Coral Red
-C_PURPLE    = "\033[38;5;141m"   # Soft Purple
-C_CYAN      = "\033[38;5;51m"    # Electric Cyan
-C_MUTED     = "\033[38;5;244m"   # Slate Gray
-C_BORDER    = "\033[38;5;240m"   # Dark Slate Border
-C_BG_ERR    = "\033[48;5;52m"    # Deep Red BG
+C_PRIMARY   = _s("38;5;39")     # Sky Blue
+C_SUCCESS   = _s("38;5;78")     # Emerald Green
+C_WARN      = _s("38;5;214")    # Amber / Orange
+C_ERROR     = _s("38;5;203")    # Coral Red
+C_PURPLE    = _s("38;5;141")    # Soft Purple
+C_CYAN      = _s("38;5;51")     # Electric Cyan
+C_MUTED     = _s("38;5;244")    # Slate Gray
+C_BORDER    = _s("38;5;240")    # Dark Slate Border
+C_BG_ERR    = _s("48;5;52")     # Deep Red BG
+
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def _term_width() -> int:
+    """Usable width shared by one-shot commands and the live runner."""
     try:
-        return min(shutil.get_terminal_size((80, 24)).columns, 90)
+        return max(52, min(shutil.get_terminal_size((80, 24)).columns, 100))
     except Exception:
         return 80
+
+
+def _visible_len(text: object) -> int:
+    return len(_ANSI_RE.sub("", str(text)))
+
+
+def strip_ansi(text: str) -> str:
+    """Strip terminal colour codes (useful for logs, snapshots and tests)."""
+    return _ANSI_RE.sub("", text)
+
+
+def _clip(text: object, width: int) -> str:
+    """Clip plain or coloured text while keeping the common case fast."""
+    value = str(text)
+    if _visible_len(value) <= width:
+        return value
+    # Table/cell values are plain text. Stripping colour for a clipped value
+    # avoids leaving an unterminated escape sequence in the terminal.
+    plain = strip_ansi(value)
+    return plain[:max(0, width - 1)] + "…"
+
+
+def _box_line(text: str, inner: int, colour: str = C_PRIMARY) -> str:
+    text = _clip(text, max(1, inner - 2))
+    padding = " " * max(0, inner - 2 - _visible_len(text))
+    return f"  {colour}│{RESET} {text}{padding} {colour}│{RESET}"
+
+
+def render_brand_banner(version: str = "", tagline: str = "Native Android. Python powered.") -> str:
+    """Compact brand banner used by top-level CLI help."""
+    width = _term_width()
+    inner = width - 4
+    title = f" PYDRUD{f' {version}' if version else ''} "
+    top_fill = "─" * max(2, inner - len(title) - 1)
+    lines = [
+        f"  {C_PRIMARY}╭─{RESET}{BOLD}{C_PRIMARY}{title}{RESET}{C_PRIMARY}{top_fill}╮{RESET}",
+        _box_line(tagline, inner),
+        f"  {C_PRIMARY}╰{'─' * inner}╯{RESET}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_command_header(
+    command: str,
+    title: str,
+    *,
+    subtitle: str = "",
+    details: Optional[Sequence[tuple[str, object]]] = None,
+    colour: str = C_PRIMARY,
+) -> str:
+    """Render the standard header for a one-shot Pydrud command."""
+    width = _term_width()
+    inner = width - 4
+    label = f" PYDRUD · {command.upper()} "
+    top_fill = "─" * max(2, inner - len(label) - 1)
+    lines = [
+        "",
+        f"  {colour}╭─{RESET}{BOLD}{colour}{label}{RESET}{colour}{top_fill}╮{RESET}",
+        _box_line(f"{BOLD}{title}{RESET}", inner, colour),
+    ]
+    if subtitle:
+        for line in textwrap.wrap(subtitle, max(20, inner - 4)) or [""]:
+            lines.append(_box_line(f"{C_MUTED}{line}{RESET}", inner, colour))
+    if details:
+        lines.append(_box_line("", inner, colour))
+        for key, value in details:
+            label_text = f"{C_MUTED}{key:<12}{RESET}"
+            lines.append(_box_line(f"{label_text} {value}", inner, colour))
+    lines.append(f"  {colour}╰{'─' * inner}╯{RESET}")
+    return "\n".join(lines) + "\n"
+
+
+def render_section(title: str, *, colour: str = C_PRIMARY) -> str:
+    """A quiet divider for phases within a command."""
+    width = _term_width() - 4
+    plain = f" {title} "
+    right = "─" * max(2, width - len(plain))
+    return f"\n  {colour}──{RESET}{BOLD}{plain}{RESET}{C_BORDER}{right}{RESET}"
+
+
+def render_key_values(items: Sequence[tuple[str, object]]) -> str:
+    """Render aligned metadata without a heavy border."""
+    if not items:
+        return ""
+    key_width = min(22, max(_visible_len(key) for key, _ in items))
+    return "\n".join(
+        f"  {C_MUTED}{key:<{key_width}}{RESET}  {value}" for key, value in items
+    )
+
+
+def render_table(
+    headers: Sequence[str],
+    rows: Iterable[Sequence[object]],
+    *,
+    max_width: Optional[int] = None,
+) -> str:
+    """Render a responsive table used by devices, packages and diagnostics."""
+    rows = [tuple(str(cell) for cell in row) for row in rows]
+    headers = tuple(str(header) for header in headers)
+    if not headers:
+        return ""
+    columns = len(headers)
+    normalised = [row[:columns] + ("",) * max(0, columns - len(row)) for row in rows]
+    widths = [len(headers[index]) for index in range(columns)]
+    for row in normalised:
+        for index, cell in enumerate(row):
+            widths[index] = max(widths[index], _visible_len(cell))
+
+    available = max_width or (_term_width() - 6)
+    separators = 3 * (columns - 1)
+    overflow = sum(widths) + separators - available
+    # Descriptions and paths are normally the last column, so shrink from the
+    # right while retaining useful identifiers in the first columns.
+    for index in range(columns - 1, -1, -1):
+        if overflow <= 0:
+            break
+        floor = 12 if index == columns - 1 else min(8, widths[index])
+        reduction = min(overflow, max(0, widths[index] - floor))
+        widths[index] -= reduction
+        overflow -= reduction
+
+    def row_text(row: Sequence[str], *, header: bool = False) -> str:
+        cells = []
+        for index, cell in enumerate(row):
+            clipped = _clip(cell, widths[index])
+            cells.append(clipped.ljust(widths[index]))
+        text = "   ".join(cells).rstrip()
+        return f"  {BOLD}{C_MUTED}{text}{RESET}" if header else f"  {text}"
+
+    output = [row_text(headers, header=True)]
+    output.append(f"  {C_BORDER}{'─' * min(available, sum(widths) + separators)}{RESET}")
+    output.extend(row_text(row) for row in normalised)
+    return "\n".join(output)
+
+
+def render_summary(
+    title: str,
+    items: Sequence[tuple[str, object]],
+    *,
+    success: bool = True,
+) -> str:
+    """Render a compact completion card."""
+    colour = C_SUCCESS if success else C_ERROR
+    icon = "✓" if success else "✗"
+    lines = [f"\n  {colour}{icon}{RESET} {BOLD}{title}{RESET}"]
+    if items:
+        lines.append(render_key_values(items))
+    return "\n".join(lines) + "\n"
+
+
+def render_next_steps(commands: Sequence[tuple[str, str] | str]) -> str:
+    """Render shell commands as a consistent final action block."""
+    lines = [render_section("Next steps", colour=C_PURPLE).lstrip("\n")]
+    for item in commands:
+        if isinstance(item, tuple):
+            command, description = item
+        else:
+            command, description = item, ""
+        suffix = f"  {C_MUTED}{description}{RESET}" if description else ""
+        lines.append(f"  {C_PURPLE}${RESET} {BOLD}{command}{RESET}{suffix}")
+    return "\n".join(lines) + "\n"
 
 
 # ── Status Badges ────────────────────────────────────────────────────────────
@@ -67,6 +253,15 @@ def warn_badge(text: str) -> str:
 
 def error_badge(text: str) -> str:
     return f"  {C_ERROR}✗{RESET} {text}"
+
+def neutral_badge(text: str) -> str:
+    return f"  {C_MUTED}•{RESET} {text}"
+
+def add_badge(text: str) -> str:
+    return f"  {C_SUCCESS}[+]{RESET} {text}"
+
+def remove_badge(text: str) -> str:
+    return f"  {C_ERROR}[-]{RESET} {text}"
 
 def step_badge(step: str, status: str = "...") -> str:
     return f"  {C_PRIMARY}➜{RESET} {BOLD}{step:<38}{RESET} {C_MUTED}{status}{RESET}"
@@ -110,22 +305,17 @@ def render_header_banner(
     device_name: str,
     python_version: str = "3.11",
 ) -> str:
-    """Render the startup banner with rounded box border."""
-    width = _term_width()
-    inner = width - 4
-
-    title = f" ⚡ Pydrud Native Runner  (Python {python_version}) "
-    details = f" App: {BOLD}{package_name or app_name}{RESET}  •  Device: {C_CYAN}{device_name or 'android'}{RESET}"
-
-    # Build top border
-    bar_len = inner - len(title)
-    if bar_len < 0:
-        bar_len = 2
-    top = f"  {C_PRIMARY}╭─{RESET}{BOLD}{C_PRIMARY}{title}{RESET}{C_PRIMARY}{'─' * (inner - len(title) - 2)}╮{RESET}"
-    line1 = f"  {C_PRIMARY}│{RESET}  {details}{' ' * max(0, inner - len(package_name or app_name) - len(device_name or 'android') - 26)}{C_PRIMARY}│{RESET}"
-    bottom = f"  {C_PRIMARY}╰{'─' * inner}╯{RESET}"
-
-    return f"\n{top}\n{line1}\n{bottom}\n"
+    """Render the live runner banner using the shared command visual system."""
+    return render_command_header(
+        "run",
+        "⚡ Pydrud Native Runner",
+        subtitle="Hot reload, device logs and interactive developer tools",
+        details=(
+            ("App", package_name or app_name),
+            ("Device", f"{C_CYAN}{device_name or 'android'}{RESET}"),
+            ("Runtime", f"Python {python_version}"),
+        ),
+    )
 
 
 # ── Interactive Key Commands Bar ─────────────────────────────────────────────

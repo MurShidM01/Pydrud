@@ -16,6 +16,8 @@ import sys
 import time
 from typing import Optional
 
+from pydrud.utils import tui
+
 BOX = {"tl": "┌", "tr": "┐", "bl": "└", "br": "┘", "h": "─", "v": "│",
        "t": "├", "l": "└"}
 
@@ -79,6 +81,13 @@ def run_inspector(*, port: int = 8595, dump_tree: bool = False,
                   follow: bool = False, host: str = "127.0.0.1",
                   timeout: float = 5.0) -> int:
     """Attach to a running app. Returns a process exit code."""
+    print(tui.render_command_header(
+        "inspect",
+        "Widget tree and bridge traffic",
+        subtitle="Inspecting application structure, events and render activity",
+        details=(("Endpoint", f"{host}:{port}"),
+                 ("Mode", "follow" if follow else "snapshot")),
+    ))
     local_tree = _local_tree()
     if local_tree is not None and not follow:
         _report_local(local_tree, dump_tree)
@@ -87,12 +96,13 @@ def run_inspector(*, port: int = 8595, dump_tree: bool = False,
     try:
         connection = socket.create_connection((host, port), timeout=timeout)
     except OSError as exc:
-        print(f"  [x] No app listening on {host}:{port} ({exc}).")
-        print("      Start it with 'pydrud run', or run this inside a project "
-              "to inspect the tree statically.")
+        print(tui.error_badge(f"No app listening on {host}:{port} ({exc})."))
+        print(tui.info_badge(
+            "Start with 'pydrud run', or inspect from inside a project."))
         return 1
 
-    print(f"  Attached to {host}:{port} — Ctrl-C to detach\n")
+    print(tui.ok_badge(f"Attached to {host}:{port} — Ctrl-C to detach"))
+    print(tui.render_section("Live bridge traffic"))
     started = time.time()
     counts: dict[str, int] = {}
     try:
@@ -125,9 +135,15 @@ def run_inspector(*, port: int = 8595, dump_tree: bool = False,
     finally:
         connection.close()
 
-    print("\n  Traffic summary:")
-    for kind, count in sorted(counts.items(), key=lambda kv: -kv[1]):
-        print(f"    {kind:<16} {count}")
+    print(tui.render_section("Traffic summary"))
+    if counts:
+        print(tui.render_table(
+            ("MESSAGE", "COUNT"),
+            ((kind, count) for kind, count in
+             sorted(counts.items(), key=lambda item: -item[1])),
+        ))
+    else:
+        print(tui.neutral_badge("No bridge messages received."))
     return 0
 
 
@@ -146,6 +162,15 @@ def _local_tree() -> Optional[dict]:
     src = os.path.join(os.getcwd(), "src")
     if not os.path.isdir(src):
         return None
+    # An inspector embedded in a test runner or IDE may already have another
+    # project's ``app`` package cached. Isolate this project for the render,
+    # then restore the caller's modules afterwards.
+    previous_app_modules = {
+        name: module for name, module in sys.modules.items()
+        if name == "app" or name.startswith("app.")
+    }
+    for name in previous_app_modules:
+        sys.modules.pop(name, None)
     sys.path.insert(0, src)
     try:
         from pydrud import App
@@ -162,29 +187,39 @@ def _local_tree() -> Optional[dict]:
             app.attach_router(router)
         return app.build().to_dict()
     except Exception as exc:
-        print(f"  [!] Could not build the tree locally: {exc}")
+        print(tui.warn_badge(f"Could not build the tree locally: {exc}"))
         return None
     finally:
         if src in sys.path:
             sys.path.remove(src)
+        for name in [name for name in sys.modules
+                     if name == "app" or name.startswith("app.")]:
+            sys.modules.pop(name, None)
+        sys.modules.update(previous_app_modules)
 
 
 def _report_local(tree: dict, dump_tree: bool) -> None:
     stats = summarise(tree)
-    print("  No running app found — inspecting the project statically.\n")
+    print(tui.info_badge(
+        "No running app detected — using a static local render."))
     if dump_tree:
+        print(tui.render_section("Widget tree"))
         print(render_tree(tree))
-        print()
-    print(f"  Nodes:        {stats['nodes']}")
-    print(f"  Max depth:    {stats['depth']}")
-    print(f"  Interactive:  {stats['interactive']} widget(s) with handlers")
-    print("  Widgets:")
-    for name, count in list(stats["widgets"].items())[:12]:
-        print(f"    {name:<22} {count}")
+    print(tui.render_section("Tree metrics"))
+    print(tui.render_key_values((
+        ("Nodes:", stats["nodes"]),
+        ("Max depth:", stats["depth"]),
+        ("Interactive:", f"{stats['interactive']} widget(s) with handlers"),
+    )))
+    print(tui.render_section("Widgets"))
+    print(tui.render_table(
+        ("WIDGET", "COUNT"),
+        ((name, count) for name, count in list(stats["widgets"].items())[:12]),
+    ))
     heavy = [name for name, count in stats["widgets"].items() if count > 200]
     if heavy:
-        print(f"\n  [!] {', '.join(heavy)} appears a lot — consider "
-              f"InfiniteList for virtualised rows.")
+        print(tui.warn_badge(
+            f"{', '.join(heavy)} appears often — consider InfiniteList."))
     if stats["depth"] > 20:
-        print("  [!] The tree is deep; flatten nested Containers to speed "
-              "up diffing.")
+        print(tui.warn_badge(
+            "The tree is deep; flatten nested Containers to speed up diffing."))

@@ -10,6 +10,7 @@ import sys
 import click
 
 from pydrud import __version__
+from pydrud.utils import tui
 
 
 # Ensure the project root is in sys.path when running.
@@ -41,7 +42,32 @@ def _find_project_root() -> str | None:
         current = parent
 
 
-@click.group()
+class _PydrudCommand(click.Command):
+    """Command help with the same branded surface as command execution."""
+
+    def format_help(self, ctx, formatter):
+        formatter.write(tui.render_command_header(
+            ctx.info_name or "help", "Command reference",
+            subtitle=self.help or self.short_help or "Pydrud command",
+        ))
+        super().format_help(ctx, formatter)
+
+
+class _PydrudGroup(click.Group):
+    """Click group with the same branded header as the interactive runner."""
+
+    command_class = _PydrudCommand
+    group_class = type
+
+    def format_help(self, ctx, formatter):
+        formatter.write(tui.render_brand_banner(__version__))
+        super().format_help(ctx, formatter)
+
+
+@click.group(cls=_PydrudGroup, context_settings={
+    "help_option_names": ["-h", "--help"],
+    "max_content_width": 100,
+})
 @click.version_option(version=__version__, prog_name="pydrud")
 def main():
     """Pydrud — build native Android apps with Python.
@@ -53,6 +79,19 @@ def main():
         pydrud run
     """
     pass
+
+
+def _show_header(command: str, title: str, subtitle: str = "", *,
+                 details=()) -> None:
+    click.echo(tui.render_command_header(
+        command, title, subtitle=subtitle, details=tuple(details)
+    ))
+
+
+def _show_error(message: str, hint: str = "") -> None:
+    click.echo(tui.error_badge(message), err=True)
+    if hint:
+        click.echo(tui.info_badge(hint), err=True)
 
 
 @main.command()
@@ -74,16 +113,17 @@ def init(name, org, min_sdk, target_sdk, accent):
 @click.option("--no-runtime", is_flag=True, default=False,
               help="Only refresh the Java layer, keep the bundled Python runtime.")
 def sync(no_runtime):
-    """Upgrade an existing project to this version of Pydrud.
+    """Apply pydrud.yaml and upgrade the generated Android project.
 
-    Rewrites the generated Android renderer, theme resources and the
-    bundled runtime. Your app code in ``src/app/`` is left alone.
+    Rewrites managed Java, manifest, Gradle, theme and generated metadata,
+    plus the bundled runtime. Your app code in ``src/app/`` is left alone.
     """
     from pydrud.commands.project import sync_project
 
     root = _find_project_root()
     if not root:
-        click.echo("Not inside a Pydrud project (no pydrud.yaml found).")
+        _show_error("Not inside a Pydrud project.",
+                    "Run this command from a directory containing pydrud.yaml.")
         sys.exit(1)
     if not sync_project(root, update_runtime=not no_runtime):
         sys.exit(1)
@@ -100,7 +140,8 @@ def run(device, release, watch, no_interactive):
 
     root = _find_project_root()
     if not root:
-        click.echo("Error: not inside a Pydrud project (no pydrud.yaml found)", err=True)
+        _show_error("Not inside a Pydrud project.",
+                    "Run this command from a directory containing pydrud.yaml.")
         sys.exit(1)
 
     builder = Builder(root)
@@ -116,7 +157,8 @@ def build(release, output):
 
     root = _find_project_root()
     if not root:
-        click.echo("Error: not inside a Pydrud project (no pydrud.yaml found)", err=True)
+        _show_error("Not inside a Pydrud project.",
+                    "Run this command from a directory containing pydrud.yaml.")
         sys.exit(1)
 
     builder = Builder(root)
@@ -124,11 +166,10 @@ def build(release, output):
     if not apk_path:
         sys.exit(1)
 
-    click.echo(f"APK ready: {apk_path}")
     if output:
         import shutil
         shutil.copy2(apk_path, output)
-        click.echo(f"Copied to: {output}")
+        click.echo(tui.ok_badge(f"Copied artifact to {output}"))
 
 
 @main.command()
@@ -139,7 +180,8 @@ def clean(device):
 
     root = _find_project_root()
     if not root:
-        click.echo("Error: not inside a Pydrud project", err=True)
+        _show_error("Not inside a Pydrud project.",
+                    "Run this command from a directory containing pydrud.yaml.")
         sys.exit(1)
 
     builder = Builder(root)
@@ -156,7 +198,8 @@ def watch(device, release, no_interactive):
 
     root = _find_project_root()
     if not root:
-        click.echo("Error: not inside a Pydrud project (no pydrud.yaml found)", err=True)
+        _show_error("Not inside a Pydrud project.",
+                    "Run this command from a directory containing pydrud.yaml.")
         sys.exit(1)
 
     builder = Builder(root)
@@ -169,11 +212,36 @@ def devices():
     import shutil as _shutil
     import subprocess
 
+    _show_header("devices", "Connected Android devices",
+                 "Discovering phones and emulators available through ADB")
     if not _shutil.which("adb"):
-        click.echo("adb not found in PATH. Install Android platform-tools.", err=True)
+        _show_error("ADB was not found in PATH.",
+                    "Install Android platform-tools, then run pydrud doctor.")
         sys.exit(1)
     result = subprocess.run(["adb", "devices", "-l"], capture_output=True, text=True)
-    click.echo(result.stdout.strip() or "No devices found.")
+    if result.returncode != 0:
+        _show_error("ADB could not list devices.",
+                    (result.stderr or result.stdout or "Run pydrud doctor.").strip())
+        sys.exit(1)
+    rows = []
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line or line.startswith("List of devices") or line.startswith("*"):
+            continue
+        fields = line.split()
+        rows.append((fields[0], fields[1] if len(fields) > 1 else "unknown",
+                     " ".join(fields[2:]) or "—"))
+    if rows:
+        click.echo(tui.render_table(("DEVICE", "STATE", "DETAILS"), rows))
+        click.echo(tui.render_summary(
+            f"{len(rows)} device(s) available", (("ADB", "ready"),)
+        ))
+    else:
+        click.echo(tui.warn_badge("No devices or emulators are connected."))
+        click.echo(tui.render_next_steps((
+            ("adb devices", "verify the connection"),
+            ("pydrud run", "launch after a device is available"),
+        )))
 
 
 @main.command()
@@ -216,8 +284,8 @@ def pip():
 def _project_or_exit() -> str:
     root = _find_project_root()
     if not root:
-        click.echo("Error: not inside a Pydrud project (no pydrud.yaml found)",
-                   err=True)
+        _show_error("Not inside a Pydrud project.",
+                    "Run this command from a directory containing pydrud.yaml.")
         sys.exit(1)
     return root
 
@@ -233,26 +301,35 @@ def pip_add(packages, force, no_sync):
     from pydrud.commands.packages import PackageError, Requirements, sync_gradle
 
     root = _project_or_exit()
+    _show_header("pip add", "Add Python packages",
+                 "Recording Chaquopy-compatible dependencies for the Android build",
+                 details=(("Project", os.path.basename(root)),))
     requirements = Requirements(root)
     added = []
     for requirement in packages:
         try:
             entry = requirements.add(requirement, force=force)
         except PackageError as exc:
-            click.echo(f"  [x] {exc}", err=True)
+            _show_error(str(exc))
             sys.exit(1)
         added.append(entry)
-        warning = "  (native wheel — adds a few MB per ABI)" if entry["native"] else ""
-        click.echo(f"  [+] {entry['name']}{entry.get('spec', '')} "
-                   f"— {entry['description']}{warning}")
+        warning = " · native wheel, increases APK size" if entry["native"] else ""
+        click.echo(tui.add_badge(
+            f"{entry['name']}{entry.get('spec', '')} — "
+            f"{entry['description']}{warning}"))
 
+    gradle_path = "not updated (--no-sync)"
     if not no_sync:
         try:
             path = sync_gradle(root)
-            click.echo(f"\n  Updated {os.path.relpath(path, root)}")
+            gradle_path = os.path.relpath(path, root)
+            click.echo(tui.info_badge(f"Updated {gradle_path}"))
         except PackageError as exc:
-            click.echo(f"  [!] {exc}", err=True)
-    click.echo(f"  {len(added)} package(s) will be installed on the next build.")
+            click.echo(tui.warn_badge(str(exc)), err=True)
+    click.echo(tui.render_summary(
+        f"{len(added)} package(s) ready",
+        (("Gradle", gradle_path), ("Install", "next Android build")),
+    ))
 
 
 @pip.command("remove")
@@ -262,16 +339,24 @@ def pip_remove(packages):
     from pydrud.commands.packages import PackageError, Requirements, sync_gradle
 
     root = _project_or_exit()
+    _show_header("pip remove", "Remove Python packages",
+                 "Updating pydrud.toml and the generated Chaquopy build block",
+                 details=(("Project", os.path.basename(root)),))
     requirements = Requirements(root)
+    removed = 0
     for name in packages:
         if requirements.remove(name):
-            click.echo(f"  [-] {name}")
+            click.echo(tui.remove_badge(name))
+            removed += 1
         else:
-            click.echo(f"  [ ] {name} was not installed")
+            click.echo(tui.neutral_badge(f"{name} was not installed"))
     try:
         sync_gradle(root)
     except PackageError as exc:
-        click.echo(f"  [!] {exc}", err=True)
+        click.echo(tui.warn_badge(str(exc)), err=True)
+    click.echo(tui.render_summary(
+        f"Removed {removed} package(s)", (("Manifest", "pydrud.toml"),)
+    ))
 
 
 @pip.command("list")
@@ -283,31 +368,46 @@ def pip_list(show_all, category):
     from pydrud.commands.packages import by_category, installed_summary
 
     if show_all:
+        _show_header("pip list", "Verified Android packages",
+                     "Packages tested with Chaquopy and available to Pydrud apps",
+                     details=(("Filter", category or "all categories"),))
         groups = by_category()
         if category:
             groups = {k: v for k, v in groups.items() if k == category}
             if not groups:
-                click.echo(f"No such category: {category}", err=True)
+                _show_error(f"No such package category: {category}")
                 sys.exit(1)
         total = 0
         for name, entries in groups.items():
-            click.echo(f"\n  {name.upper()}")
-            for entry in entries:
-                flag = "*" if entry["native"] else " "
-                click.echo(f"   {flag} {entry['name']:<26} {entry['description']}")
-                total += 1
-        click.echo(f"\n  {total} verified packages  "
-                   f"(* = native wheel, larger APK)")
+            click.echo(tui.render_section(name.upper()))
+            click.echo(tui.render_table(
+                ("PACKAGE", "WHEEL", "DESCRIPTION"),
+                ((entry["name"], "native" if entry["native"] else "pure",
+                  entry["description"]) for entry in entries),
+            ))
+            total += len(entries)
+        click.echo(tui.render_summary(
+            f"{total} verified packages",
+            (("Native", "marked in the WHEEL column"),),
+        ))
         return
 
     root = _project_or_exit()
+    _show_header("pip list", "Project packages",
+                 "Dependencies bundled into this application's APK",
+                 details=(("Project", os.path.basename(root)),))
     rows = installed_summary(root)
     if not rows:
-        click.echo("  No extra packages. Add one with 'pydrud pip add <name>'.")
+        click.echo(tui.neutral_badge(
+            "No extra packages. Add one with 'pydrud pip add <name>'."))
         return
-    for row in rows:
-        click.echo(f"  {row['name']:<26} {row['spec']:<12} {row['description']}")
-    click.echo(f"\n  {len(rows)} package(s) in pydrud.toml")
+    click.echo(tui.render_table(
+        ("PACKAGE", "VERSION", "DESCRIPTION"),
+        ((row["name"], row["spec"], row["description"]) for row in rows),
+    ))
+    click.echo(tui.render_summary(
+        f"{len(rows)} package(s)", (("Manifest", "pydrud.toml"),)
+    ))
 
 
 @pip.command("search")
@@ -316,15 +416,22 @@ def pip_search(query):
     """Search the verified registry."""
     from pydrud.commands.packages import search
 
+    _show_header("pip search", f"Package search · {query}",
+                 "Searching Pydrud's verified Android package registry")
     results = search(query)
     if not results:
-        click.echo(f"  Nothing matches {query!r}. "
-                   f"Try 'pydrud pip list --all'.")
+        click.echo(tui.warn_badge(
+            f"Nothing matches {query!r}. Try 'pydrud pip list --all'."))
         return
-    for entry in results:
-        flag = "*" if entry["native"] else " "
-        click.echo(f"   {flag} {entry['name']:<26} [{entry['category']}] "
-                   f"{entry['description']}")
+    click.echo(tui.render_table(
+        ("PACKAGE", "CATEGORY", "WHEEL", "DESCRIPTION"),
+        ((entry["name"], entry["category"],
+          "native" if entry["native"] else "pure", entry["description"])
+         for entry in results),
+    ))
+    click.echo(tui.render_summary(
+        f"{len(results)} match(es)", (("Query", query),)
+    ))
 
 
 @pip.command("sync")
@@ -333,13 +440,18 @@ def pip_sync():
     from pydrud.commands.packages import PackageError, Requirements, sync_gradle
 
     root = _project_or_exit()
+    _show_header("pip sync", "Synchronize Python packages",
+                 "Applying pydrud.toml dependencies to the Chaquopy Gradle block",
+                 details=(("Project", os.path.basename(root)),))
     try:
         path = sync_gradle(root)
     except PackageError as exc:
-        click.echo(f"  [x] {exc}", err=True)
+        _show_error(str(exc))
         sys.exit(1)
-    click.echo(f"  Synced {len(Requirements(root))} package(s) into "
-               f"{os.path.relpath(path, root)}")
+    click.echo(tui.render_summary(
+        f"Synced {len(Requirements(root))} package(s)",
+        (("Gradle", os.path.relpath(path, root)),),
+    ))
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -357,6 +469,9 @@ def keygen(alias, password, validity, dname):
     from pydrud.commands.release import create_keystore
 
     root = _project_or_exit()
+    _show_header("keygen", "Create an Android upload key",
+                 "Generating release-signing credentials for Google Play",
+                 details=(("Alias", alias), ("Validity", f"{validity} days")))
     if password is None:
         password = click.prompt("Keystore password", hide_input=True,
                                 confirmation_prompt=True)
@@ -375,14 +490,22 @@ def icons(source, background, splash_text):
     from pydrud.commands.release import generate_icons
 
     root = _project_or_exit()
+    _show_header("icons", "Generate Android app artwork",
+                 "Creating launcher, adaptive and splash resources",
+                 details=(("Source", source or "generated lettermark"),
+                          ("Background", background)))
     written = generate_icons(root, source=source, background=background,
                              splash_text=splash_text)
-    click.echo(f"  {len(written)} resource file(s) written.")
+    click.echo(tui.render_summary(
+        f"{len(written)} resource file(s) written",
+        (("Output", "android/app/src/main/res"),),
+        success=bool(written),
+    ))
 
 
 @main.group()
 def permissions():
-    """Add or remove Android permissions in the manifest."""
+    """Manage Android permissions in YAML and the generated manifest."""
 
 
 @permissions.command("add")
@@ -392,9 +515,17 @@ def permissions_add(names):
     from pydrud.commands.release import update_permissions
 
     root = _project_or_exit()
+    _show_header("permissions add", "Add Android permissions",
+                 "Updating pydrud.yaml and AndroidManifest.xml",
+                 details=(("Project", os.path.basename(root)),))
     added = update_permissions(root, add=list(names))
     for name in added:
-        click.echo(f"  [+] {name}")
+        click.echo(tui.add_badge(name))
+    if not added:
+        click.echo(tui.neutral_badge("All requested permissions were already present."))
+    click.echo(tui.render_summary(
+        f"Added {len(added)} permission(s)", (("Source", "pydrud.yaml"),)
+    ))
 
 
 @permissions.command("remove")
@@ -404,9 +535,17 @@ def permissions_remove(names):
     from pydrud.commands.release import update_permissions
 
     root = _project_or_exit()
+    _show_header("permissions remove", "Remove Android permissions",
+                 "Updating pydrud.yaml and AndroidManifest.xml",
+                 details=(("Project", os.path.basename(root)),))
     removed = update_permissions(root, remove=list(names))
     for name in removed:
-        click.echo(f"  [-] {name}")
+        click.echo(tui.remove_badge(name))
+    if not removed:
+        click.echo(tui.neutral_badge("None of the requested permissions were present."))
+    click.echo(tui.render_summary(
+        f"Removed {len(removed)} permission(s)", (("Source", "pydrud.yaml"),)
+    ))
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -423,8 +562,13 @@ def docs(output, serve):
     from pydrud.commands.docs import build_docs, serve_docs
 
     root = _find_project_root() or os.getcwd()
+    _show_header("docs", "Build API documentation",
+                 "Generating an offline reference for the project",
+                 details=(("Project", os.path.basename(root)), ("Output", output)))
     path = build_docs(root, output)
-    click.echo(f"  Docs written to {path}")
+    click.echo(tui.render_summary(
+        "Documentation generated", (("Output", path),)
+    ))
     if serve:
         serve_docs(path)
 

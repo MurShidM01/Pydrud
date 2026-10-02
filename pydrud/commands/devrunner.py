@@ -24,7 +24,6 @@ from typing import Callable, Optional
 
 from pydrud.commands.builder import Builder
 from pydrud.core.watcher import FileWatcher
-from pydrud.utils.colors import print_step
 from pydrud.utils import tui
 
 
@@ -88,7 +87,6 @@ class DevRunner:
         self._setup_port_forward()
 
         # 4. Install and clear logs
-        print_step("Installing APK on device")
         installed = self.builder._install_and_launch(apk, self.device)
         if not installed:
             return 1

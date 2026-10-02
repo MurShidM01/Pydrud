@@ -1239,7 +1239,59 @@ the target child `index`, so the renderer inserts views in the right place:
 
 ---
 
+## Android project configuration
+
+`pydrud.yaml` is the system-level source of truth for generated Android
+files. Change it and run `pydrud sync`; the command updates the Java package,
+activity, manifest, Gradle build files, wrapper, native theme and generated
+Python metadata together. In particular, changing `app_name` or `package`
+now migrates the generated Java sources instead of continuing to use the old
+identity discovered under `android/`.
+
+```yaml
+app_name: "Taskflow"
+package: "com.example.taskflow"
+version_code: 2
+version_name: "1.1.0"
+min_sdk: 24
+target_sdk: 36
+compile_sdk: 36
+ndk: "28.2.13676358"
+abi_filters: ["arm64-v8a", "armeabi-v7a", "x86_64"]
+assets_dir: "assets"
+scheme: "taskflow"
+app_links_host: ""
+permissions:
+  - "CAMERA"
+capabilities:
+  - "notifications"
+firebase: false
+shrink: false
+python_version: "3.11"
+framework_version: "2.0.0"
+protocol_version: 2
+chaquopy_version: "17.0.0"
+agp_version: "8.13.2"
+gradle_version: "8.14.4"
+```
+
+`pydrud.toml` continues to own `[python.packages]` and `[theme]`. Its legacy
+`[app]` identity fields are kept in sync with YAML for compatibility; when
+both files contain an app name or package, YAML wins. App source under
+`src/app/`, local SDK paths, signing keys and custom Java files are not
+removed by sync.
+
+---
+
 ## CLI Reference
+
+Every command uses the same responsive terminal UI as the Hot Reload runner:
+branded command cards, phase dividers, status badges, aligned tables, final
+summaries and actionable next steps. It works in PowerShell and standard
+Unix terminals without adding a UI dependency. Colours automatically switch
+off when output is redirected; `NO_COLOR=1` / `PYDRUD_COLOR=never` disables
+them explicitly, and `PYDRUD_COLOR=always` forces them. Machine output such
+as `pydrud analyze --json` remains plain JSON.
 
 | Command | Description |
 |---------|-------------|
@@ -1256,13 +1308,14 @@ the target child `index`, so the renderer inserts views in the right place:
 | `pydrud analyze --path src` | Custom source directory |
 | `pydrud analyze --json` | Machine-readable JSON output |
 | `pydrud clean` | Clean build artifacts |
+| `pydrud sync` | Apply `pydrud.yaml` and refresh the generated native layer |
 | `pydrud doctor` | Check environment requirements |
 | `pydrud pip add <pkg>...` | Add verified PyPI packages (auto-syncs Gradle) |
 | `pydrud pip remove <pkg>...` | Remove packages |
 | `pydrud pip list [--all] [--category ai]` | Installed, or the whole catalogue |
 | `pydrud pip search <term>` | Search the supported-package registry |
 | `pydrud pip sync` | Re-apply `pydrud.toml` packages to `build.gradle.kts` |
-| `pydrud permissions add\|remove <name>...` | Edit `AndroidManifest.xml` by friendly name |
+| `pydrud permissions add\|remove <name>...` | Update YAML and the Android manifest by friendly name |
 | `pydrud icons [--source logo.png]` | Launcher, round, adaptive icons and splash |
 | `pydrud keygen` | Create the Play Store upload keystore |
 | `pydrud docs [--serve]` | Offline HTML API reference |

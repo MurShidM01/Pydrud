@@ -129,5 +129,5 @@ dependencies {
 {%- endif %}
 }
 
-// Redirect Android assets dir to the project-level assets folder.
-android.sourceSets["main"].assets.srcDirs("../../assets")
+// Redirect Android assets to the project-level directory from pydrud.yaml.
+android.sourceSets["main"].assets.srcDirs("../../{{ assets_dir | default('assets') }}")

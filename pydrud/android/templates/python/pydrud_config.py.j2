@@ -1,13 +1,19 @@
-"""Pydrud configuration for the {{ project_name }} app."""
+"""Generated Pydrud configuration for the {{ project_name }} app.
+
+Edit pydrud.yaml and run `pydrud sync`; this module is regenerated.
+"""
 
 # ── App metadata ─────────────────────────────────────────────────────────────
 APP_NAME = "{{ project_name }}"
 PACKAGE = "{{ package }}"
-VERSION = "1.0.0"
+VERSION = "{{ version_name | default("1.0.0") }}"
+VERSION_CODE = {{ version_code | default(1) }}
+ASSETS_DIR = "{{ assets_dir | default("assets") }}"
 
 # ── Android SDK ──────────────────────────────────────────────────────────────
 MIN_SDK = {{ min_sdk }}
 TARGET_SDK = {{ target_sdk }}
+COMPILE_SDK = {{ compile_sdk | default(target_sdk) }}
 
 # ── Bridge (do not change unless you know what you're doing) ─────────────────
 BRIDGE_HOST = "127.0.0.1"

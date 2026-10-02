@@ -8,7 +8,8 @@ import shutil
 import subprocess
 import sys
 
-from pydrud.utils.colors import ok, fail, warn, header
+from pydrud.utils.colors import fail, warn
+from pydrud.utils import tui
 
 _MIN_JAVA_VERSION = 17
 _MIN_SDK_VERSION = 33
@@ -16,7 +17,13 @@ _MIN_SDK_VERSION = 33
 
 def run_doctor():
     """Run all environment checks and print a summary."""
-    print(header("\n  Pydrud Doctor — Environment Check\n"))
+    print(tui.render_command_header(
+        "doctor",
+        "Development environment",
+        subtitle="Checking the tools required to build and run native Android apps",
+        details=(("Python", sys.executable), ("Platform", sys.platform)),
+    ))
+    print(tui.render_section("Toolchain"))
 
     all_ok = True
 
@@ -35,13 +42,13 @@ def run_doctor():
     # 7. Click
     all_ok &= _check_package("click", "click")
 
-    print()
-    if all_ok:
-        print(ok("All checks passed. Environment is ready."))
-    else:
-        print(fail("Some checks failed. See messages above."))
-
-    print()
+    print(tui.render_summary(
+        "Environment is ready" if all_ok else "Environment needs attention",
+        (("Result", "all checks passed" if all_ok else "one or more checks failed"),),
+        success=all_ok,
+    ))
+    if not all_ok:
+        print(tui.render_next_steps((("pydrud doctor", "run again after fixing the failed tools"),)))
 
 
 def _check_python() -> bool:
@@ -156,7 +163,7 @@ def _check_package(module: str, label: str) -> bool:
 
 
 def _print_check(name: str, detail: str, ok_: bool):
-    """Print a single check result line."""
-    icon = ok("") if ok_ else fail("")
-    detail_str = f" — {detail}" if detail else ""
-    print(f"  {icon} {name}{detail_str}")
+    """Print a single aligned check result line."""
+    detail_str = f"{tui.C_MUTED}{detail}{tui.RESET}" if detail else ""
+    message = f"{name:<20} {detail_str}".rstrip()
+    print(tui.ok_badge(message) if ok_ else tui.error_badge(message))

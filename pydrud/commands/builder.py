@@ -9,8 +9,10 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 
-from pydrud.utils.colors import ok, fail, info, warn, header, print_step
+from pydrud.utils.colors import ok, fail, info, warn, print_step
+from pydrud.utils import tui
 
 
 class Builder:
@@ -25,7 +27,14 @@ class Builder:
 
     def build(self, release: bool = False) -> str | None:
         """Run the Gradle build and return the output APK path."""
-        print(header("\n  Building Pydrud APK\n"))
+        started = time.perf_counter()
+        variant_name = "release" if release else "debug"
+        print(tui.render_command_header(
+            "build",
+            f"Building {os.path.basename(os.path.abspath(self.root))}",
+            subtitle="Compiling Python and Android sources into a native APK",
+            details=(("Variant", variant_name), ("Project", self.root)),
+        ))
 
         gradlew = self._gradlew()
         if not gradlew:
@@ -42,7 +51,8 @@ class Builder:
         task = "assembleRelease" if release else "assembleDebug"
 
         gradle_cmd = os.path.basename(gradlew) if gradlew else "gradle"
-        print(info(f"Running: {gradle_cmd} {task}"))
+        print(tui.render_section("Gradle output"))
+        print(info(f"Running {gradle_cmd} {task}"))
         print()
 
         result = subprocess.run(
@@ -71,14 +81,24 @@ class Builder:
 
         if os.path.isfile(apk_path):
             size = os.path.getsize(apk_path) / (1024 * 1024)
-            print(ok(f"APK generated: {apk_path} ({size:.1f} MB)"))
+            elapsed = time.perf_counter() - started
+            print(tui.render_summary(
+                "APK generated",
+                (("Artifact", apk_path), ("Size", f"{size:.1f} MB"),
+                 ("Variant", variant_name), ("Elapsed", f"{elapsed:.1f}s")),
+            ))
             return apk_path
 
         # Try unsigned variant.
         if release:
             alt = os.path.join(apk_dir, "app-release-unsigned.apk")
             if os.path.isfile(alt):
-                print(ok(f"APK generated (unsigned): {alt}"))
+                elapsed = time.perf_counter() - started
+                print(tui.render_summary(
+                    "Unsigned APK generated",
+                    (("Artifact", alt), ("Variant", variant_name),
+                     ("Elapsed", f"{elapsed:.1f}s")),
+                ))
                 return alt
 
         print(fail("APK not found at expected path."))
@@ -142,18 +162,24 @@ class Builder:
 
     def clean(self):
         """Clean Gradle build artifacts."""
-        print(header("\n  Cleaning Pydrud project\n"))
+        print(tui.render_command_header(
+            "clean",
+            f"Cleaning {os.path.basename(os.path.abspath(self.root))}",
+            subtitle="Removing Gradle outputs and Python bytecode caches",
+            details=(("Project", self.root),),
+        ))
         gradlew = self._gradlew()
+        gradle_status = "not available"
         if gradlew:
+            print(tui.render_section("Gradle output"))
             result = subprocess.run(
                 self._gradle_cmd("clean"),
                 cwd=self.android_dir,
                 capture_output=False,
             )
-            if result.returncode == 0:
-                print(ok("Build cleaned."))
-            else:
-                print(fail("Clean failed."))
+            gradle_status = "cleaned" if result.returncode == 0 else "failed"
+            if result.returncode != 0:
+                print(fail("Gradle clean failed."))
 
         # Also remove Python cache files.
         removed = 0
@@ -164,7 +190,11 @@ class Builder:
                     shutil.rmtree(full, ignore_errors=True)
                     removed += 1
 
-        print(ok(f"Removed {removed} __pycache__ directories."))
+        print(tui.render_summary(
+            "Project cleaned",
+            (("Gradle", gradle_status), ("Python caches", removed)),
+            success=gradle_status != "failed",
+        ))
 
     # ── internal ──────────────────────────────────────────────────────────
 
@@ -274,7 +304,7 @@ class Builder:
             with open(config_path, encoding="utf-8") as f:
                 raw_lines = f.readlines()
         except OSError as exc:
-            print(f"[WARN] Could not read {config_path}: {exc}")
+            print(warn(f"Could not read {config_path}: {exc}"))
             return {}
 
         for raw in raw_lines:
@@ -357,10 +387,10 @@ class Builder:
             print(ok(f"Android SDK:  {sdk}"))
             if os.path.isdir(platforms):
                 dirs = sorted(os.listdir(platforms))
-                print(info(f"  Platforms:   {', '.join(dirs[-3:])}"))
+                print(info(f"Platforms:   {', '.join(dirs[-3:])}"))
             if os.path.isdir(build_tools):
                 dirs = sorted(os.listdir(build_tools))
-                print(info(f"  Build tools: {', '.join(dirs[-3:])}"))
+                print(info(f"Build tools: {', '.join(dirs[-3:])}"))
         return True
 
     # ── pre-flight ────────────────────────────────────────────────────────
@@ -379,7 +409,7 @@ class Builder:
             print(warn(
                 f"Project was generated by Pydrud {project_version}, "
                 f"but {__version__} is installed."))
-            print(info("  Run `pydrud sync` to refresh the native layer."))
+            print(info("Run `pydrud sync` to refresh the native layer."))
 
     def _preflight_java(self) -> bool:
         """Resolve the generated Java sources before paying for Gradle.
@@ -424,7 +454,7 @@ class Builder:
             print(f"    {problem}")
         if len(problems) > 10:
             print(f"    … and {len(problems) - 10} more")
-        print(info("  Run `pydrud sync` to regenerate the native layer."))
+        print(info("Run `pydrud sync` to regenerate the native layer."))
         return False
 
     def _check_adb(self) -> bool:

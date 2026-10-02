@@ -45,6 +45,12 @@ replacement; they are removed in 3.0. `pydrud/android/` is now a real
 package rather than an implicit namespace one.
 
 ### Added
+* **One terminal UI across the entire CLI.** `init`, `sync`, `build`, `clean`,
+  `doctor`, `analyze`, package/permission commands, release tooling, devices,
+  docs and inspector now use the same responsive banners, status badges,
+  sections, tables, summaries and next-step prompts as Hot Reload. Root and
+  per-command help are branded too, while `analyze --json` remains clean
+  machine-readable output.
 * **`README.md` in every new project** — how to run it, what each directory
   is for, and how to add a screen.
 * **`tests/test_app.py` in every new project** — three `AppTester` tests
@@ -60,6 +66,16 @@ package rather than an implicit namespace one.
   are now pinned by tests (733 tests, 2 217 subtests in total).
 
 ### Fixed
+* **`pydrud sync` ignored Android identity and toolchain edits.** It used the
+  stale package/activity discovered in generated Java and refreshed only Java
+  plus theme resources. `pydrud.yaml` is now the Android source of truth:
+  sync migrates package/name changes and regenerates the manifest, Gradle
+  files/wrapper, SDK/NDK settings, version metadata, ABIs, assets, permissions,
+  deep links and generated Python metadata. TOML dependencies/theme settings
+  and `src/app/` remain untouched.
+* **Permission CLI edits disappeared after sync.** `pydrud permissions` now
+  records its changes in the YAML manifest as well as applying them
+  immediately to `AndroidManifest.xml`.
 * **`AppTester.settle()` returned too early.** It only checked that the
   event queue was empty — which is also true while an event is still in
   flight on the socket — so a `tap()` could silently do nothing and the
