@@ -476,7 +476,50 @@ class TestFloatingActionButtonPlacement(unittest.TestCase):
         fab = [c for c in scaffold.to_dict()["children"]
                if c["key"] == "fab"][0]
         self.assertEqual(fab["style"]["bottom"], 24 + Tokens.nav_height)
-        self.assertFalse(fab["style"]["safeAreaBottom"])
+        # FAB sits above the bar and clears the bottom navigation area
+        self.assertTrue(fab["style"].get("safeAreaBottom", True))
+
+    def test_fab_positions_start_and_center(self):
+        from pydrud import BottomNavigationBar, NavItem, Scaffold, Text
+
+        scaffold_start = Scaffold(
+            key="s1", body=Text("x"),
+            fab_position="bottom_start",
+            bottom_navigation=BottomNavigationBar(
+                [NavItem("Home", icon=Icons.HOME)], key="nav"),
+            floating_action_button=FloatingActionButton(
+                icon=Icons.ADD, key="fab"),
+        )
+        fab_start = [c for c in scaffold_start.to_dict()["children"] if c["key"] == "fab"][0]
+        self.assertEqual(fab_start["style"].get("left"), 24)
+        self.assertNotIn("right", fab_start["style"])
+
+        scaffold_center = Scaffold(
+            key="s2", body=Text("x"),
+            fab_position="bottom_center",
+            bottom_navigation=BottomNavigationBar(
+                [NavItem("Home", icon=Icons.HOME)], key="nav"),
+            floating_action_button=FloatingActionButton(
+                icon=Icons.ADD, key="fab"),
+        )
+        fab_center = [c for c in scaffold_center.to_dict()["children"] if c["key"] == "fab"][0]
+        self.assertEqual(fab_center["style"].get("alignment"), "bottomCenter")
+        self.assertNotIn("right", fab_center["style"])
+        self.assertNotIn("left", fab_center["style"])
+
+    def test_tabs_effective_height(self):
+        from pydrud import Tab, Tabs, Text
+        tabs = Tabs([Tab("Tab 1", content=Text("1")), Tab("Tab 2", content=Text("2"))], tab_height=48)
+        self.assertEqual(tabs.effective_height, 48)
+
+    def test_container_border_property(self):
+        from pydrud import Border, Container, Text
+        c1 = Container(child=Text("a"), border=Border("#FF0000", 2))
+        self.assertEqual(c1.style["border"]["left"]["color"], "#FF0000")
+        self.assertEqual(c1.style["border"]["left"]["width"], 2)
+
+        c2 = Container(child=Text("b"), border={"color": "#00FF00", "width": 1})
+        self.assertEqual(c2.style["border"]["color"], "#00FF00")
 
     def test_fab_keeps_its_offset_without_a_bar(self):
         from pydrud import Scaffold, Text

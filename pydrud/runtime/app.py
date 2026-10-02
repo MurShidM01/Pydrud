@@ -561,15 +561,42 @@ class App:
         snapshot = self.capture_state() if self._preserve_state else None
         try:
             mod_name = _module_name_for(filepath, self._project_root)
-            if mod_name and mod_name in sys.modules:
-                module = importlib.reload(sys.modules[mod_name])
-                # Re-bind the target if it came from the reloaded module.
-                target_name = getattr(self.target, "__name__", None)
-                target_mod = getattr(self.target, "__module__", None)
-                if target_name and target_mod == mod_name:
-                    new_target = getattr(module, target_name, None)
-                    if callable(new_target):
-                        self.target = new_target
+            reloaded: dict[str, Any] = {}
+
+            # Reload all loaded user modules so dependent screens/components update
+            user_modules = _find_user_modules(self._project_root)
+            if mod_name and mod_name not in user_modules:
+                user_modules.append(mod_name)
+
+            for name in list(user_modules):
+                if name in sys.modules:
+                    try:
+                        reloaded[name] = importlib.reload(sys.modules[name])
+                    except Exception as err:
+                        print(f"[Pydrud] Failed to reload module {name}: {err}")
+
+            if mod_name and mod_name in sys.modules and mod_name not in reloaded:
+                try:
+                    reloaded[mod_name] = importlib.reload(sys.modules[mod_name])
+                except Exception as err:
+                    print(f"[Pydrud] Failed to reload module {mod_name}: {err}")
+
+            # Re-bind the target if it came from a reloaded module
+            target_name = getattr(self.target, "__name__", None)
+            target_mod = getattr(self.target, "__module__", None)
+            if target_mod in reloaded:
+                new_target = getattr(reloaded[target_mod], target_name, None)
+                if callable(new_target):
+                    self.target = new_target
+            elif "app.main" in reloaded:
+                new_main = getattr(reloaded["app.main"], "main", None)
+                if callable(new_main) and (self.target is None or target_name == "main"):
+                    self.target = new_main
+            elif "main" in reloaded:
+                new_main = getattr(reloaded["main"], "main", None)
+                if callable(new_main) and (self.target is None or target_name == "main"):
+                    self.target = new_main
+
             if snapshot is not None:
                 self.restore_state(snapshot)
             kept = len(snapshot["states"]) + len(snapshot["stores"]) \

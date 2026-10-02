@@ -40,14 +40,15 @@ class _ReloadHandler(FileSystemEventHandler if _HAS_WATCHDOG else object):
     def _fire(self, path: str) -> None:
         if not path or not str(path).endswith(_EXTENSIONS):
             return
-        if any(part in _IGNORED_DIRS for part in str(path).split(os.sep)):
+        abs_path = os.path.abspath(path)
+        if any(part in _IGNORED_DIRS for part in abs_path.split(os.sep)):
             return
         now = time.time()
-        if now - self._debounce.get(path, 0) <= self._debounce_sec:
+        if now - self._debounce.get(abs_path, 0) <= self._debounce_sec:
             return
-        self._debounce[path] = now
+        self._debounce[abs_path] = now
         try:
-            self.callback(path)
+            self.callback(abs_path)
         except Exception as exc:
             print(f"[Pydrud] Watcher callback error: {exc}")
 
@@ -101,9 +102,13 @@ class FileWatcher:
         """Start watching for file changes."""
         self._running = True
         if _HAS_WATCHDOG and Observer is not None:
-            self._start_watchdog()
-        else:
-            self._start_polling()
+            try:
+                self._start_watchdog()
+                return
+            except Exception as exc:
+                print(f"[Pydrud] Watchdog failed to start ({exc}), falling back to polling.")
+                self._observer = None
+        self._start_polling()
 
     def _start_watchdog(self) -> None:
         """Start watchdog-based file watching."""
@@ -127,9 +132,30 @@ class FileWatcher:
         """Polling loop for environments without watchdog."""
         while self._running:
             for path in self.paths:
-                self._walk_and_check(path)
+                if os.path.isdir(path):
+                    self._walk_and_check(path)
+                elif os.path.isfile(path) and path.endswith(_EXTENSIONS):
+                    self._check_file(path)
             self._scanned = True
             time.sleep(self.poll_interval)
+
+    def _check_file(self, fpath: str) -> None:
+        fpath = os.path.abspath(fpath)
+        try:
+            mtime = os.stat(fpath).st_mtime
+        except OSError:
+            return
+        last = self._mtimes.get(fpath, 0)
+        if self._scanned:
+            if mtime > last or last == 0:
+                now = time.time()
+                if now - self._last_fired.get(fpath, 0) > self.debounce:
+                    self._last_fired[fpath] = now
+                    try:
+                        self.callback(fpath)
+                    except Exception as exc:
+                        print(f"[Pydrud] Watcher callback error: {exc}")
+        self._mtimes[fpath] = mtime
 
     def _walk_and_check(self, directory: str) -> None:
         """Walk a directory and check for modified .py files."""
@@ -139,7 +165,7 @@ class FileWatcher:
                 for fname in files:
                     if not fname.endswith(_EXTENSIONS):
                         continue
-                    fpath = os.path.join(root, fname)
+                    fpath = os.path.abspath(os.path.join(root, fname))
                     try:
                         mtime = os.stat(fpath).st_mtime
                     except OSError:

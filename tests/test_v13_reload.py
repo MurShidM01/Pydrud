@@ -112,6 +112,13 @@ class TestStateSnapshots(unittest.TestCase):
         app.bind(Grumpy())
         self.assertIsInstance(app.capture_state(), dict)
 
+    def test_on_hot_reload_invokes_update(self):
+        updated = []
+        app = App(target=lambda page: None)
+        app.update = lambda: updated.append(True)
+        app._on_hot_reload("non_existent_file.py")
+        self.assertTrue(updated)
+
 
 if __name__ == "__main__":
     unittest.main()
