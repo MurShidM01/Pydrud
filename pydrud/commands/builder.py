@@ -277,7 +277,7 @@ class Builder:
                     pending.clear()
                     time.sleep(0.3)  # debounce bursts of saves
                     pending.clear()
-                    print(step("Rebuilding and updating app..."))
+                    print_step("Rebuilding and updating app...")
                     apk = self.build(release=release)
                     if apk:
                         self._install_and_launch(apk, device)
