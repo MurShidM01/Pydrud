@@ -1,6 +1,6 @@
 """Widget system for Pydrud."""
 
-from pydrud.widgets.base import Widget, assign_stable_keys
+from pydrud.widgets.base import Widget, assign_stable_keys, validate_tree_keys
 from pydrud.widgets.styling import Style, EdgeInsets, Alignment, FontStyle, Border, BorderSide, BorderRadius
 from pydrud.widgets.layout import (
     Container, Column, Row, Center, Spacer, Divider,
@@ -44,6 +44,7 @@ from pydrud.widgets.responsive import (
 __all__ = [
     "Widget",
     "assign_stable_keys",
+    "validate_tree_keys",
     # layout
     "Container",
     "Column",
