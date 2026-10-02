@@ -39,6 +39,9 @@ silent hang, a no-op, or a two-minute Gradle error.
   linear clock and eases once per frame, so every curve takes exactly
   `duration`. `animate_to()` also no longer rewrites `upper`, which used to
   shrink the controller's range permanently.
+* **`pydrud analyze` reported nested-loop findings twice** (once per
+  enclosing loop). Findings are now de-duplicated and sorted by line, and a
+  test pins the analyzer's widget list against the exported widgets.
 * **Hot reload missed most saves.** The watchdog handler only listened for
   `on_modified`, but vim/PyCharm (and most editors) save atomically by
   renaming a temp file — those arrived as `on_moved` and were dropped, as were
