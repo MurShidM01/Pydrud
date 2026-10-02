@@ -113,9 +113,13 @@ public class ViewFactory {
     // ── Public API ────────────────────────────────────────────────────────
 
     public void buildTree(JSONObject tree, ViewGroup root) {
-        clear();
         if (eventDispatcher != null) eventDispatcher.clear();
+        // A full snapshot is authoritative, but existing keyed native Views
+        // remain available for adapters which can safely reuse them.
         root.removeAllViews();
+        viewMap.clear();
+        parentMap.clear();
+        nodeMap.clear();
         View v = createView(tree);
         if (v != null) {
             FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
