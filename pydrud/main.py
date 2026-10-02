@@ -141,48 +141,56 @@ class App:
         return self._build_tree()
 
     def update(self):
-        """Rebuild the widget tree and send incremental patches via TreeDiff.
+        """Rebuild and transact the desired tree.
 
-        This re-runs the ``target`` builder, so the UI is a pure function of
-        your state — the declarative model. If instead you hold on to a
-        widget, mutate it and want just that subtree refreshed, use
-        :meth:`update_widget` (``page.update(widget)``).
-
-        Falls back to a full render when there is no previous tree or when
-        the patch list grows beyond :data:`MAX_PATCHES`.
+        Python keeps desired, confirmed and in-flight UI state separate.  A
+        native ACK is the only operation which advances the confirmed snapshot.
         """
-        # Diff against what the *device* is actually showing, not merely
-        # the last tree we built. They diverge whenever an update was
-        # built while disconnected — diffing against the newer tree then
-        # produced zero patches and the UI froze.
-        old_tree = self._current_tree
-        old_clone = self._snapshot
-        if old_clone is None and old_tree is not None:
-            old_clone = old_tree.clone()
-
         new = self._build_tree()
-
+        self._desired_tree = new
         if not (self._connected and self._transport):
             return
 
-        if old_clone is None:
-            self._send(self._bridge.encode_full_render(new.to_dict()))
-            return
+        base_revision = self._confirmed_revision
+        self._desired_revision = max(self._desired_revision, base_revision) + 1
 
-        try:
-            patches = TreeDiff.diff(old_clone, new)
-        except Exception as exc:  # pragma: no cover — defensive
-            self._report_error(exc)
-            self._send(self._bridge.encode_full_render(new.to_dict()))
-            return
-
-        if not patches:
-            return
-        if len(patches) <= MAX_PATCHES:
-            self._send(self._bridge.encode_render([p.to_dict() for p in patches]))
+        old = self._snapshot
+        if old is None:
+            tx = RenderTransaction.create(
+                revision=self._desired_revision,
+                base_revision=base_revision,
+                kind="snapshot",
+                payload={"tree": new.to_dict()},
+            )
         else:
-            self._send(self._bridge.encode_full_render(new.to_dict()))
-        self._snapshot = new.clone()
+            try:
+                patches = TreeDiff.diff(old, new)
+            except Exception as exc:
+                self._report_error(exc)
+                tx = RenderTransaction.create(
+                    revision=self._desired_revision,
+                    base_revision=base_revision,
+                    kind="snapshot",
+                    payload={"tree": new.to_dict()},
+                )
+            else:
+                if not patches:
+                    return
+                kind = "patch" if len(patches) <= MAX_PATCHES else "snapshot"
+                payload = (
+                    {"patches": [p.to_dict() for p in patches]}
+                    if kind == "patch"
+                    else {"tree": new.to_dict()}
+                )
+                tx = RenderTransaction.create(
+                    revision=self._desired_revision,
+                    base_revision=base_revision,
+                    kind=kind,
+                    payload=payload,
+                )
+
+        self._inflight[tx.tx_id] = tx
+        self._send(self._bridge.encode_transaction(tx))
 
     def update_widget(self, *widgets: Widget) -> None:
         """Push changes for mutated widgets without re-running the builder.
@@ -227,11 +235,19 @@ class App:
         return None
 
     def render(self):
-        """Force a full re-render (send the entire tree)."""
+        """Force a full desired-state snapshot reconciliation."""
         tree = self._build_tree()
-        self._snapshot = tree.clone()
+        self._desired_tree = tree
         if self._connected and self._transport:
-            self._send(self._bridge.encode_full_render(tree.to_dict()))
+            self._desired_revision = max(self._desired_revision, self._confirmed_revision) + 1
+            tx = RenderTransaction.create(
+                revision=self._desired_revision,
+                base_revision=self._confirmed_revision,
+                kind="snapshot",
+                payload={"tree": tree.to_dict()},
+            )
+            self._inflight[tx.tx_id] = tx
+            self._send(self._bridge.encode_transaction(tx))
 
     def update_state(self, state: State):
         """Rebuild after a State change."""
