@@ -223,16 +223,22 @@ class TestEdgeToEdgeLayout(unittest.TestCase):
         return {child["key"]: child["style"] for child in column["children"]}
 
     def test_app_bar_and_bottom_nav_take_the_insets(self):
-        slots = self.slots(Scaffold(
+        scaffold = Scaffold(
             key="s",
             app_bar=AppBar(title="T", key="bar"),
             body=Text("x"),
             bottom_navigation=BottomNavigationBar(
                 [NavItem("Home", icon=Icons.HOME)], key="nav"),
-        ))
+        )
+        slots = self.slots(scaffold)
         self.assertTrue(slots["bar._bar"]["safeAreaTop"])
-        self.assertTrue(slots["nav"]["safeAreaBottom"])
+        # The bottom bar draws its own gesture inset, so it opts out of the
+        # generic safe-area padding (otherwise the inset is counted twice).
+        self.assertFalse(slots["nav"]["safeAreaBottom"])
         self.assertNotIn("safeAreaTop", slots["nav"])
+        column = scaffold.to_dict()["children"][0]["children"]
+        nav = [c for c in column if c["key"] == "nav"][0]
+        self.assertTrue(nav["props"]["safeArea"])
 
     def test_bare_body_takes_both_insets(self):
         slots = self.slots(Scaffold(key="s", body=Text("x")))

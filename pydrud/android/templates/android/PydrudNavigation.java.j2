@@ -1,0 +1,859 @@
+package {{ package }};
+
+import android.animation.ValueAnimator;
+import android.content.Context;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.RectF;
+import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
+import android.text.TextUtils;
+import android.util.TypedValue;
+import android.view.Gravity;
+import android.view.HapticFeedbackConstants;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+/**
+ * Pydrud's own navigation surfaces.
+ *
+ * <p>Android's {@code BottomNavigationView} and {@code TabLayout} only let
+ * you change what their theme attributes expose, which is why "customisable"
+ * bottom bars usually end up looking the same. These two views are drawn by
+ * Pydrud, so every property Python sends — height, corner radius, floating
+ * margin, indicator shape, per-item colours, badge styling, label behaviour,
+ * icon sizes, ripple, motion — really changes the pixels.
+ *
+ * <p>Both views are patchable: {@link PydrudNavBar#applyProps(JSONObject)}
+ * and {@link PydrudTabBar#applyProps(JSONObject)} accept a partial props
+ * object, so changing the selected index costs one small patch instead of
+ * rebuilding the bar.
+ */
+public final class PydrudNavigation {
+
+    private PydrudNavigation() {}
+
+    static int color(JSONObject o, String name, int fallback) {
+        if (o == null) return fallback;
+        String raw = o.optString(name, "");
+        if (raw == null || raw.isEmpty()) return fallback;
+        return PydrudTheme.parse(raw, fallback);
+    }
+
+    static float f(JSONObject o, String name, float fallback) {
+        if (o == null) return fallback;
+        return (float) o.optDouble(name, fallback);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Bottom navigation
+    // ──────────────────────────────────────────────────────────────────────
+
+    /** A fully customisable bottom navigation bar / Material 3 NavigationBar. */
+    public static class PydrudNavBar extends FrameLayout {
+
+        public interface OnSelect { void onSelect(int index); }
+
+        private final LinearLayout row;
+        private final Paint indicatorPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint dividerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF indicatorRect = new RectF();
+
+        private JSONObject props = new JSONObject();
+        private JSONArray items = new JSONArray();
+        private OnSelect listener;
+
+        private int selected = 0;
+        private float indicatorX = -1f;      // animated centre of the pill
+        private ValueAnimator indicatorAnim;
+
+        // Resolved style (px / colours).
+        private String indicatorStyle = "pill";
+        private int indicatorColor;
+        private int indicatorW, indicatorH, indicatorRadius;
+        private int selectedColor, unselectedColor;
+        private int iconSize, selectedIconSize;
+        private float labelSize, selectedLabelSize;
+        private String labelBehavior = "always";
+        private boolean boldSelected = true;
+        private int itemPadding, iconLabelGap, maxLabelLines = 1;
+        private int badgeColor, badgeTextColor;
+        private boolean ripple = true, animate = true, haptic = false;
+        private int rippleColor;
+        private int duration = 180;
+        private boolean topDivider = false;
+        private int dividerColor;
+        private boolean shifting = false;
+
+        // Surface
+        private final Paint surfacePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF surfaceRect = new RectF();
+        private int bgColor, borderColor, shadowColor;
+        private float radiusPx, shadowRadius;
+        private int borderWidthPx, marginPx, barHeightPx;
+        private boolean floating = false, insetEnabled = true;
+
+        public PydrudNavBar(Context context) {
+            super(context);
+            row = new LinearLayout(context);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            addView(row, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+            setWillNotDraw(false);
+        }
+
+        public void setOnSelect(OnSelect l) { this.listener = l; }
+
+        public int selectedIndex() { return selected; }
+
+        /** Apply a full or partial props object and rebuild what changed. */
+        public void applyProps(JSONObject p) {
+            if (p == null) return;
+            boolean structural = p.has("items");
+            java.util.Iterator<String> keys = p.keys();
+            while (keys.hasNext()) {
+                String k = keys.next();
+                try { props.put(k, p.get(k)); } catch (Exception ignored) { }
+                if (!"selected".equals(k)) structural = true;
+            }
+            if (p.has("items")) items = props.optJSONArray("items");
+            if (items == null) items = new JSONArray();
+
+            int next = props.optInt("selected", selected);
+            boolean selectionChanged = next != selected;
+            selected = Math.max(0, Math.min(next, Math.max(0, items.length() - 1)));
+
+            resolveStyle();
+            if (structural || row.getChildCount() != items.length()) {
+                buildItems();
+            } else {
+                refreshItems();
+            }
+            if (selectionChanged) animateIndicator(); else invalidate();
+        }
+
+        // ── style ───────────────────────────────────────────────────────
+
+        private void resolveStyle() {
+            JSONObject p = props;
+            indicatorStyle = p.optString("indicator", "pill");
+            selectedColor = color(p, "selectedColor", PydrudTheme.primary);
+            unselectedColor = color(p, "unselectedColor", PydrudTheme.onSurfaceVariant);
+            indicatorColor = color(p, "indicatorColor",
+                PydrudTheme.alpha(selectedColor, 0.14f));
+            indicatorW = PydrudTheme.dp(f(p, "indicatorWidth", 64));
+            indicatorH = PydrudTheme.dp(f(p, "indicatorHeight", 32));
+            indicatorRadius = PydrudTheme.dp(
+                f(p, "indicatorRadius", indicatorStyle.equals("circle") ? 999 : 16));
+
+            iconSize = PydrudTheme.dp(f(p, "iconSize", PydrudTheme.iconSize));
+            selectedIconSize = PydrudTheme.dp(
+                f(p, "selectedIconSize", f(p, "iconSize", PydrudTheme.iconSize)));
+            labelSize = f(p, "labelSize", 11f);
+            selectedLabelSize = f(p, "selectedLabelSize", labelSize);
+            labelBehavior = p.optString("labelBehavior",
+                p.optBoolean("showLabels", true) ? "always" : "never");
+            boldSelected = p.optBoolean("boldSelected", true);
+            maxLabelLines = Math.max(1, p.optInt("maxLabelLines", 1));
+
+            itemPadding = PydrudTheme.dp(f(p, "itemPadding", 6));
+            iconLabelGap = PydrudTheme.dp(f(p, "iconLabelGap", 3));
+
+            badgeColor = color(p, "badgeColor", PydrudTheme.error);
+            badgeTextColor = color(p, "badgeTextColor", 0xFFFFFFFF);
+
+            ripple = p.optBoolean("ripple", true);
+            rippleColor = color(p, "rippleColor",
+                PydrudTheme.alpha(selectedColor, 0.12f));
+            animate = p.optBoolean("animate", true);
+            duration = p.optInt("duration", 180);
+            haptic = p.optBoolean("haptic", false);
+            shifting = "shifting".equals(p.optString("type", "fixed"));
+
+            topDivider = p.optBoolean("topDivider", false);
+            dividerColor = color(p, "dividerColor", PydrudTheme.outline);
+            dividerPaint.setColor(dividerColor);
+            indicatorPaint.setColor(indicatorColor);
+
+            applySurface();
+        }
+
+        /**
+         * Resolve the surface: background, radius, border, shadow, floating
+         * margin and the gesture inset.
+         *
+         * <p>The background is drawn by the view instead of being a
+         * {@code Drawable}, because a floating bar needs the rounded card to
+         * sit *inside* the margin and above the gesture inset, while the
+         * view itself still spans the full width.
+         */
+        private void applySurface() {
+            JSONObject p = props;
+            bgColor = color(p, "bg", PydrudTheme.surface);
+            floating = p.optBoolean("floating", false);
+            radiusPx = PydrudTheme.dp(f(p, "radius", floating ? 24 : 0));
+            borderWidthPx = PydrudTheme.dp(f(p, "borderWidth", 0));
+            borderColor = color(p, "borderColor", PydrudTheme.outline);
+            shadowColor = color(p, "shadowColor", PydrudTheme.shadow);
+            shadowRadius = PydrudTheme.dp(f(p, "elevation", floating ? 10 : 0));
+            marginPx = PydrudTheme.dp(f(p, "margin", floating ? 12 : 0));
+            insetEnabled = p.optBoolean("safeArea", true);
+            barHeightPx = PydrudTheme.dp(f(p, "height", PydrudTheme.navHeight));
+
+            surfacePaint.setColor(bgColor);
+            borderPaint.setColor(borderColor);
+            borderPaint.setStyle(Paint.Style.STROKE);
+            borderPaint.setStrokeWidth(borderWidthPx);
+            if (shadowRadius > 0) {
+                setLayerType(LAYER_TYPE_SOFTWARE, null);
+                surfacePaint.setShadowLayer(shadowRadius, 0,
+                    shadowRadius / 3f, shadowColor);
+            } else {
+                surfacePaint.clearShadowLayer();
+            }
+
+            int inset = insetEnabled ? PydrudTheme.insetBottom : 0;
+            setPadding(floating ? marginPx : 0, 0,
+                       floating ? marginPx : 0,
+                       (floating ? marginPx : 0) + inset);
+            setBackground(null);
+            requestLayout();
+        }
+
+        @Override
+        protected void onMeasure(int widthSpec, int heightSpec) {
+            // The bar's declared height is *content* height: the gesture
+            // inset and a floating margin are added on top, so the same
+            // widget looks identical on a gesture phone and a button phone.
+            int extra = getPaddingBottom() + getPaddingTop();
+            int mode = MeasureSpec.getMode(heightSpec);
+            if (mode == MeasureSpec.EXACTLY || mode == MeasureSpec.AT_MOST) {
+                int size = Math.max(MeasureSpec.getSize(heightSpec), barHeightPx);
+                heightSpec = MeasureSpec.makeMeasureSpec(
+                    Math.max(barHeightPx, size - extra) + extra, MeasureSpec.EXACTLY);
+            } else {
+                heightSpec = MeasureSpec.makeMeasureSpec(
+                    barHeightPx + extra, MeasureSpec.EXACTLY);
+            }
+            super.onMeasure(widthSpec, heightSpec);
+        }
+
+        private void drawSurface(Canvas canvas) {
+            float left = getPaddingLeft();
+            float right = getWidth() - getPaddingRight();
+            float top = getPaddingTop();
+            float bottom = getHeight() - (floating ? getPaddingBottom() : 0);
+            if (right <= left || bottom <= top) return;
+            surfaceRect.set(left, top, right, bottom);
+            canvas.drawRoundRect(surfaceRect, radiusPx, radiusPx, surfacePaint);
+            if (borderWidthPx > 0) {
+                canvas.drawRoundRect(surfaceRect, radiusPx, radiusPx, borderPaint);
+            }
+        }
+
+        // ── items ───────────────────────────────────────────────────────
+
+        private void buildItems() {
+            row.removeAllViews();
+            for (int i = 0; i < items.length(); i++) {
+                row.addView(buildItem(i), new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.MATCH_PARENT, weightFor(i)));
+            }
+            post(new Runnable() {
+                @Override public void run() { animateIndicator(); }
+            });
+        }
+
+        /** A "shifting" bar gives the active destination more room. */
+        private float weightFor(int index) {
+            if (!shifting) return 1f;
+            return index == selected ? 1.6f : 1f;
+        }
+
+        private View buildItem(final int index) {
+            JSONObject item = items.optJSONObject(index);
+            if (item == null) item = new JSONObject();
+            final boolean enabled = item.optBoolean("enabled", true);
+            final boolean active = index == selected;
+
+            LinearLayout cell = new LinearLayout(getContext());
+            cell.setOrientation(LinearLayout.VERTICAL);
+            cell.setGravity(Gravity.CENTER);
+            cell.setPadding(itemPadding, itemPadding, itemPadding, itemPadding);
+            cell.setClickable(enabled);
+            cell.setFocusable(enabled);
+            cell.setAlpha(enabled ? 1f : 0.4f);
+            cell.setTag(item);
+
+            int fg = active
+                ? color(item, "color", selectedColor)
+                : color(item, "unselectedColor", unselectedColor);
+
+            // Icon (with optional badge on top).
+            FrameLayout iconHost = new FrameLayout(getContext());
+            ImageView icon = new ImageView(getContext());
+            String name = active
+                ? item.optString("activeIcon", item.optString("icon", ""))
+                : item.optString("icon", "");
+            if (name == null || name.isEmpty()) name = item.optString("icon", "");
+            int size = active ? selectedIconSize : iconSize;
+            if (!name.isEmpty()) {
+                Drawable d = PydrudIcons.drawable(name, fg, size);
+                icon.setImageDrawable(d);
+            }
+            iconHost.addView(icon, new FrameLayout.LayoutParams(size, size));
+
+            String badge = item.optString("badge", "");
+            if (!badge.isEmpty()) iconHost.addView(badgeView(item, badge));
+            cell.addView(iconHost, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+            if (showLabel(active)) {
+                TextView label = new TextView(getContext());
+                label.setText(item.optString("label", ""));
+                label.setSingleLine(maxLabelLines == 1);
+                label.setMaxLines(maxLabelLines);
+                label.setEllipsize(TextUtils.TruncateAt.END);
+                label.setGravity(Gravity.CENTER);
+                label.setTextColor(fg);
+                PydrudTheme.applyTextDefaults(label,
+                    active ? selectedLabelSize : labelSize,
+                    active && boldSelected ? 600 : 500, fg);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+                lp.topMargin = iconLabelGap;
+                cell.addView(label, lp);
+            }
+
+            int itemBg = color(item, "bg", Color.TRANSPARENT);
+            if (ripple) {
+                cell.setBackground(PydrudTheme.ripple(
+                    new android.graphics.drawable.ColorDrawable(itemBg),
+                    rippleColor, indicatorRadius));
+            } else if (itemBg != Color.TRANSPARENT) {
+                cell.setBackgroundColor(itemBg);
+            }
+
+            String tooltip = item.optString("tooltip", "");
+            if (!tooltip.isEmpty() && android.os.Build.VERSION.SDK_INT >= 26) {
+                cell.setTooltipText(tooltip);
+            }
+            cell.setContentDescription(item.optString("label", ""));
+
+            if (enabled) {
+                cell.setOnClickListener(new OnClickListener() {
+                    @Override public void onClick(View v) {
+                        if (haptic) {
+                            v.performHapticFeedback(
+                                HapticFeedbackConstants.VIRTUAL_KEY);
+                        }
+                        select(index, true);
+                    }
+                });
+            }
+            return cell;
+        }
+
+        private boolean showLabel(boolean active) {
+            if ("never".equals(labelBehavior)) return false;
+            if ("selected".equals(labelBehavior)) return active;
+            return true;
+        }
+
+        private View badgeView(JSONObject item, String text) {
+            boolean dot = "dot".equals(text) || ".".equals(text);
+            TextView badge = new TextView(getContext());
+            int bgColor = color(item, "badgeColor", badgeColor);
+            int fgColor = color(item, "badgeTextColor", badgeTextColor);
+            GradientDrawable shape = new GradientDrawable();
+            shape.setColor(bgColor);
+            shape.setCornerRadius(PydrudTheme.dp(999));
+            badge.setBackground(shape);
+            if (!dot) {
+                badge.setText(text);
+                badge.setTextColor(fgColor);
+                badge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9f);
+                badge.setTypeface(Typeface.DEFAULT_BOLD);
+                badge.setGravity(Gravity.CENTER);
+                badge.setPadding(PydrudTheme.dp(4), 0, PydrudTheme.dp(4), 0);
+            }
+            int size = PydrudTheme.dp(dot ? 8 : 16);
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                dot ? size : ViewGroup.LayoutParams.WRAP_CONTENT, size);
+            lp.gravity = Gravity.TOP | Gravity.END;
+            lp.topMargin = PydrudTheme.dp(-2);
+            lp.setMarginEnd(PydrudTheme.dp(-6));
+            badge.setMinWidth(size);
+            badge.setLayoutParams(lp);
+            return badge;
+        }
+
+        /** Re-skin existing cells without re-creating them. */
+        private void refreshItems() {
+            buildItems();
+        }
+
+        // ── selection ───────────────────────────────────────────────────
+
+        public void select(int index, boolean notify) {
+            if (index < 0 || index >= items.length()) return;
+            if (index != selected) {
+                selected = index;
+                try { props.put("selected", index); } catch (Exception ignored) { }
+                buildItems();
+                animateIndicator();
+            }
+            if (notify && listener != null) listener.onSelect(index);
+        }
+
+        private void animateIndicator() {
+            View cell = row.getChildAt(selected);
+            if (cell == null) return;
+            final float target = cell.getLeft() + cell.getWidth() / 2f;
+            if (!animate || indicatorX < 0) {
+                indicatorX = target;
+                invalidate();
+                return;
+            }
+            if (indicatorAnim != null) indicatorAnim.cancel();
+            indicatorAnim = ValueAnimator.ofFloat(indicatorX, target);
+            indicatorAnim.setDuration(Math.max(0, duration));
+            indicatorAnim.setInterpolator(
+                new android.view.animation.DecelerateInterpolator());
+            indicatorAnim.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+                @Override public void onAnimationUpdate(ValueAnimator a) {
+                    indicatorX = (Float) a.getAnimatedValue();
+                    invalidate();
+                }
+            });
+            indicatorAnim.start();
+        }
+
+        @Override
+        protected void onLayout(boolean changed, int l, int t, int r, int b) {
+            super.onLayout(changed, l, t, r, b);
+            if (changed) {
+                View cell = row.getChildAt(selected);
+                if (cell != null) indicatorX = cell.getLeft() + cell.getWidth() / 2f;
+            }
+        }
+
+        @Override
+        protected void dispatchDraw(Canvas canvas) {
+            drawSurface(canvas);
+            drawIndicator(canvas);
+            super.dispatchDraw(canvas);
+            if (topDivider) {
+                float h = Math.max(1f, PydrudTheme.dp(0.5f));
+                canvas.drawRect(getPaddingLeft(), getPaddingTop(),
+                                getWidth() - getPaddingRight(),
+                                getPaddingTop() + h, dividerPaint);
+            }
+        }
+
+        private void drawIndicator(Canvas canvas) {
+            if ("none".equals(indicatorStyle) || indicatorX < 0) return;
+            View cell = row.getChildAt(selected);
+            if (cell == null) return;
+
+            float cx = indicatorX;
+            int contentHeight = getHeight() - getPaddingBottom();
+            if ("line".equals(indicatorStyle)) {
+                float thickness = indicatorH > 0
+                    ? Math.min(indicatorH, PydrudTheme.dp(4)) : PydrudTheme.dp(3);
+                float half = (indicatorW > 0 ? indicatorW : cell.getWidth() * 0.5f) / 2f;
+                indicatorRect.set(cx - half, 0, cx + half, thickness);
+                canvas.drawRoundRect(indicatorRect, thickness, thickness, indicatorPaint);
+                return;
+            }
+            if ("dot".equals(indicatorStyle)) {
+                float r = PydrudTheme.dp(3);
+                canvas.drawCircle(cx, contentHeight - PydrudTheme.dp(8), r, indicatorPaint);
+                return;
+            }
+
+            // pill / circle sit behind the icon.
+            float width = "circle".equals(indicatorStyle) ? indicatorH : indicatorW;
+            float top = cell.getTop() + itemPadding;
+            float bottom = top + indicatorH;
+            if (bottom > contentHeight) {
+                top = Math.max(0, (contentHeight - indicatorH) / 2f);
+                bottom = top + indicatorH;
+            }
+            indicatorRect.set(cx - width / 2f, top, cx + width / 2f, bottom);
+            canvas.drawRoundRect(indicatorRect, indicatorRadius, indicatorRadius,
+                                 indicatorPaint);
+        }
+
+        /** Re-apply insets and sizes after a rotation or inset change. */
+        public void refreshMetrics() {
+            resolveStyle();
+            buildItems();
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Tab bar
+    // ──────────────────────────────────────────────────────────────────────
+
+    /** A fully customisable tab strip (fixed or scrollable). */
+    public static class PydrudTabBar extends FrameLayout {
+
+        public interface OnSelect { void onSelect(int index); }
+
+        private final LinearLayout strip;
+        private final HorizontalScrollView scroller;
+        private final Paint indicatorPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint dividerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF rect = new RectF();
+
+        private JSONObject props = new JSONObject();
+        private JSONArray tabs = new JSONArray();
+        private OnSelect listener;
+        private int selected = 0;
+
+        private String indicatorStyle = "line";
+        private String indicatorSize = "label";
+        private int indicatorColor, indicatorHeight, indicatorRadius;
+        private int labelColor, unselectedLabelColor;
+        private float labelSize, selectedLabelSize;
+        private boolean boldSelected = true, uppercase = false, showLabels = true;
+        private int iconSize;
+        private String iconPosition = "top";
+        private int tabHeight, tabMinWidth, padding;
+        private String align = "fill";
+        private boolean scrollable = false, divider = false, ripple = true;
+        private int dividerColor, rippleColor;
+        private boolean animate = true;
+        private int duration = 220;
+        private float indicatorLeft = -1f, indicatorRight = -1f;
+        private ValueAnimator anim;
+
+        public PydrudTabBar(Context context) {
+            super(context);
+            strip = new LinearLayout(context);
+            strip.setOrientation(LinearLayout.HORIZONTAL);
+            scroller = new HorizontalScrollView(context);
+            scroller.setHorizontalScrollBarEnabled(false);
+            scroller.addView(strip, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+            addView(scroller, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+            setWillNotDraw(false);
+        }
+
+        public void setOnSelect(OnSelect l) { this.listener = l; }
+
+        public int selectedIndex() { return selected; }
+
+        public void applyProps(JSONObject p) {
+            if (p == null) return;
+            boolean structural = false;
+            java.util.Iterator<String> keys = p.keys();
+            while (keys.hasNext()) {
+                String k = keys.next();
+                try { props.put(k, p.get(k)); } catch (Exception ignored) { }
+                if (!"selected".equals(k)) structural = true;
+            }
+            if (props.has("tabs")) tabs = props.optJSONArray("tabs");
+            if (tabs == null) tabs = new JSONArray();
+
+            int next = props.optInt("selected", selected);
+            boolean selectionChanged = next != selected;
+            selected = Math.max(0, Math.min(next, Math.max(0, tabs.length() - 1)));
+
+            resolveStyle();
+            if (structural || strip.getChildCount() != tabs.length()) build();
+            else build();
+            if (selectionChanged) animateIndicator(); else invalidate();
+        }
+
+        private void resolveStyle() {
+            JSONObject p = props;
+            scrollable = p.optBoolean("scrollable",
+                "scrollable".equals(p.optString("mode", "fixed")));
+            indicatorStyle = p.optString("indicator", "line");
+            indicatorSize = p.optString("indicatorSize", "label");
+            indicatorColor = color(p, "indicatorColor", PydrudTheme.primary);
+            indicatorHeight = PydrudTheme.dp(f(p, "indicatorHeight",
+                "pill".equals(indicatorStyle) ? 32 : 3));
+            indicatorRadius = PydrudTheme.dp(f(p, "indicatorRadius",
+                "pill".equals(indicatorStyle) ? 999 : 3));
+            labelColor = color(p, "labelColor", indicatorColor);
+            unselectedLabelColor = color(p, "unselectedLabelColor",
+                PydrudTheme.onSurfaceVariant);
+            labelSize = f(p, "labelSize", 14f);
+            selectedLabelSize = f(p, "selectedLabelSize", labelSize);
+            boldSelected = p.optBoolean("boldSelected", true);
+            uppercase = p.optBoolean("uppercase", false);
+            showLabels = p.optBoolean("showLabels", true);
+            iconSize = PydrudTheme.dp(f(p, "iconSize", 20));
+            iconPosition = p.optString("iconPosition", "top");
+            tabHeight = PydrudTheme.dp(f(p, "tabHeight", 48));
+            tabMinWidth = PydrudTheme.dp(f(p, "tabMinWidth", scrollable ? 88 : 0));
+            padding = PydrudTheme.dp(f(p, "padding", 12));
+            align = p.optString("align", "fill");
+            divider = p.optBoolean("divider", false);
+            dividerColor = color(p, "dividerColor", PydrudTheme.outline);
+            ripple = p.optBoolean("ripple", true);
+            rippleColor = color(p, "rippleColor",
+                PydrudTheme.alpha(indicatorColor, 0.10f));
+            animate = p.optBoolean("animate", true);
+            duration = p.optInt("duration", 220);
+
+            indicatorPaint.setColor(indicatorColor);
+            dividerPaint.setColor(dividerColor);
+
+            int bg = color(p, "bg", PydrudTheme.surface);
+            float radius = PydrudTheme.dp(f(p, "radius", 0));
+            GradientDrawable shape = new GradientDrawable();
+            shape.setColor(bg);
+            shape.setCornerRadius(radius);
+            setBackground(shape);
+            setElevation(PydrudTheme.dp(f(p, "elevation", 0)));
+            if (radius > 0) setClipToOutline(true);
+
+            ViewGroup.LayoutParams lp = getLayoutParams();
+            if (lp != null) { lp.height = tabHeight; setLayoutParams(lp); }
+            scroller.setFillViewport(!scrollable);
+        }
+
+        private void build() {
+            strip.removeAllViews();
+            strip.setGravity(gravityFor(align));
+            for (int i = 0; i < tabs.length(); i++) {
+                strip.addView(buildTab(i), tabParams(i));
+            }
+            post(new Runnable() {
+                @Override public void run() {
+                    measureIndicator(false);
+                    scrollToSelected();
+                }
+            });
+        }
+
+        private int gravityFor(String a) {
+            if ("center".equals(a)) return Gravity.CENTER;
+            if ("end".equals(a)) return Gravity.END | Gravity.CENTER_VERTICAL;
+            return Gravity.START | Gravity.CENTER_VERTICAL;
+        }
+
+        private LinearLayout.LayoutParams tabParams(int index) {
+            boolean fill = "fill".equals(align) && !scrollable;
+            LinearLayout.LayoutParams lp = fill
+                ? new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+                : new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT);
+            return lp;
+        }
+
+        private View buildTab(final int index) {
+            JSONObject tab = tabs.optJSONObject(index);
+            if (tab == null) tab = new JSONObject();
+            final boolean active = index == selected;
+            final boolean enabled = tab.optBoolean("enabled", true);
+
+            LinearLayout cell = new LinearLayout(getContext());
+            cell.setOrientation("start".equals(iconPosition)
+                ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+            cell.setGravity(Gravity.CENTER);
+            cell.setPadding(padding, 0, padding, 0);
+            cell.setMinimumWidth(tabMinWidth);
+            cell.setAlpha(enabled ? 1f : 0.4f);
+
+            int fg = active
+                ? color(tab, "color", labelColor)
+                : color(tab, "unselectedColor", unselectedLabelColor);
+
+            String iconName = active
+                ? tab.optString("activeIcon", tab.optString("icon", ""))
+                : tab.optString("icon", "");
+            if (iconName == null || iconName.isEmpty()) {
+                iconName = tab.optString("icon", "");
+            }
+            if (!iconName.isEmpty()) {
+                ImageView icon = new ImageView(getContext());
+                icon.setImageDrawable(PydrudIcons.drawable(iconName, fg, iconSize));
+                LinearLayout.LayoutParams ip =
+                    new LinearLayout.LayoutParams(iconSize, iconSize);
+                if ("start".equals(iconPosition)) {
+                    ip.setMarginEnd(PydrudTheme.dp(6));
+                } else {
+                    ip.bottomMargin = PydrudTheme.dp(2);
+                }
+                cell.addView(icon, ip);
+            }
+
+            if (showLabels) {
+                TextView label = new TextView(getContext());
+                String text = tab.optString("label", "");
+                label.setText(uppercase ? text.toUpperCase(java.util.Locale.US) : text);
+                label.setSingleLine(true);
+                label.setEllipsize(TextUtils.TruncateAt.END);
+                PydrudTheme.applyTextDefaults(label,
+                    active ? selectedLabelSize : labelSize,
+                    active && boldSelected ? 600 : 500, fg);
+                cell.addView(label);
+            }
+
+            String badge = tab.optString("badge", "");
+            if (!badge.isEmpty()) {
+                TextView dot = new TextView(getContext());
+                dot.setText(badge);
+                dot.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9f);
+                dot.setTypeface(Typeface.DEFAULT_BOLD);
+                dot.setGravity(Gravity.CENTER);
+                dot.setTextColor(color(tab, "badgeTextColor", 0xFFFFFFFF));
+                GradientDrawable shape = new GradientDrawable();
+                shape.setColor(color(tab, "badgeColor", PydrudTheme.error));
+                shape.setCornerRadius(PydrudTheme.dp(999));
+                dot.setBackground(shape);
+                dot.setPadding(PydrudTheme.dp(5), 0, PydrudTheme.dp(5), 0);
+                LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, PydrudTheme.dp(16));
+                bp.setMarginStart(PydrudTheme.dp(6));
+                cell.addView(dot, bp);
+            }
+
+            if (ripple) {
+                cell.setBackground(PydrudTheme.ripple(
+                    new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT),
+                    rippleColor, indicatorRadius));
+            }
+            String tooltip = tab.optString("tooltip", "");
+            if (!tooltip.isEmpty() && android.os.Build.VERSION.SDK_INT >= 26) {
+                cell.setTooltipText(tooltip);
+            }
+            if (enabled) {
+                cell.setOnClickListener(new OnClickListener() {
+                    @Override public void onClick(View v) { select(index, true); }
+                });
+            }
+            return cell;
+        }
+
+        public void select(int index, boolean notify) {
+            if (index < 0 || index >= tabs.length()) return;
+            if (index != selected) {
+                selected = index;
+                try { props.put("selected", index); } catch (Exception ignored) { }
+                build();
+                animateIndicator();
+                scrollToSelected();
+            }
+            if (notify && listener != null) listener.onSelect(index);
+        }
+
+        private void scrollToSelected() {
+            View cell = strip.getChildAt(selected);
+            if (cell == null || !scrollable) return;
+            int target = cell.getLeft() - (getWidth() - cell.getWidth()) / 2;
+            scroller.smoothScrollTo(Math.max(0, target), 0);
+        }
+
+        private float[] boundsFor(int index) {
+            View cell = strip.getChildAt(index);
+            if (cell == null) return null;
+            float left = cell.getLeft() - scroller.getScrollX();
+            float right = cell.getRight() - scroller.getScrollX();
+            if ("label".equals(indicatorSize)) {
+                float inset = Math.min(padding, (right - left) * 0.25f);
+                left += inset;
+                right -= inset;
+            } else if ("tab".equals(indicatorSize)) {
+                // full tab width — nothing to trim.
+                left += 0;
+            }
+            return new float[]{left, right};
+        }
+
+        private void measureIndicator(boolean animated) {
+            float[] b = boundsFor(selected);
+            if (b == null) return;
+            if (!animated || indicatorLeft < 0) {
+                indicatorLeft = b[0];
+                indicatorRight = b[1];
+                invalidate();
+                return;
+            }
+            if (anim != null) anim.cancel();
+            final float fromL = indicatorLeft, fromR = indicatorRight;
+            final float toL = b[0], toR = b[1];
+            anim = ValueAnimator.ofFloat(0f, 1f);
+            anim.setDuration(Math.max(0, duration));
+            anim.setInterpolator(new android.view.animation.DecelerateInterpolator());
+            anim.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+                @Override public void onAnimationUpdate(ValueAnimator a) {
+                    float t = (Float) a.getAnimatedValue();
+                    indicatorLeft = fromL + (toL - fromL) * t;
+                    indicatorRight = fromR + (toR - fromR) * t;
+                    invalidate();
+                }
+            });
+            anim.start();
+        }
+
+        private void animateIndicator() {
+            post(new Runnable() {
+                @Override public void run() { measureIndicator(animate); }
+            });
+        }
+
+        @Override
+        protected void onLayout(boolean changed, int l, int t, int r, int b) {
+            super.onLayout(changed, l, t, r, b);
+            if (changed) measureIndicator(false);
+        }
+
+        @Override
+        protected void dispatchDraw(Canvas canvas) {
+            if ("pill".equals(indicatorStyle)) drawIndicator(canvas);
+            super.dispatchDraw(canvas);
+            if (!"pill".equals(indicatorStyle)) drawIndicator(canvas);
+            if (divider) {
+                float h = Math.max(1f, PydrudTheme.dp(0.5f));
+                canvas.drawRect(0, getHeight() - h, getWidth(), getHeight(),
+                                dividerPaint);
+            }
+        }
+
+        private void drawIndicator(Canvas canvas) {
+            if ("none".equals(indicatorStyle) || indicatorLeft < 0) return;
+            if ("dot".equals(indicatorStyle)) {
+                float cx = (indicatorLeft + indicatorRight) / 2f;
+                canvas.drawCircle(cx, getHeight() - PydrudTheme.dp(6),
+                                  PydrudTheme.dp(3), indicatorPaint);
+                return;
+            }
+            if ("pill".equals(indicatorStyle)) {
+                float top = Math.max(0, (getHeight() - indicatorHeight) / 2f);
+                rect.set(indicatorLeft, top, indicatorRight, top + indicatorHeight);
+                canvas.drawRoundRect(rect, indicatorRadius, indicatorRadius,
+                                     indicatorPaint);
+                return;
+            }
+            rect.set(indicatorLeft, getHeight() - indicatorHeight,
+                     indicatorRight, getHeight());
+            canvas.drawRoundRect(rect, indicatorRadius, indicatorRadius,
+                                 indicatorPaint);
+        }
+    }
+}

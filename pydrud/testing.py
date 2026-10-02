@@ -5,7 +5,9 @@ A fake Android device for end-to-end testing of the Pydrud bridge.
 ``ViewFactory`` implement:
 
 * it listens on 127.0.0.1 and accepts the Python app's connection;
-* it sends a ``ready`` event with screen metrics;
+* it sends a ``ready`` event with screen metrics, and ``rotate()`` /
+  ``resize()`` / ``show_keyboard()`` replay the ``metrics`` events a real
+  device sends when the window changes;
 * it applies ``full_render`` and ``render`` (patch) commands to an in-memory
   mirror of the native view tree, using the same semantics as
   ``ViewFactory.applyPatch``;
@@ -303,6 +305,43 @@ class FakeDevice:
             },
         })
 
+    def send_metrics(self, **overrides) -> None:
+        """Tell the app the window changed (what Android does on rotation)."""
+        data = {
+            "width": self.width,
+            "height": self.height,
+            "density": self.density,
+            "width_px": int(self.width * self.density),
+            "height_px": int(self.height * self.density),
+            "status_bar_height": 24,
+            "navigation_bar_height": 16,
+            "padding_top": 24,
+            "padding_bottom": 16,
+            "text_scale": 1.0,
+            "reason": "configuration",
+        }
+        data.update(overrides)
+        self._send({"type": "metrics", "key": "", "data": data})
+
+    def resize(self, width: int, height: int, **overrides) -> None:
+        """Simulate a window resize (split screen, foldable, desktop)."""
+        self.width, self.height = int(width), int(height)
+        self.send_metrics(**overrides)
+
+    def rotate(self, **overrides) -> None:
+        """Simulate a rotation by swapping the window dimensions."""
+        self.resize(self.height, self.width, **overrides)
+
+    def set_text_scale(self, scale: float) -> None:
+        """Simulate the user changing their system font size."""
+        self.send_metrics(text_scale=scale)
+
+    def show_keyboard(self, height: int = 300) -> None:
+        self.send_metrics(keyboard_height=height, reason="insets")
+
+    def hide_keyboard(self) -> None:
+        self.send_metrics(keyboard_height=0, reason="insets")
+
     def send_event(self, type_: str, key: str, data: dict | None = None) -> None:
         self._send({"type": type_, "key": key, "data": data or {}})
 
@@ -341,6 +380,29 @@ class FakeDevice:
 
     def lifecycle(self, state: str) -> None:
         self.send_event("lifecycle", "", {"state": state})
+
+    def tap_snackbar_action(self) -> bool:
+        """Tap the action button of the most recent snackbar.
+
+        Returns False when no snackbar is showing or it carried no
+        ``on_action`` callback.
+        """
+        return self._snackbar_event(True)
+
+    def dismiss_snackbar(self) -> bool:
+        """Let the most recent snackbar time out without being tapped."""
+        return self._snackbar_event(False)
+
+    def _snackbar_event(self, actioned: bool) -> bool:
+        bars = self.commands_named("snackbar")
+        if not bars:
+            return False
+        callback_id = bars[-1].get("callback_id", "")
+        if not callback_id:
+            return False
+        self.send_event("snackbar", "",
+                        {"callback_id": callback_id, "action": actioned})
+        return True
 
     # ── helpers for tests ─────────────────────────────────────────────────
 
@@ -497,6 +559,11 @@ class AppTester:
 
     def lifecycle(self, state: str) -> "AppTester":
         self.device.lifecycle(state)
+        return self.settle()
+
+    def tap_snackbar_action(self) -> "AppTester":
+        """Tap the Undo-style action on the snackbar currently showing."""
+        self.device.tap_snackbar_action()
         return self.settle()
 
     def answer(self, cmd: str, value) -> "AppTester":
