@@ -38,6 +38,7 @@ public class ViewFactory {
     private final Map<String, View> viewMap = new HashMap<>();
     private final Map<String, String> parentMap = new HashMap<>();
     private final Map<String, JSONObject> nodeMap = new HashMap<>();
+    private final Map<String, ViewElement> elementMap = new HashMap<>();
     /** Views that pad themselves to clear the status / navigation bars. */
     private final Map<View, int[]> safeAreaViews = new java.util.WeakHashMap<>();
     /** Gap (px) a LinearLayout puts between its children, applied as margins. */
@@ -48,16 +49,29 @@ public class ViewFactory {
     private final GestureBinder gestures;
     private EventDispatcher eventDispatcher;
 
+    private static final class ViewElement {
+        final String key;
+        final String type;
+        final View view;
+        long confirmedRevision;
+        ViewElement(String key, String type, View view) {
+            this.key = key;
+            this.type = type;
+            this.view = view;
+        }
+    }
+
     public ViewFactory({{ app_name }}Activity activity) {
         this.activity = activity;
         this.material = new MaterialViews(activity, this);
-        this.advanced = new AdvancedViews(activity, eventDispatcher);
+        this.advanced = new AdvancedViews(activity, null);
         this.gestures = new GestureBinder(activity);
     }
 
     public void setEventDispatcher(EventDispatcher d) {
         this.eventDispatcher = d;
         material.setEventDispatcher(d);
+        advanced.setEventDispatcher(d);
         gestures.setEventDispatcher(d);
     }
 
@@ -220,6 +234,7 @@ public class ViewFactory {
         viewMap.clear();
         parentMap.clear();
         nodeMap.clear();
+        elementMap.clear();
         safeAreaViews.clear();
     }
 
@@ -349,6 +364,7 @@ public class ViewFactory {
             if (!key.isEmpty()) {
                 viewMap.put(key, view);
                 nodeMap.put(key, json);
+                elementMap.put(key, new ViewElement(key, type, view));
                 view.setTag(key);
             }
 
