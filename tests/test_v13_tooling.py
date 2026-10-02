@@ -370,16 +370,23 @@ class TestBuildPython(unittest.TestCase):
             returncode = 0
             stdout = "/usr/bin/pythonX\n"
 
-        with mock.patch.object(project_mod.shutil, "which", fake_which), \
-                mock.patch("subprocess.run", return_value=FakeRun()):
-            project_mod._detect_build_python("3.11")
-        self.assertTrue(tried[0].endswith("3.11"), tried[:3])
+        def first_candidate(version):
+            """``py -3.11`` on Windows, ``python3.11`` elsewhere."""
+            command, args = project_mod._build_python_candidates(version)[0]
+            return " ".join([command, *args])
 
-        tried.clear()
-        with mock.patch.object(project_mod.shutil, "which", fake_which), \
-                mock.patch("subprocess.run", return_value=FakeRun()):
-            project_mod._detect_build_python("3.9")
-        self.assertTrue(tried[0].endswith("3.9"), tried[:3])
+        for version in ("3.11", "3.9"):
+            tried.clear()
+            with mock.patch.object(project_mod.shutil, "which", fake_which), \
+                    mock.patch("subprocess.run", return_value=FakeRun()):
+                project_mod._detect_build_python(version)
+            # The app's own version is probed before any other.
+            self.assertTrue(first_candidate(version).endswith(version),
+                            first_candidate(version))
+            self.assertEqual(
+                tried[0],
+                project_mod._build_python_candidates(version)[0][0],
+                tried[:3])
 
     def test_builder_does_not_force_the_default_interpreter(self):
         """Regression: the builder used to export whatever ``python``
