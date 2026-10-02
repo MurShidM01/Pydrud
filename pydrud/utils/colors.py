@@ -1,40 +1,46 @@
+"""Backward-compatible CLI colour helpers backed by the shared TUI.
+
+Older command modules import these names directly. Keeping the shim lets the
+whole CLI share the same visual language as Hot Reload without forcing every
+call site to know about ANSI styling.
 """
-Colour utilities for the CLI output.
-"""
 
-# ANSI helpers
+from __future__ import annotations
 
-def _s(code: int) -> str:
-    return f"\033[{code}m"
+from pydrud.utils import tui
 
-RESET   = _s(0)
-BOLD    = _s(1)
-DIM     = _s(2)
-RED     = _s(31)
-GREEN   = _s(32)
-YELLOW  = _s(33)
-BLUE    = _s(34)
-MAGENTA = _s(35)
-CYAN    = _s(36)
-GRAY    = _s(90)
+RESET = tui.RESET
+BOLD = tui.BOLD
+DIM = tui.DIM
+RED = tui.RED
+GREEN = tui.GREEN
+YELLOW = tui.YELLOW
+BLUE = tui.BLUE
+MAGENTA = tui.MAGENTA
+CYAN = tui.CYAN
+GRAY = tui.GRAY
 
 
 def ok(text: str) -> str:
-    return f"{GREEN}[OK]{RESET} {text}"
+    return tui.ok_badge(text)
+
 
 def fail(text: str) -> str:
-    return f"{RED}[FAIL]{RESET} {text}"
+    return tui.error_badge(text)
+
 
 def warn(text: str) -> str:
-    return f"{YELLOW}[WARN]{RESET} {text}"
+    return tui.warn_badge(text)
+
 
 def info(text: str) -> str:
-    return f"{CYAN}[INFO]{RESET} {text}"
+    return tui.info_badge(text)
+
 
 def header(text: str) -> str:
-    return f"{BOLD}{text}{RESET}"
+    return f"{tui.BOLD}{tui.C_PRIMARY}{text}{tui.RESET}"
 
 
-def print_step(step: str, status: str = "..."):
-    """Print a build step with consistent formatting."""
-    print(f"  {BLUE}> {RESET}{step:<40} {GRAY}{status}{RESET}")
+def print_step(step: str, status: str = "working") -> None:
+    """Print a build step with the global Pydrud TUI formatting."""
+    print(tui.step_badge(step, status))

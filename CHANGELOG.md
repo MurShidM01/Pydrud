@@ -45,6 +45,12 @@ replacement; they are removed in 3.0. `pydrud/android/` is now a real
 package rather than an implicit namespace one.
 
 ### Added
+* **One terminal UI across the entire CLI.** `init`, `sync`, `build`, `clean`,
+  `doctor`, `analyze`, package/permission commands, release tooling, devices,
+  docs and inspector now use the same responsive banners, status badges,
+  sections, tables, summaries and next-step prompts as Hot Reload. Root and
+  per-command help are branded too, while `analyze --json` remains clean
+  machine-readable output.
 * **`README.md` in every new project** — how to run it, what each directory
   is for, and how to add a screen.
 * **`tests/test_app.py` in every new project** — three `AppTester` tests

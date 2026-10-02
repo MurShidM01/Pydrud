@@ -11,7 +11,8 @@ import sys
 
 from jinja2 import Environment, PackageLoader, select_autoescape
 
-from pydrud.utils.colors import ok, fail, info, header
+from pydrud.utils.colors import fail, info
+from pydrud.utils import tui
 from pydrud.compatibility import COMPATIBILITY
 from pydrud.commands.project_config import load_project_config
 
@@ -73,7 +74,7 @@ def _bundle_pydrud_source(project_dir: str):
         os.path.getsize(os.path.join(root, f))
         for root, _d, fs in os.walk(dst) for f in fs
     ) / 1024
-    print(info(f"  Bundled pydrud runtime ({files} files, {size_kb:.0f} KB)"))
+    print(info(f"Bundled pydrud runtime ({files} files, {size_kb:.0f} KB)"))
 
 
 def _copy_icon_resources(project_dir: str):
@@ -311,7 +312,7 @@ def _detect_build_python(target: str = APP_PYTHON_VERSION) -> str:
         resolved = _resolve_executable(exe, args)
         if version != target:
             print(info(
-                f"  buildPython: using Python {version} "
+                f"buildPython: using Python {version} "
                 f"(the app ships Python {target}), so Chaquopy will skip "
                 f".pyc pre-compilation — harmless, just a slower first "
                 f"start. Install Python {target} or set PYDRUD_PYTHON "
@@ -321,7 +322,7 @@ def _detect_build_python(target: str = APP_PYTHON_VERSION) -> str:
     fallback = (shutil.which("python") or shutil.which("python3")
                 or sys.executable)
     print(info(
-        f"  buildPython: no Chaquopy-compatible Python found "
+        f"buildPython: no Chaquopy-compatible Python found "
         f"(need {BUILD_PYTHON_VERSIONS[-1]}-{BUILD_PYTHON_VERSIONS[0]}, "
         f"ideally {target}); using {fallback}. "
         f"Set PYDRUD_PYTHON to override."))
@@ -774,9 +775,13 @@ def create_project(
         "assets_dir": "assets",
     }
 
-    print(header(f"\n  Creating Pydrud project: {name}"))
-    print(f"    Package:    {package}")
-    print(f"    Directory:  {project_dir}\n")
+    print(tui.render_command_header(
+        "init",
+        f"Creating {name}",
+        subtitle="Scaffolding a native Android application powered by Python",
+        details=(("Package", package), ("Directory", project_dir),
+                 ("Android", f"API {min_sdk} → {target_sdk}")),
+    ))
 
     # ── 1.  Python source ────────────────────────────────────────────────
     _render_app_package(project_dir, ctx)
@@ -854,12 +859,14 @@ def create_project(
     with open(f"{project_dir}/tests/__init__.py", "w", encoding="utf-8") as f:
         f.write("")
 
-    print(ok(f"Project '{name}' created!"))
-    print()
-    print("  Next steps:")
-    print(f"    $ cd {_slugify(name)}")
-    print("    $ pydrud run")
-    print()
+    print(tui.render_summary(
+        f"Project '{name}' created",
+        (("Package", package), ("Files", "Android + Python scaffold")),
+    ))
+    print(tui.render_next_steps((
+        (f"cd {_slugify(name)}", "enter the project"),
+        ("pydrud run", "build, install and start Hot Reload"),
+    )))
 
 
 #: The generated ``src/app`` package: template → path inside ``src/app``.
@@ -1068,8 +1075,13 @@ def sync_project(project_dir: str, *, update_runtime: bool = True) -> bool:
         print(fail(f"Invalid pydrud.yaml: {exc}"))
         return False
 
-    print(header(f"\n  Syncing {ctx['project_name']} with Pydrud {_version()}"))
-    print(f"    Package:  {ctx['package']}")
+    print(tui.render_command_header(
+        "sync",
+        f"Syncing {ctx['project_name']}",
+        subtitle="Applying pydrud.yaml to the generated Android project",
+        details=(("Package", ctx["package"]), ("Pydrud", _version()),
+                 ("Runtime", ctx["pydrud_runtime_version"])),
+    ))
 
     identity_changed = (found["package"] != ctx["package"]
                         or found["app_name"] != ctx["app_name"])
@@ -1082,13 +1094,18 @@ def sync_project(project_dir: str, *, update_runtime: bool = True) -> bool:
     detail = "all Android configuration"
     if identity_changed:
         detail += " + package migration"
-    print(info(f"  Rewrote {count} Java classes + {detail}"))
+    print(info(f"Rewrote {count} Java classes + {detail}"))
 
     if update_runtime:
         _bundle_pydrud_source(project_dir)
 
     _stamp_version(project_dir)
-    print(ok("Project synced — run `pydrud run` to rebuild."))
+    print(tui.render_summary(
+        "Project synchronized",
+        (("Java classes", count), ("Package", ctx["package"]),
+         ("Runtime", "updated" if update_runtime else "kept")),
+    ))
+    print(tui.render_next_steps((("pydrud run", "rebuild and launch"),)))
     return True
 
 

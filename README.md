@@ -1285,6 +1285,14 @@ removed by sync.
 
 ## CLI Reference
 
+Every command uses the same responsive terminal UI as the Hot Reload runner:
+branded command cards, phase dividers, status badges, aligned tables, final
+summaries and actionable next steps. It works in PowerShell and standard
+Unix terminals without adding a UI dependency. Colours automatically switch
+off when output is redirected; `NO_COLOR=1` / `PYDRUD_COLOR=never` disables
+them explicitly, and `PYDRUD_COLOR=always` forces them. Machine output such
+as `pydrud analyze --json` remains plain JSON.
+
 | Command | Description |
 |---------|-------------|
 | `pydrud init <name>` | Create a new project |

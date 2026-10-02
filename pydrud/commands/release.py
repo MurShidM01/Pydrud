@@ -16,6 +16,8 @@ import subprocess
 import xml.etree.ElementTree as ET
 from typing import Iterable, Optional
 
+from pydrud.utils import tui
+
 #: Friendly names → the real Android permission constants.
 PERMISSIONS = {
     "camera": "CAMERA",
@@ -76,18 +78,18 @@ def create_keystore(project_dir: str, *, alias: str = "release",
     """
     keytool = shutil.which("keytool")
     if not keytool:
-        print("  [x] keytool not found — install a JDK 17+ and retry.")
+        print(tui.error_badge("keytool not found — install a JDK 17+ and retry."))
         return False
     if len(password) < 6:
-        print("  [x] Keystore passwords must be at least 6 characters.")
+        print(tui.error_badge("Keystore passwords must be at least 6 characters."))
         return False
 
     android_dir = os.path.join(project_dir, "android")
     os.makedirs(android_dir, exist_ok=True)
     keystore_path = os.path.join(android_dir, filename)
     if os.path.exists(keystore_path):
-        print(f"  [!] {filename} already exists — keeping it "
-              f"(delete it first to regenerate).")
+        print(tui.warn_badge(
+            f"{filename} already exists — keeping it (delete it first to regenerate)."))
         return False
 
     name = dname or (f"CN={os.path.basename(os.path.abspath(project_dir))}, "
@@ -103,8 +105,8 @@ def create_keystore(project_dir: str, *, alias: str = "release",
     ]
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0:
-        print("  [x] keytool failed:")
-        print("      " + (result.stderr.strip().splitlines() or ["unknown"])[-1])
+        print(tui.error_badge("keytool failed:"))
+        print(tui.neutral_badge((result.stderr.strip().splitlines() or ["unknown"])[-1]))
         return False
 
     properties = os.path.join(android_dir, "keystore.properties")
@@ -117,11 +119,13 @@ def create_keystore(project_dir: str, *, alias: str = "release",
             f"keyPassword={password}\n")
     os.chmod(properties, 0o600)
 
-    print(f"  [ok] Keystore:   android/{filename}")
-    print("  [ok] Properties: android/keystore.properties (chmod 600)")
-    print("\n  Back up both files somewhere safe — losing them means you can "
-          "never update\n  this app on Google Play again.")
-    print("\n  Next: pydrud build --release --bundle   # signed .aab for Play")
+    print(tui.ok_badge(f"Keystore     android/{filename}"))
+    print(tui.ok_badge("Properties   android/keystore.properties (chmod 600)"))
+    print(tui.warn_badge(
+        "Back up both files safely — losing them prevents future Play updates."))
+    print(tui.render_next_steps((
+        ("pydrud build --release", "build a signed release APK"),
+    )))
     return True
 
 
@@ -162,7 +166,7 @@ def generate_icons(project_dir: str, *, source: Optional[str] = None,
         # Availability probe — the helpers below import what they need.
         from PIL import Image  # noqa: F401
     except ImportError:                                  # pragma: no cover
-        print("  [x] Pillow is required: pip install pillow")
+        print(tui.error_badge("Pillow is required: pip install pillow"))
         return []
 
     res_dir = os.path.join(project_dir, "android", "app", "src", "main", "res")
@@ -235,10 +239,11 @@ def generate_icons(project_dir: str, *, source: Optional[str] = None,
             '</layer-list>\n')
     written.append(splash)
 
-    print(f"  [ok] Launcher icons for {len(ICON_SIZES)} densities")
-    print("  [ok] Adaptive icon + splash drawable")
+    print(tui.ok_badge(f"Launcher icons for {len(ICON_SIZES)} densities"))
+    print(tui.ok_badge("Adaptive icon + splash drawable"))
     if splash_text:
-        print(f"  [i]  Splash text '{splash_text}' — set it in themes.xml")
+        print(tui.info_badge(
+            f"Splash text '{splash_text}' — set it in themes.xml"))
     return written
 
 
@@ -296,7 +301,8 @@ def update_permissions(project_dir: str, *, add: Optional[Iterable[str]] = None,
     manifest_path = os.path.join(project_dir, "android", "app", "src", "main",
                                  "AndroidManifest.xml")
     if not os.path.exists(manifest_path):
-        print("  [x] AndroidManifest.xml not found — run 'pydrud build' once.")
+        print(tui.error_badge(
+            "AndroidManifest.xml not found — run 'pydrud sync' first."))
         return []
 
     ET.register_namespace("android", ANDROID_NS)

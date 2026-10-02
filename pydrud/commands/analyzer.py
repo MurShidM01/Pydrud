@@ -16,6 +16,8 @@ from __future__ import annotations
 import ast
 import os
 
+from pydrud.utils import tui
+
 # ── Issue types ──────────────────────────────────────────────────────────────
 
 _SEVERITY_WARNING = "warning"
@@ -296,26 +298,38 @@ def format_report(issues: list[dict], json_output: bool = False) -> str:
         import json
         return json.dumps(issues, indent=2)
 
+    header = tui.render_command_header(
+        "analyze",
+        "Static analysis",
+        subtitle="Checking Pydrud source for correctness and performance issues",
+    )
     if not issues:
-        return "\n  [OK] No issues found.\n"
-
-    lines: list[str] = ["\n  [ANALYSIS] Pydrud Analysis Report"]
-    lines.append(f"  {'=' * 50}")
+        return header + tui.render_summary(
+            "No issues found", (("Status", "source looks good"),)
+        )
 
     errors = [i for i in issues if i["severity"] == _SEVERITY_ERROR]
     warnings = [i for i in issues if i["severity"] == _SEVERITY_WARNING]
+    lines: list[str] = [header.rstrip()]
 
     if errors:
-        lines.append(f"\n  [ERRORS] ({len(errors)}):")
-        for i in errors:
-            lines.append(f"    {i['file']}:{i['line']}  {i['message']}")
+        lines.append(tui.render_section(f"Errors · {len(errors)}", colour=tui.C_ERROR))
+        for issue in errors:
+            location = f"{issue['file']}:{issue['line']}"
+            lines.append(tui.error_badge(
+                f"{tui.BOLD}{location}{tui.RESET}  {issue['message']}"))
 
     if warnings:
-        lines.append(f"\n  [WARNINGS] ({len(warnings)}):")
-        for i in warnings:
-            lines.append(f"    {i['file']}:{i['line']}  {i['message']}")
+        lines.append(tui.render_section(
+            f"Warnings · {len(warnings)}", colour=tui.C_WARN))
+        for issue in warnings:
+            location = f"{issue['file']}:{issue['line']}"
+            lines.append(tui.warn_badge(
+                f"{tui.BOLD}{location}{tui.RESET}  {issue['message']}"))
 
-    lines.append(f"\n  {'=' * 50}")
-    lines.append(f"  Total: {len(issues)} issues "
-                 f"({len(errors)} errors, {len(warnings)} warnings)\n")
-    return "\n".join(lines)
+    lines.append(tui.render_summary(
+        f"{len(issues)} issue(s) found",
+        (("Errors", len(errors)), ("Warnings", len(warnings))),
+        success=not errors,
+    ).rstrip())
+    return "\n".join(lines) + "\n"
