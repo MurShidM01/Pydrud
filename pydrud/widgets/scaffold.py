@@ -167,6 +167,14 @@ class Scaffold(Widget):
         if self.floating_action_button is not None:
             fab = self.floating_action_button
             fab.style.setdefault("fabPosition", self.fab_position)
+            if self.fab_position == "bottom_start":
+                fab.style.pop("right", None)
+                fab.style.setdefault("left", 24)
+            elif self.fab_position == "bottom_center":
+                fab.style.pop("right", None)
+                fab.style.pop("left", None)
+                fab.style["alignment"] = "bottomCenter"
+
             # Lift the FAB above a bottom bar instead of letting it sit on
             # top of the navigation items.
             bar = self.bottom_navigation or self.bottom_bar
@@ -175,10 +183,14 @@ class Scaffold(Widget):
 
                 base = fab.style.get("bottom", 24)
                 bar_height = getattr(bar, "effective_height", None)
+                if bar_height is None and hasattr(bar, "height") and bar.height is not None:
+                    bar_height = bar.height
+                if bar_height is None and hasattr(bar, "style") and bar.style.get("height") is not None:
+                    bar_height = bar.style.get("height")
                 fab.style["bottom"] = base + (bar_height or Tokens.nav_height)
                 fab.style["_fabLifted"] = True
-                # The bar already clears the gesture inset.
-                fab.style.setdefault("safeAreaBottom", False)
+                if not self.safe_area:
+                    fab.style.setdefault("safeAreaBottom", False)
             stack_children.append(fab)
 
         for drawer, side in ((self.drawer, "start"), (self.end_drawer, "end")):

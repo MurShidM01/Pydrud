@@ -582,6 +582,11 @@ class Tabs(Widget):
     def current(self) -> Optional[Tab]:
         return self.tabs[self.selected] if self.tabs else None
 
+    @property
+    def effective_height(self) -> float:
+        """Height the tab bar occupies."""
+        return self.tab_height if self.tab_height is not None else 52.0
+
     def _serialise_props(self) -> dict:
         props = dict(self._extra)
         props.update(_clean({

@@ -63,17 +63,26 @@ def settings_screen(page):
                 child=Column(key="accent_body", spacing=Spacing.SM, children=[
                     Text("Accent colour", key="accent_title", size=15,
                          weight=500, color=Theme.text),
-                    Row(key="accent_swatches", spacing=Spacing.SM, children=[
+                    Row(key="accent_swatches", spacing=Spacing.MD, scroll=True, children=[
                         Container(
                             key=f"accent_{name}",
-                            width=40, height=40,
+                            width=44, height=44,
                             bg=color,
                             border_radius=Radius.PILL,
                             alignment="center",
-                            style={"feedback": True,
-                                   "elevation": Elevation.HAIRLINE},
+                            style={
+                                "feedback": True,
+                                "elevation": Elevation.HAIRLINE,
+                                "border": {
+                                    "width": 2 if accent.value == color else 1,
+                                    "color": Colors.with_opacity(
+                                        Colors.WHITE if dark_mode.value else Colors.BLACK,
+                                        0.15 if accent.value != color else 0.4,
+                                    ),
+                                },
+                            },
                             child=Icon(Icons.CHECK, key=f"accent_{name}_tick",
-                                       size=18, color=Colors.on(color))
+                                       size=20, color=Colors.on(color))
                             if accent.value == color else None,
                         ).on_click(pick_accent(color))
                         for name, color in ACCENTS
