@@ -1,0 +1,37 @@
+package {{ package }};
+
+import android.util.Log;
+import android.view.View;
+import org.json.JSONObject;
+import org.json.JSONException;
+import java.util.HashMap;
+import java.util.Map;
+
+public class WidgetRegistry {
+
+    private static final String TAG = "PydrudRegistry";
+    private final Map<String, ViewCreator> creators = new HashMap<>();
+
+    public void register(String type, ViewCreator creator) {
+        creators.put(type, creator);
+    }
+
+    public View create(JSONObject json, android.content.Context context, ViewFactory factory) {
+        try {
+            String type = json.getString("type");
+            ViewCreator creator = creators.get(type);
+            if (creator == null) {
+                Log.w(TAG, "Unknown widget type: " + type);
+                return null;
+            }
+            return creator.create(json, context, factory);
+        } catch (JSONException e) {
+            Log.e(TAG, "Widget creation error", e);
+            return null;
+        }
+    }
+
+    public boolean hasType(String type) { return creators.containsKey(type); }
+    public void unregister(String type) { creators.remove(type); }
+    public void clear() { creators.clear(); }
+}

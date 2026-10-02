@@ -1,0 +1,71 @@
+package {{ package }};
+
+import android.util.Log;
+import android.view.View;
+
+import org.json.JSONObject;
+import org.json.JSONException;
+
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * EventDispatcher — forwards Android UI events to the Python bridge.
+ *
+ * Widget event handlers register via subscribe(); when a UI event fires,
+ * dispatch() sends a JSON message over the bridge to the Python callback.
+ */
+public class EventDispatcher {
+
+    private static final String TAG = "PydrudEvents";
+
+    // Map of widget key → subscribed event types.
+    private final Map<String, String[]> subscriptions = new HashMap<>();
+    private BridgeService bridge;
+
+    public EventDispatcher() {
+    }
+
+    public void setBridge(BridgeService bridge) {
+        this.bridge = bridge;
+    }
+
+    /**
+     * Register a widget key for event delivery.
+     */
+    public void subscribe(String key, String... eventTypes) {
+        subscriptions.put(key, eventTypes);
+    }
+
+    /**
+     * Unregister a widget key.
+     */
+    public void unsubscribe(String key) {
+        subscriptions.remove(key);
+    }
+
+    /**
+     * Clear all subscriptions.
+     */
+    public void clear() {
+        subscriptions.clear();
+    }
+
+    public boolean isSubscribed(String key) {
+        return subscriptions.containsKey(key);
+    }
+
+    /**
+     * Send an event to Python.
+     */
+    public void dispatch(String eventType, String key) {
+        dispatch(eventType, key, null);
+    }
+
+    public void dispatch(String eventType, String key, JSONObject data) {
+        Log.d(TAG, "Event: " + eventType + " @" + key);
+        if (bridge != null) {
+            bridge.sendEvent(eventType, key, data);
+        }
+    }
+}

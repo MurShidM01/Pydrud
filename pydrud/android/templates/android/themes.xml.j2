@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Pydrud app theme — GENERATED, do not edit.
+
+    These colours come from the Python colour scheme (pydrud.toml
+    `[theme] seed`, or the Pydrud default) so native dialogs, the
+    text-selection handles, the overscroll glow and the system bars match
+    the widgets Pydrud draws itself. Change the seed and run
+    `pydrud sync`, or re-theme at runtime with Theme.seed(...) /
+    page.set_theme(...).
+-->
+<resources>
+{% if night %}
+    <style name="Theme.{{ app_name }}" parent="Theme.Material3.Dark.NoActionBar">
+{% else %}
+    <style name="Theme.{{ app_name }}" parent="Theme.Material3.Light.NoActionBar">
+{% endif %}
+        <item name="colorPrimary">{{ colors.primary }}</item>
+        <item name="colorOnPrimary">{{ colors.on_primary }}</item>
+        <item name="colorPrimaryContainer">{{ colors.primary_container }}</item>
+        <item name="colorOnPrimaryContainer">{{ colors.on_primary_container }}</item>
+        <item name="colorSecondary">{{ colors.secondary }}</item>
+        <item name="colorOnSecondary">{{ colors.on_secondary }}</item>
+        <item name="colorSurface">{{ colors.surface }}</item>
+        <item name="colorOnSurface">{{ colors.on_surface }}</item>
+        <item name="colorSurfaceVariant">{{ colors.surface_variant }}</item>
+        <item name="colorOnSurfaceVariant">{{ colors.on_surface_variant }}</item>
+        <item name="colorOutline">{{ colors.outline }}</item>
+        <item name="colorError">{{ colors.error }}</item>
+        <item name="android:colorBackground">{{ colors.background }}</item>
+        <item name="android:windowBackground">{{ colors.background }}</item>
+        <item name="android:textColorPrimary">{{ colors.on_surface }}</item>
+        <item name="android:textColorSecondary">{{ colors.on_surface_variant }}</item>
+        <item name="android:textColorHint">{{ colors.hint }}</item>
+        <item name="android:windowLightStatusBar">{{ "false" if night else "true" }}</item>
+
+        <!-- Edge-to-edge: Pydrud paints the bars itself and insets the UI. -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
+        <item name="android:enforceStatusBarContrast">false</item>
+
+        <!-- Smooth screen transitions instead of the abrupt default. -->
+        <item name="android:windowAnimationStyle">@style/Animation.{{ app_name }}</item>
+        <item name="android:windowContentTransitions">true</item>
+    </style>
+
+    <style name="Animation.{{ app_name }}"
+           parent="@android:style/Animation.Activity">
+        <item name="android:activityOpenEnterAnimation">@android:anim/fade_in</item>
+        <item name="android:activityOpenExitAnimation">@android:anim/fade_out</item>
+        <item name="android:activityCloseEnterAnimation">@android:anim/fade_in</item>
+        <item name="android:activityCloseExitAnimation">@android:anim/fade_out</item>
+    </style>
+</resources>

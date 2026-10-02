@@ -1,0 +1,10 @@
+package {{ package }};
+
+import android.view.View;
+import org.json.JSONObject;
+import org.json.JSONException;
+
+@FunctionalInterface
+public interface ViewCreator {
+    View create(JSONObject json, android.content.Context context, ViewFactory factory) throws JSONException;
+}

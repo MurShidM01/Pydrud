@@ -1,0 +1,271 @@
+package {{ package }};
+
+import android.content.Context;
+import android.util.Log;
+import android.view.GestureDetector;
+import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
+import android.view.View;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+/**
+ * GestureBinder — attaches rich touch handling to views whose Python widget
+ * subscribed to gestures (GestureDetector, Dismissible, Draggable).
+ *
+ * Only the gestures that Python actually listens for are detected, and only
+ * those are sent over the bridge: a scroll in a list with no pan handler
+ * costs zero messages.
+ */
+public class GestureBinder {
+
+    private static final String TAG = "PydrudGestures";
+
+    private final Context context;
+    private EventDispatcher events;
+
+    public GestureBinder(Context context) {
+        this.context = context;
+    }
+
+    public void setEventDispatcher(EventDispatcher d) { this.events = d; }
+
+    /** Attach gesture handling if this node declares any. */
+    public void bind(final View view, JSONObject json) {
+        if (view == null || json == null) return;
+        String type = json.optString("type", "");
+        final String key = json.optString("key", "");
+        JSONObject props = json.optJSONObject("props");
+
+        if ("Dismissible".equals(type)) {
+            bindDismiss(view, key, props);
+            return;
+        }
+        if ("Draggable".equals(type)) {
+            bindDrag(view, key, props);
+            return;
+        }
+        if (!"GestureDetector".equals(type) || props == null) return;
+
+        final java.util.List<String> wanted = new java.util.ArrayList<>();
+        JSONArray array = props.optJSONArray("gestures");
+        if (array != null) {
+            for (int i = 0; i < array.length(); i++) wanted.add(array.optString(i, ""));
+        }
+        if (wanted.isEmpty()) return;
+
+        final float threshold = dp((float) props.optDouble("swipeThreshold", 48));
+
+        final GestureDetector detector = new GestureDetector(context,
+            new GestureDetector.SimpleOnGestureListener() {
+
+                @Override public boolean onDown(MotionEvent e) { return true; }
+
+                @Override public boolean onSingleTapConfirmed(MotionEvent e) {
+                    if (wanted.contains("tap")) send("tap", key, point(e));
+                    return true;
+                }
+
+                @Override public boolean onDoubleTap(MotionEvent e) {
+                    if (wanted.contains("double_tap")) send("double_tap", key, point(e));
+                    return true;
+                }
+
+                @Override public void onLongPress(MotionEvent e) {
+                    if (wanted.contains("long_press")) send("long_press", key, point(e));
+                }
+
+                @Override public boolean onFling(MotionEvent down, MotionEvent up,
+                                                 float vx, float vy) {
+                    if (down == null || up == null) return false;
+                    float dx = up.getX() - down.getX();
+                    float dy = up.getY() - down.getY();
+                    String gesture;
+                    float velocity;
+                    if (Math.abs(dx) > Math.abs(dy)) {
+                        if (Math.abs(dx) < threshold) return false;
+                        gesture = dx > 0 ? "swipe_right" : "swipe_left";
+                        velocity = Math.abs(vx);
+                    } else {
+                        if (Math.abs(dy) < threshold) return false;
+                        gesture = dy > 0 ? "swipe_down" : "swipe_up";
+                        velocity = Math.abs(vy);
+                    }
+                    if (!wanted.contains(gesture)) return false;
+                    JSONObject data = new JSONObject();
+                    try {
+                        data.put("dx", dx);
+                        data.put("dy", dy);
+                        data.put("velocity", velocity);
+                    } catch (Exception ignored) {}
+                    send(gesture, key, data);
+                    return true;
+                }
+
+                @Override public boolean onScroll(MotionEvent down, MotionEvent move,
+                                                  float dx, float dy) {
+                    if (!wanted.contains("pan_update") || move == null) return false;
+                    JSONObject data = new JSONObject();
+                    try {
+                        data.put("x", move.getX());
+                        data.put("y", move.getY());
+                        data.put("dx", -dx);
+                        data.put("dy", -dy);
+                    } catch (Exception ignored) {}
+                    send("pan_update", key, data);
+                    return true;
+                }
+            });
+
+        final ScaleGestureDetector scaleDetector = wanted.contains("scale")
+            ? new ScaleGestureDetector(context,
+                new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                    @Override public boolean onScale(ScaleGestureDetector d) {
+                        JSONObject data = new JSONObject();
+                        try { data.put("scale", d.getScaleFactor()); }
+                        catch (Exception ignored) {}
+                        send("scale", key, data);
+                        return true;
+                    }
+                })
+            : null;
+
+        view.setOnTouchListener(new View.OnTouchListener() {
+            @Override public boolean onTouch(View v, MotionEvent event) {
+                if (scaleDetector != null) scaleDetector.onTouchEvent(event);
+                boolean handled = detector.onTouchEvent(event);
+                int action = event.getActionMasked();
+                if (action == MotionEvent.ACTION_DOWN && wanted.contains("pan_start")) {
+                    send("pan_start", key, point(event));
+                } else if ((action == MotionEvent.ACTION_UP
+                            || action == MotionEvent.ACTION_CANCEL)
+                           && wanted.contains("pan_end")) {
+                    send("pan_end", key, point(event));
+                }
+                return handled || action == MotionEvent.ACTION_DOWN;
+            }
+        });
+    }
+
+    // ── swipe to dismiss ─────────────────────────────────────────────────
+
+    private void bindDismiss(final View view, final String key, JSONObject props) {
+        final String allowed = props != null
+            ? props.optString("direction", "both") : "both";
+        view.setOnTouchListener(new View.OnTouchListener() {
+            private float startX;
+            private boolean dragging;
+
+            @Override public boolean onTouch(View v, MotionEvent event) {
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        startX = event.getRawX();
+                        dragging = true;
+                        return true;
+                    case MotionEvent.ACTION_MOVE:
+                        if (!dragging) return false;
+                        float dx = event.getRawX() - startX;
+                        if (("start".equals(allowed) && dx > 0)
+                                || ("end".equals(allowed) && dx < 0)) {
+                            return true;
+                        }
+                        v.setTranslationX(dx);
+                        v.setAlpha(Math.max(0.2f,
+                            1f - Math.abs(dx) / Math.max(1, v.getWidth())));
+                        return true;
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                        dragging = false;
+                        float offset = v.getTranslationX();
+                        if (Math.abs(offset) > v.getWidth() * 0.4f) {
+                            final String direction = offset < 0 ? "end" : "start";
+                            v.animate()
+                             .translationX(offset < 0 ? -v.getWidth() : v.getWidth())
+                             .alpha(0f).setDuration(180)
+                             .withEndAction(new Runnable() {
+                                 @Override public void run() {
+                                     JSONObject data = new JSONObject();
+                                     try { data.put("direction", direction); }
+                                     catch (Exception ignored) {}
+                                     send("dismiss", key, data);
+                                 }
+                             }).start();
+                        } else {
+                            v.animate().translationX(0f).alpha(1f)
+                             .setDuration(150).start();
+                        }
+                        return true;
+                }
+                return false;
+            }
+        });
+    }
+
+    // ── drag ─────────────────────────────────────────────────────────────
+
+    private void bindDrag(final View view, final String key, JSONObject props) {
+        final String axis = props != null ? props.optString("axis", "") : "";
+        view.setOnTouchListener(new View.OnTouchListener() {
+            private float downX, downY, originX, originY;
+
+            @Override public boolean onTouch(View v, MotionEvent event) {
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        downX = event.getRawX();
+                        downY = event.getRawY();
+                        originX = v.getTranslationX();
+                        originY = v.getTranslationY();
+                        return true;
+                    case MotionEvent.ACTION_MOVE: {
+                        float dx = event.getRawX() - downX;
+                        float dy = event.getRawY() - downY;
+                        if (!"vertical".equals(axis)) v.setTranslationX(originX + dx);
+                        if (!"horizontal".equals(axis)) v.setTranslationY(originY + dy);
+                        JSONObject data = new JSONObject();
+                        try {
+                            data.put("dx", dx);
+                            data.put("dy", dy);
+                        } catch (Exception ignored) {}
+                        send("drag", key, data);
+                        return true;
+                    }
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL: {
+                        JSONObject data = new JSONObject();
+                        try {
+                            data.put("x", v.getTranslationX());
+                            data.put("y", v.getTranslationY());
+                        } catch (Exception ignored) {}
+                        send("drop", key, data);
+                        return true;
+                    }
+                }
+                return false;
+            }
+        });
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────
+
+    private JSONObject point(MotionEvent event) {
+        JSONObject data = new JSONObject();
+        try {
+            data.put("x", event.getX());
+            data.put("y", event.getY());
+        } catch (Exception ignored) {}
+        return data;
+    }
+
+    private void send(String gesture, String key, JSONObject data) {
+        if (events == null) {
+            Log.d(TAG, "no dispatcher for " + gesture);
+            return;
+        }
+        events.dispatch(gesture, key, data);
+    }
+
+    private float dp(float value) {
+        return value * context.getResources().getDisplayMetrics().density;
+    }
+}

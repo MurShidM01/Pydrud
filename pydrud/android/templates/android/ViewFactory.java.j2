@@ -1,0 +1,2532 @@
+package {{ package }};
+
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.util.Log;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.*;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+import org.json.JSONException;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * ViewFactory — converts Pydrud JSON widget trees into native Android Views.
+ *
+ * Responsibilities:
+ *   - create a native View for every widget node (built-ins + custom types
+ *     registered through {@link WidgetRegistry});
+ *   - apply styles (size, padding, margin, colours, radius, border, font…);
+ *   - attach children with layout params appropriate for their parent
+ *     (LinearLayout weights, FrameLayout gravity, absolute positioning);
+ *   - apply incremental patches (create / update / move / delete / replace)
+ *     so a `page.update()` only touches the views that actually changed.
+ */
+public class ViewFactory {
+
+    private static final String TAG = "PydrudViewFactory";
+
+    private final {{ app_name }}Activity activity;
+    private final Map<String, View> viewMap = new HashMap<>();
+    private final Map<String, String> parentMap = new HashMap<>();
+    private final Map<String, JSONObject> nodeMap = new HashMap<>();
+    private final Map<String, ViewElement> elementMap = new HashMap<>();
+    /** Views that pad themselves to clear the status / navigation bars. */
+    private final Map<View, int[]> safeAreaViews = new java.util.WeakHashMap<>();
+    /** Gap (px) a LinearLayout puts between its children, applied as margins. */
+    private final Map<View, Integer> linearSpacing = new java.util.WeakHashMap<>();
+    private final WidgetRegistry registry = new WidgetRegistry();
+    private final MaterialViews material;
+    private final AdvancedViews advanced;
+    private final GestureBinder gestures;
+    private EventDispatcher eventDispatcher;
+
+    private static final class ViewElement {
+        final String key;
+        final String type;
+        final View view;
+        long confirmedRevision;
+        ViewElement(String key, String type, View view) {
+            this.key = key;
+            this.type = type;
+            this.view = view;
+        }
+    }
+
+    public ViewFactory({{ app_name }}Activity activity) {
+        this.activity = activity;
+        this.material = new MaterialViews(activity, this);
+        this.advanced = new AdvancedViews(activity, null);
+        this.gestures = new GestureBinder(activity);
+    }
+
+    public void setEventDispatcher(EventDispatcher d) {
+        this.eventDispatcher = d;
+        material.setEventDispatcher(d);
+        advanced.setEventDispatcher(d);
+        gestures.setEventDispatcher(d);
+    }
+
+    /** Resolve a Pydrud icon name to a drawable resource (legacy fallback). */
+    public int iconResource(String name) { return getIconRes(name); }
+
+    /**
+     * A crisp, tinted vector icon at an exact pixel size.
+     *
+     * <p>Preferred over {@link #iconResource(String)} — the framework
+     * bitmaps it returns are low-resolution and visually dated.
+     */
+    public android.graphics.drawable.Drawable icon(String name, int color, int sizePx) {
+        return PydrudIcons.drawable(name, color, sizePx);
+    }
+
+    /** Load an asset/remote image into an ImageView (public for MaterialViews). */
+    public void loadImage(ImageView view, String src) {
+        JSONObject node = new JSONObject();
+        JSONObject props = new JSONObject();
+        try {
+            props.put("src", src);
+            node.put("props", props);
+        } catch (JSONException ignored) {}
+        ImageView loaded = createImageView(node);
+        view.setImageDrawable(loaded.getDrawable());
+    }
+
+    /** Register a custom widget type rendered by user-supplied Java code. */
+    public void registerWidget(String type, ViewCreator creator) {
+        registry.register(type, creator);
+    }
+
+    public View getView(String key) { return viewMap.get(key); }
+
+    /** The JSON node a view was created from (used for drawer lookup, etc.). */
+    public JSONObject getNode(String key) { return nodeMap.get(key); }
+
+    // ── Public API ────────────────────────────────────────────────────────
+
+    public void buildTree(JSONObject tree, ViewGroup root) {
+        if (eventDispatcher != null) eventDispatcher.clear();
+        // A full snapshot is authoritative, but existing keyed native Views
+        // remain available for adapters which can safely reuse them.
+        root.removeAllViews();
+        viewMap.clear();
+        parentMap.clear();
+        nodeMap.clear();
+        View v = createView(tree);
+        if (v != null) {
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT);
+            root.addView(v, lp);
+            applySize(v, tree.optJSONObject("style"));
+            indexParents(tree);
+        }
+    }
+
+    public void applyPatch(JSONObject patch) throws JSONException {
+        String op = patch.getString("op");
+        String key = patch.getString("key");
+        String parentKey = patch.optString("parent_key", "");
+        int index = patch.optInt("index", -1);
+
+        switch (op) {
+            case "create": {
+                JSONObject tree = patch.getJSONObject("tree");
+                ViewGroup parent = containerFor(parentKey);
+                View v = createView(tree);
+                if (v != null && parent != null) {
+                    parentMap.put(key, parentKey);
+                    addChild(parent, v, tree, index);
+                    recordChild(parentKey, tree, index);
+                    indexParents(tree);
+                } else if (v != null) {
+                    Log.w(TAG, "create: parent not found for " + key);
+                }
+                break;
+            }
+            case "update": {
+                View v = viewMap.get(key);
+                if (v == null) { Log.w(TAG, "update: unknown key " + key); break; }
+                JSONObject node = nodeMap.get(key);
+                if (patch.has("props")) {
+                    JSONObject props = patch.getJSONObject("props");
+                    boolean handled = updateProps(v, props, node);
+                    mergeInto(node, "props", props);
+                    if (!handled) {
+                        // The widget paints itself from props at build
+                        // time; rebuild it so the change is never lost.
+                        recreateInPlace(key, node);
+                        v = viewMap.get(key);
+                        if (v == null) break;
+                    }
+                }
+                if (patch.has("style")) {
+                    JSONObject style = patch.getJSONObject("style");
+                    mergeInto(node, "style", style);
+                    JSONObject merged = node != null ? node.optJSONObject("style") : style;
+                    // Widgets carrying an `animation` spec tween towards the
+                    // new values; everything else snaps, as before.
+                    if (!animateStyleChange(v, node, style)) {
+                        applyStyle(v, merged);
+                        applySize(v, merged);
+                        v.requestLayout();
+                    } else {
+                        applyStyle(v, merged);
+                    }
+                }
+                break;
+            }
+            case "move": {
+                View v = viewMap.get(key);
+                ViewGroup parent = containerFor(parentKey);
+                if (v != null && parent != null && index >= 0) {
+                    ViewGroup.LayoutParams lp = v.getLayoutParams();
+                    if (v.getParent() == parent) parent.removeView(v);
+                    parent.addView(v, Math.min(index, parent.getChildCount()), lp);
+                    applySpacing(parent);
+                    forgetChild(parentKey, key);
+                    recordChild(parentKey, nodeMap.get(key), index);
+                }
+                break;
+            }
+            case "delete": {
+                View old = viewMap.get(key);
+                ViewGroup parent = old != null && old.getParent() instanceof ViewGroup
+                    ? (ViewGroup) old.getParent() : null;
+                forgetChild(parentMap.get(key), key);
+                removeViewTree(key);
+                applySpacing(parent);
+                break;
+            }
+            case "replace": {
+                View old = viewMap.get(key);
+                JSONObject tree = patch.getJSONObject("tree");
+                String newKey = patch.optString("new_key", tree.optString("key", key));
+                ViewGroup parent = null;
+                int at = index;
+                if (old != null && old.getParent() instanceof ViewGroup) {
+                    parent = (ViewGroup) old.getParent();
+                    at = parent.indexOfChild(old);
+                } else {
+                    parent = containerFor(parentKey);
+                }
+                forgetChild(parentKey, key);
+                removeViewTree(key);
+                View n = createView(tree);
+                if (n != null && parent != null) {
+                    parentMap.put(newKey, parentKey);
+                    addChild(parent, n, tree, at);
+                    recordChild(parentKey, tree, at);
+                    indexParents(tree);
+                }
+                break;
+            }
+            default:
+                Log.w(TAG, "Unknown patch op: " + op);
+        }
+    }
+
+    public void clear() {
+        viewMap.clear();
+        parentMap.clear();
+        nodeMap.clear();
+        elementMap.clear();
+        safeAreaViews.clear();
+    }
+
+    /**
+     * Re-apply window insets after the system reports them (they can
+     * arrive after the first frame, and change on rotation or when a
+     * foldable unfolds).
+     */
+    public void refreshInsets() {
+        for (Map.Entry<View, int[]> entry : safeAreaViews.entrySet()) {
+            applySafeAreaPadding(entry.getKey(), entry.getValue());
+        }
+        // Navigation bars size themselves from the gesture inset and the
+        // window metrics, so they have to recompute after a rotation.
+        for (View view : viewMap.values()) {
+            if (view instanceof PydrudNavigation.PydrudNavBar) {
+                ((PydrudNavigation.PydrudNavBar) view).refreshMetrics();
+            }
+        }
+    }
+
+    /** spec = {wantTop, wantBottom, basePaddingTop, basePaddingBottom}. */
+    private void applySafeAreaPadding(View view, int[] spec) {
+        if (view == null) return;
+        int top = spec[2] + (spec[0] == 1 ? PydrudTheme.insetTop : 0);
+        int bottom = spec[3] + (spec[1] == 1 ? PydrudTheme.insetBottom : 0);
+        view.setPadding(view.getPaddingLeft(), top, view.getPaddingRight(), bottom);
+    }
+
+    /** Opt a view into edge-to-edge padding via style.safeAreaTop/Bottom. */
+    private void applySafeArea(View view, JSONObject s) {
+        if (s == null) return;
+        boolean top = s.optBoolean("safeAreaTop", false);
+        boolean bottom = s.optBoolean("safeAreaBottom", false);
+        if (!top && !bottom) return;
+        int[] spec = {top ? 1 : 0, bottom ? 1 : 0,
+                      view.getPaddingTop(), view.getPaddingBottom()};
+        safeAreaViews.put(view, spec);
+        applySafeAreaPadding(view, spec);
+    }
+
+    // ── View creation ────────────────────────────────────────────────────
+
+    private View createView(JSONObject json) {
+        if (json == null) return null;
+        try {
+            String type = json.optString("type", "");
+            String key = json.optString("key", "");
+            View view;
+
+            ViewElement reusable = key.isEmpty() ? null : elementMap.get(key);
+            if (reusable != null && reusable.type.equals(type) && isReusableType(type)) {
+                view = reusable.view;
+                if (view.getParent() instanceof ViewGroup) ((ViewGroup) view.getParent()).removeView(view);
+                nodeMap.put(key, json);
+                updateProps(view, props(json), json);
+                applyStyle(view, json.optJSONObject("style"));
+                applySafeArea(view, json.optJSONObject("style"));
+                applySize(view, json.optJSONObject("style"));
+                return view;
+            }
+
+            switch (type) {
+                case "Container":
+                case "Center":
+                case "Padding":
+                case "SizedBox":
+                case "Positioned":
+                case "Card":
+                case "Stack":
+                    view = createBox(json); break;
+                case "Column":
+                case "ListView":
+                    view = createLinear(json, LinearLayout.VERTICAL); break;
+                case "Row":
+                    view = createLinear(json, LinearLayout.HORIZONTAL); break;
+                case "GridView":
+                    view = createGrid(json); break;
+                case "Spacer":
+                    view = new Space(activity); break;
+                case "Divider":
+                    view = createDivider(json); break;
+                case "Text":
+                    view = createTextView(json); break;
+                case "Button":
+                    view = createButton(json); break;
+                case "TextField":
+                    view = createTextField(json); break;
+                case "Image":
+                    view = createImageView(json); break;
+                case "Icon":
+                    view = createIconView(json); break;
+                case "Checkbox":
+                    view = createCheckbox(json); break;
+                case "Switch":
+                    view = createSwitchView(json); break;
+                case "Radio":
+                    view = createRadio(json); break;
+                case "ProgressBar":
+                    view = createProgressBar(json); break;
+                case "Slider":
+                    view = createSlider(json); break;
+                case "Dropdown":
+                    view = createDropdown(json); break;
+                case "Canvas":
+                    view = advanced.createCanvas(json.optJSONObject("props") == null
+                        ? new JSONObject() : json.optJSONObject("props")); break;
+                case "RichText":
+                    view = advanced.createRichText(props(json), key); break;
+                case "Markdown":
+                    view = advanced.createMarkdown(props(json), key); break;
+                case "MapView":
+                    view = advanced.createMap(props(json), key); break;
+                case "CameraPreview":
+                    view = createCameraPreview(json); break;
+                case "ReorderableList":
+                case "InfiniteList":
+                    view = createRecyclerList(json, key,
+                        "ReorderableList".equals(type)); break;
+                default:
+                    if (material.handles(type)) {
+                        view = material.create(json);
+                    } else if (registry.hasType(type)) {
+                        view = registry.create(json, activity, this);
+                    } else {
+                        Log.w(TAG, "Unknown widget type: " + type + " — rendering empty box");
+                        view = new FrameLayout(activity);
+                    }
+                    // Material components and custom widgets build themselves
+                    // from props only, so the factory attaches their Pydrud
+                    // children here. Without this a Tabs body, a Drawer, a
+                    // GestureDetector or any animation wrapper renders empty
+                    // until an unrelated patch happens to re-create it.
+                    attachChildren(view, json);
+            }
+
+            if (view == null) return null;
+
+            if (!key.isEmpty()) {
+                viewMap.put(key, view);
+                nodeMap.put(key, json);
+                elementMap.put(key, new ViewElement(key, type, view));
+                view.setTag(key);
+            }
+
+            JSONObject style = json.optJSONObject("style");
+            applyDefaultSize(view, json);
+            applyStyle(view, style);
+            applySafeArea(view, style);
+            applySize(view, style);
+            if (props(json).optBoolean("_fab", false)) styleFab(view, style);
+            bindEvents(view, json);
+            gestures.bind(view, json);
+            applyTransforms(view, style);
+            playEntrance(view, type, json);
+
+            if (!json.optBoolean("visible", true)) view.setVisibility(View.GONE);
+
+            return view;
+        } catch (Exception e) {
+            Log.e(TAG, "createView error", e);
+            return null;
+        }
+    }
+
+    /** Create a FrameLayout-based box (Container, Center, Card, Stack, …). */
+    private FrameLayout createBox(JSONObject json) throws JSONException {
+        FrameLayout fl = new FrameLayout(activity);
+        String type = json.optString("type", "");
+        JSONObject s = json.optJSONObject("style");
+
+        String alignment = (s != null) ? s.optString("alignment", "") : "";
+        if ("Center".equals(type)) alignment = "center";
+        int grav = alignment.isEmpty() ? Gravity.NO_GRAVITY : gravity(alignment);
+
+        if ("Card".equals(type)) styleCard(fl, s);
+
+        JSONArray arr = json.optJSONArray("children");
+        if (arr != null) {
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject childJson = arr.optJSONObject(i);
+                View c = createView(childJson);
+                if (c == null) continue;
+                FrameLayout.LayoutParams clp = frameParams(childJson, grav);
+                fl.addView(c, clp);
+            }
+        }
+        PydrudTheme.animateLayout(fl);
+        return fl;
+    }
+
+    /** Floating action button: circular ripple, real shadow, press response. */
+    private void styleFab(View view, JSONObject s) {
+        int fill = parseColor(s != null ? s.optString("bg", "") : "", PydrudTheme.primary);
+        float elevation = s != null
+            ? (float) s.optDouble("elevation", PydrudTheme.elevationFab)
+            : PydrudTheme.elevationFab;
+        float radius = s != null && s.has("borderRadius")
+            ? dp(s.optInt("borderRadius", (int) PydrudTheme.radiusFab))
+            : dp(PydrudTheme.radiusFab);
+        boolean circle = s == null || !s.has("width") || !s.has("height")
+            || s.optDouble("width", 56) == s.optDouble("height", 56);
+
+        android.graphics.drawable.Drawable base = PydrudTheme.shape(fill, radius);
+        int ripple = PydrudTheme.rippleOn(fill);
+        view.setBackground(circle
+            ? PydrudTheme.circleRipple(base, ripple)
+            : PydrudTheme.ripple(base, ripple, radius));
+        view.setClipToOutline(true);
+        PydrudTheme.elevate(view, elevation);
+        PydrudTheme.pressFeedback(view, PydrudTheme.pressScale - 0.04f, 0f, 4f);
+    }
+
+    /** A card is a rounded surface with a soft shadow — not a grey rectangle. */
+    private void styleCard(View view, JSONObject s) {
+        float radius = s != null && s.has("borderRadius")
+            ? dp(s.optInt("borderRadius", (int) PydrudTheme.radiusCard))
+            : dp(PydrudTheme.radiusCard);
+        int fill = parseColor(s != null ? s.optString("bg", "") : "", PydrudTheme.surface);
+        float elevation = s != null
+            ? (float) s.optDouble("elevation", PydrudTheme.elevationCard)
+            : PydrudTheme.elevationCard;
+
+        if (PydrudTheme.dark) {
+            // Shadows disappear on dark backgrounds; Material lifts the
+            // surface with a tint instead.
+            fill = PydrudTheme.blend(fill, 0xFFFFFFFF, Math.min(0.08f, elevation * 0.018f));
+        }
+        view.setBackground(PydrudTheme.shape(fill, radius,
+            PydrudTheme.dark ? dp(1) : 0,
+            PydrudTheme.dark ? PydrudTheme.outline : Color.TRANSPARENT));
+        view.setClipToOutline(true);
+        PydrudTheme.elevate(view, elevation);
+    }
+
+    /** Create a LinearLayout (Column, Row, ListView), optionally scrollable. */
+    private View createLinear(JSONObject json, int orientation) throws JSONException {
+        LinearLayout ll = new LinearLayout(activity);
+        ll.setOrientation(orientation);
+
+        JSONObject s = json.optJSONObject("style");
+        boolean scroll = s != null && s.optBoolean("scroll", false);
+        if (s != null && "horizontal".equals(s.optString("mainAxis", "")) &&
+            "ListView".equals(json.optString("type", ""))) {
+            ll.setOrientation(LinearLayout.HORIZONTAL);
+            orientation = LinearLayout.HORIZONTAL;
+        }
+        int spacing = (s != null) ? dp(s.optInt("spacing", 0)) : 0;
+        applyLinearGravity(ll, s, orientation);
+
+        // Spacing is applied as a margin on each child rather than as
+        // interleaved Space views: a Space would sit between the children
+        // and shift every native index, so an insert/remove patch (which
+        // addresses children by logical index) would land in the wrong
+        // place — or leave an orphaned gap behind.
+        if (spacing > 0) linearSpacing.put(ll, spacing);
+        String parentKey = json != null ? json.optString("key", "") : "";
+
+        JSONArray arr = json.optJSONArray("children");
+        if (arr != null) {
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject childJson = arr.optJSONObject(i);
+                View c = createView(childJson);
+                if (c == null) continue;
+                if (childJson != null && !parentKey.isEmpty()) {
+                    String childKey = childJson.optString("key", "");
+                    if (!childKey.isEmpty()) parentMap.put(childKey, parentKey);
+                }
+                ll.addView(c, linearParams(childJson, orientation));
+            }
+        }
+        applySpacing(ll);
+
+        PydrudTheme.animateLayout(ll);
+
+        if (!scroll) return ll;
+
+        if (orientation == LinearLayout.VERTICAL) {
+            ScrollView sv = new ScrollView(activity);
+            sv.setFillViewport(true);
+            sv.setVerticalScrollBarEnabled(false);
+            sv.setClipToPadding(false);
+            sv.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+            sv.addView(ll, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT));
+            return sv;
+        }
+        HorizontalScrollView hsv = new HorizontalScrollView(activity);
+        hsv.setFillViewport(true);
+        hsv.setHorizontalScrollBarEnabled(false);
+        hsv.setClipToPadding(false);
+        hsv.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        hsv.addView(ll, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.MATCH_PARENT));
+        return hsv;
+    }
+
+    /**
+     * Combine cross- and main-axis alignment into a LinearLayout's own
+     * gravity.
+     *
+     * <p>{@code crossAxisAlignment} places children on the cross axis (a
+     * Column's {@code horizontal_alignment}, a Row's {@code
+     * vertical_alignment}) and {@code mainAxisAlignment} packs them along
+     * the main axis — a Row's {@code horizontal_alignment} / a Column's
+     * {@code vertical_alignment} — with {@code start | center | end} (plus
+     * {@code top}/{@code bottom} on vertical axes). Without main-axis
+     * alignment there was no way to centre a pair of buttons inside a
+     * full-width row, so they hugged the leading edge.
+     *
+     * <p>When only the cross axis is set, the historic both-axis mapping is
+     * kept so existing layouts render exactly as before.
+     */
+    private void applyLinearGravity(LinearLayout ll, JSONObject s, int orientation) {
+        if (s == null) return;
+        String cross = s.optString("crossAxisAlignment", "");
+        String main = s.optString("mainAxisAlignment", "");
+        if (cross.isEmpty() && main.isEmpty()) return;
+        if (main.isEmpty()) {
+            ll.setGravity(gravity(cross));      // legacy both-axis behaviour
+            return;
+        }
+        boolean vertical = orientation == LinearLayout.VERTICAL;
+        int g = cross.isEmpty() ? 0 : axisBits(gravity(cross), !vertical);
+        g |= axisBits(gravity(main), vertical);
+        if (g != 0) ll.setGravity(g);
+    }
+
+    /** Keep only the horizontal (or vertical) component of a gravity value. */
+    private static int axisBits(int grav, boolean horizontal) {
+        int mask = horizontal ? Gravity.HORIZONTAL_GRAVITY_MASK
+                              : Gravity.VERTICAL_GRAVITY_MASK;
+        return grav & mask;
+    }
+
+    /**
+     * A responsive grid. ``columns`` may be a number, or ``"auto"`` together
+     * with ``minItemWidth`` so the column count follows the screen — the
+     * behaviour people expect from a modern layout.
+     */
+    private View createGrid(JSONObject json) throws JSONException {
+        JSONObject s = json.optJSONObject("style");
+        int spacing = PydrudTheme.adaptive(s != null ? (float) s.optDouble("spacing", 8) : 8f);
+        int columns = gridColumns(s);
+
+        LinearLayout grid = new LinearLayout(activity);
+        grid.setOrientation(LinearLayout.VERTICAL);
+
+        JSONArray arr = json.optJSONArray("children");
+        int count = arr != null ? arr.length() : 0;
+        LinearLayout row = null;
+        for (int i = 0; i < count; i++) {
+            if (i % columns == 0) {
+                row = new LinearLayout(activity);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+                if (i > 0) rlp.topMargin = spacing;
+                grid.addView(row, rlp);
+            }
+            View c = createView(arr.optJSONObject(i));
+            if (c == null || row == null) continue;
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+            if (i % columns != 0) clp.leftMargin = spacing;
+            row.addView(c, clp);
+        }
+        // Pad the final row so cells keep their width.
+        if (row != null && count % columns != 0) {
+            for (int i = count % columns; i < columns; i++) {
+                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+                clp.leftMargin = spacing;
+                row.addView(new Space(activity), clp);
+            }
+        }
+        PydrudTheme.animateLayout(grid);
+        return grid;
+    }
+
+    /** Resolve the column count, honouring "auto" and tablet breakpoints. */
+    private int gridColumns(JSONObject s) {
+        if (s == null) return 2;
+        Object raw = s.opt("columns");
+        int screen = PydrudTheme.screenWidthDp();
+
+        boolean auto = raw == null
+            || (raw instanceof String && "auto".equals(raw))
+            || (raw instanceof Number && ((Number) raw).intValue() <= 0);
+        if (auto) {
+            int minItem = (int) s.optDouble("minItemWidth", 160);
+            if (minItem <= 0) minItem = 160;
+            return Math.max(1, Math.min(6, screen / minItem));
+        }
+        int columns = Math.max(1, s.optInt("columns", 2));
+        if (s.has("tabletColumns") && screen >= 600) {
+            columns = Math.max(1, s.optInt("tabletColumns", columns));
+        } else if (screen >= 840) {
+            columns = Math.min(6, columns + 2);   // large tablet / foldable
+        } else if (screen >= 600) {
+            columns = Math.min(6, columns + 1);
+        }
+        return columns;
+    }
+
+    private TextView createTextView(JSONObject json) {
+        TextView tv = new TextView(activity);
+        JSONObject p = json.optJSONObject("props");
+        if (p != null) tv.setText(p.optString("value", ""));
+
+        // Readable defaults first; `style.font` refines them in applyStyle().
+        JSONObject s = json.optJSONObject("style");
+        JSONObject f = s != null ? s.optJSONObject("font") : null;
+        float size = f != null ? (float) f.optDouble("size", 16) : 16f;
+        int weight = f != null ? f.optInt("weight", 400) : 400;
+        PydrudTheme.applyTextDefaults(tv, size, weight, PydrudTheme.onSurface);
+
+        if (s != null) {
+            if (s.has("maxLines")) {
+                tv.setMaxLines(Math.max(1, s.optInt("maxLines", 1)));
+                tv.setEllipsize(ellipsize(s.optString("overflow", "ellipsis")));
+            }
+            if (s.optBoolean("selectable", false)) tv.setTextIsSelectable(true);
+        }
+        return tv;
+    }
+
+    private android.text.TextUtils.TruncateAt ellipsize(String overflow) {
+        switch (overflow) {
+            case "clip":   return null;
+            case "start":  return android.text.TextUtils.TruncateAt.START;
+            case "middle": return android.text.TextUtils.TruncateAt.MIDDLE;
+            case "marquee": return android.text.TextUtils.TruncateAt.MARQUEE;
+            default:       return android.text.TextUtils.TruncateAt.END;
+        }
+    }
+
+    /**
+     * A Material-3 style button: ripple, state layers, real elevation and a
+     * 48dp minimum tap target. Five variants — filled, tonal, elevated,
+     * outlined and text — all sharing one shape language.
+     */
+    private Button createButton(JSONObject json) {
+        JSONObject p = json.optJSONObject("props");
+        String text = p != null ? p.optString("text", "") : "";
+        JSONObject s = json.optJSONObject("style");
+        String variant = s != null ? s.optString("variant", "filled") : "filled";
+        boolean enabled = !(s != null && s.optBoolean("disabled", false));
+
+        Button btn = new androidx.appcompat.widget.AppCompatButton(
+            activity, null, android.R.attr.borderlessButtonStyle);
+        btn.setText(text);
+        btn.setAllCaps(false);
+        btn.setMinWidth(0);
+        btn.setMinimumWidth(0);
+        btn.setStateListAnimator(null);   // we install our own below
+
+        // Size scale: sm / md / lg.
+        String sizeName = s != null ? s.optString("buttonSize", "md") : "md";
+        float textSp = "sm".equals(sizeName) ? PydrudTheme.textLabel - 0.5f
+            : "lg".equals(sizeName) ? PydrudTheme.textSubtitle : PydrudTheme.textBody;
+        int padH = PydrudTheme.adaptive("sm".equals(sizeName) ? 14 : "lg".equals(sizeName) ? 26 : 20);
+        int padV = PydrudTheme.adaptive("sm".equals(sizeName) ? 8  : "lg".equals(sizeName) ? 15 : 12);
+        int minH = PydrudTheme.adaptive("sm".equals(sizeName) ? PydrudTheme.buttonHeightSm
+            : "lg".equals(sizeName) ? PydrudTheme.buttonHeightLg : PydrudTheme.buttonHeightMd);
+
+        btn.setPadding(padH, padV, padH, padV);
+        btn.setMinHeight(minH);
+        btn.setMinimumHeight(minH);
+        btn.setGravity(Gravity.CENTER);
+
+        int accent = parseColor(s != null ? s.optString("bg", "") : "", PydrudTheme.primary);
+        float radius = s != null && s.has("borderRadius")
+            ? dp(s.optInt("borderRadius", (int) PydrudTheme.radiusButton))
+            : dp(PydrudTheme.radiusButton);
+        if (s != null && s.optBoolean("pill", false)) radius = minH / 2f;
+
+        int label;
+        if ("outlined".equals(variant)) {
+            label = enabled ? accent : PydrudTheme.disabledFg;
+            btn.setBackground(PydrudTheme.outlineBackground(
+                enabled ? PydrudTheme.alpha(accent, 0.45f) : PydrudTheme.outline,
+                radius, dp(PydrudTheme.borderWidth * 1.4f),
+                PydrudTheme.alpha(accent, PydrudTheme.rippleOpacity)));
+        } else if ("text".equals(variant)) {
+            label = enabled ? accent : PydrudTheme.disabledFg;
+            btn.setBackground(PydrudTheme.ripple(
+                PydrudTheme.shape(Color.TRANSPARENT, radius),
+                PydrudTheme.alpha(accent, PydrudTheme.rippleOpacity), radius));
+        } else if ("tonal".equals(variant)) {
+            int fill = PydrudTheme.dark
+                ? PydrudTheme.blend(accent, PydrudTheme.surface, 0.72f)
+                : PydrudTheme.blend(accent, 0xFFFFFFFF, 0.86f);
+            label = enabled
+                ? (PydrudTheme.dark ? PydrudTheme.lighten(accent, 0.45f)
+                                    : PydrudTheme.darken(accent, 0.35f))
+                : PydrudTheme.disabledFg;
+            btn.setBackground(PydrudTheme.buttonBackground(fill, radius, enabled));
+        } else {
+            // filled (default) and elevated
+            label = enabled ? PydrudTheme.onColorFor(accent) : PydrudTheme.disabledFg;
+            btn.setBackground(PydrudTheme.buttonBackground(accent, radius, enabled));
+            float rest = "elevated".equals(variant)
+                ? PydrudTheme.elevationButton * 2f : PydrudTheme.elevationButton;
+            PydrudTheme.elevate(btn, enabled ? rest : 0f);
+            if (enabled) PydrudTheme.pressFeedback(btn, PydrudTheme.pressScale, 0f, 2f);
+        }
+
+        if (s != null && s.optJSONObject("font") != null
+                && s.optJSONObject("font").has("color")) {
+            label = parseColor(s.optJSONObject("font").optString("color", ""), label);
+        }
+        PydrudTheme.applyTextDefaults(btn, textSp, 600, label);
+        btn.setLetterSpacing(0.012f);
+
+        // Leading icon (Button(icon="save")).
+        String icon = s != null ? s.optString("icon", "") : "";
+        if (!icon.isEmpty()) {
+            int iconSize = PydrudTheme.adaptive("lg".equals(sizeName) ? 22 : 18);
+            btn.setCompoundDrawablesRelativeWithIntrinsicBounds(
+                PydrudIcons.drawable(icon, label, iconSize), null, null, null);
+            btn.setCompoundDrawablePadding(dp(8));
+        }
+
+        if (!enabled) {
+            btn.setEnabled(false);
+            btn.setClickable(false);
+        }
+        return btn;
+    }
+
+    private EditText createTextField(JSONObject json) {
+        EditText et = new androidx.appcompat.widget.AppCompatEditText(activity);
+        JSONObject p = json.optJSONObject("props");
+        if (p != null) {
+            et.setText(p.optString("value", ""));
+            String hint = p.optString("hint", "");
+            if (hint.isEmpty()) hint = p.optString("label", "");
+            if (!hint.isEmpty()) et.setHint(hint);
+        }
+        styleInput(et, json.optJSONObject("style"));
+        JSONObject s = json.optJSONObject("style");
+        int inputType = android.text.InputType.TYPE_CLASS_TEXT;
+        if (s != null) {
+            String keyboard = s.optString("keyboard", "text");
+            switch (keyboard) {
+                case "number": inputType = android.text.InputType.TYPE_CLASS_NUMBER; break;
+                case "phone":  inputType = android.text.InputType.TYPE_CLASS_PHONE; break;
+                case "email":  inputType = android.text.InputType.TYPE_CLASS_TEXT
+                    | android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS; break;
+                case "url":    inputType = android.text.InputType.TYPE_CLASS_TEXT
+                    | android.text.InputType.TYPE_TEXT_VARIATION_URI; break;
+                default: break;
+            }
+            if (s.optBoolean("password", false)) {
+                inputType = android.text.InputType.TYPE_CLASS_TEXT
+                    | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD;
+            }
+            if (s.optBoolean("multiline", false)) {
+                inputType |= android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE;
+                et.setSingleLine(false);
+            } else {
+                et.setSingleLine(true);
+            }
+            if (s.has("maxLines")) et.setMaxLines(Math.max(1, s.optInt("maxLines", 1)));
+            if (s.optBoolean("readOnly", false)) {
+                et.setFocusable(false);
+                et.setClickable(false);
+                et.setAlpha(0.7f);
+            }
+        }
+        et.setInputType(inputType);
+        if (s != null && s.optBoolean("multiline", false)) {
+            et.setGravity(Gravity.TOP | Gravity.START);
+            et.setMinHeight(PydrudTheme.adaptive(96));
+        }
+        return et;
+    }
+
+    /**
+     * Give an input the calm, rounded Pydrud look: a filled surface that
+     * grows a coloured border on focus, comfortable padding and a tinted
+     * caret — the Flutter TextField feel, without a wrapper layout.
+     */
+    private void styleInput(EditText et, JSONObject s) {
+        int accent = parseColor(s != null ? s.optString("accent", "") : "",
+                                PydrudTheme.primary);
+        boolean outlined = s != null && "outlined".equals(s.optString("variant", "filled"));
+        float radius = s != null && s.has("borderRadius")
+            ? dp(s.optInt("borderRadius", (int) PydrudTheme.radiusInput))
+            : dp(PydrudTheme.radiusInput);
+
+        int fill = outlined ? PydrudTheme.surface : PydrudTheme.surfaceVariant;
+        int focusFill = outlined ? PydrudTheme.surface
+                                 : PydrudTheme.blend(PydrudTheme.surfaceVariant,
+                                                     PydrudTheme.surface, 0.55f);
+        et.setBackground(PydrudTheme.inputBackground(
+            fill, focusFill, radius,
+            outlined ? PydrudTheme.outlineStrong : PydrudTheme.alpha(PydrudTheme.outline, 0f),
+            accent, dp(1.2f)));
+
+        int padH = PydrudTheme.adaptive(16);
+        int padV = PydrudTheme.adaptive(14);
+        et.setPadding(padH, padV, padH, padV);
+        et.setMinHeight(PydrudTheme.adaptive(PydrudTheme.inputHeight));
+        PydrudTheme.applyTextDefaults(et, 15.5f, 400, PydrudTheme.onSurface);
+        et.setHintTextColor(PydrudTheme.alpha(PydrudTheme.onSurfaceVariant, 0.75f));
+        et.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+
+        // Leading glyph (TextField(icon="magnify")).
+        String icon = s != null ? s.optString("icon", "") : "";
+        if (!icon.isEmpty()) {
+            et.setCompoundDrawablesRelativeWithIntrinsicBounds(
+                PydrudIcons.drawable(icon, PydrudTheme.onSurfaceVariant,
+                                     PydrudTheme.adaptive(20)), null, null, null);
+            et.setCompoundDrawablePadding(dp(10));
+        }
+
+        // Caret + selection in the app colour (stock blue looks out of place).
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                android.graphics.drawable.GradientDrawable caret =
+                    new android.graphics.drawable.GradientDrawable();
+                caret.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
+                caret.setColor(accent);
+                caret.setSize(dp(2), 0);
+                et.setTextCursorDrawable(caret);
+            }
+            et.setHighlightColor(PydrudTheme.alpha(accent, 0.25f));
+        } catch (Throwable ignored) {}
+    }
+
+    private ImageView createImageView(JSONObject json) {
+        ImageView iv = new ImageView(activity);
+        JSONObject ip = json.optJSONObject("props");
+        final String src = ip != null ? ip.optString("src", "") : "";
+        JSONObject s = json.optJSONObject("style");
+        iv.setScaleType(scaleType(s != null ? s.optString("fit", "contain") : "contain"));
+        iv.setAdjustViewBounds(true);
+
+        if (src.startsWith("http://") || src.startsWith("https://")) {
+            new Thread(() -> {
+                try {
+                    java.net.URL url = new java.net.URL(src);
+                    java.net.HttpURLConnection c = (java.net.HttpURLConnection) url.openConnection();
+                    c.setConnectTimeout(10000);
+                    c.setReadTimeout(15000);
+                    c.setDoInput(true);
+                    c.connect();
+                    java.io.InputStream is = c.getInputStream();
+                    final android.graphics.Bitmap bm = android.graphics.BitmapFactory.decodeStream(is);
+                    is.close();
+                    c.disconnect();
+                    if (bm != null) activity.runOnUiThread(() -> iv.setImageBitmap(bm));
+                } catch (Exception e) {
+                    Log.e(TAG, "Image load failed: " + src, e);
+                }
+            }).start();
+        } else if (!src.isEmpty()) {
+            try {
+                java.io.InputStream is = activity.getAssets().open(src);
+                iv.setImageBitmap(android.graphics.BitmapFactory.decodeStream(is));
+                is.close();
+            } catch (Exception e) {
+                Log.d(TAG, "Asset not found: " + src);
+            }
+        }
+        return iv;
+    }
+
+    private ImageView createIconView(JSONObject json) {
+        JSONObject p = json.optJSONObject("props");
+        String name = p != null ? p.optString("name", "star") : "star";
+        ImageView iv = new androidx.appcompat.widget.AppCompatImageView(activity);
+
+        JSONObject s = json.optJSONObject("style");
+        float size = 24f;
+        int tint = PydrudTheme.onSurfaceVariant;
+        if (s != null && s.optJSONObject("font") != null) {
+            JSONObject f = s.optJSONObject("font");
+            size = (float) f.optDouble("size", 24);
+            tint = parseColor(f.optString("color", ""), tint);
+        }
+        int px = PydrudTheme.adaptive(size);
+        iv.setImageDrawable(PydrudIcons.drawable(name, tint, px));
+        iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        iv.setLayoutParams(new ViewGroup.LayoutParams(px, px));
+        return iv;
+    }
+
+    private CheckBox createCheckbox(JSONObject json) {
+        CheckBox cb = new androidx.appcompat.widget.AppCompatCheckBox(activity);
+        JSONObject p = json.optJSONObject("props");
+        if (p != null) {
+            cb.setText(p.optString("label", ""));
+            cb.setChecked(p.optBoolean("checked", false));
+        }
+        styleToggle(cb, json.optJSONObject("style"));
+        return cb;
+    }
+
+    private CompoundButton createSwitchView(JSONObject json) {
+        androidx.appcompat.widget.SwitchCompat sw =
+            new androidx.appcompat.widget.SwitchCompat(activity);
+        JSONObject p = json.optJSONObject("props");
+        if (p != null) {
+            sw.setText(p.optString("label", ""));
+            sw.setChecked(p.optBoolean("active", false));
+        }
+        JSONObject s = json.optJSONObject("style");
+        int accent = parseColor(s != null ? s.optString("activeColor", "") : "",
+                                PydrudTheme.primary);
+        styleToggle(sw, s);
+        sw.setSwitchPadding(dp(12));
+        try {
+            android.content.res.ColorStateList thumb = new android.content.res.ColorStateList(
+                new int[][]{
+                    new int[]{-android.R.attr.state_enabled},
+                    new int[]{android.R.attr.state_checked},
+                    new int[]{},
+                },
+                new int[]{PydrudTheme.disabledFg, accent,
+                          PydrudTheme.dark ? 0xFF9BA6B8 : 0xFFFFFFFF});
+            android.content.res.ColorStateList track = new android.content.res.ColorStateList(
+                new int[][]{
+                    new int[]{-android.R.attr.state_enabled},
+                    new int[]{android.R.attr.state_checked},
+                    new int[]{},
+                },
+                new int[]{PydrudTheme.disabledBg,
+                          PydrudTheme.alpha(accent, 0.42f),
+                          PydrudTheme.alpha(PydrudTheme.onSurfaceVariant, 0.35f)});
+            sw.setThumbTintList(thumb);
+            sw.setTrackTintList(track);
+        } catch (Throwable ignored) {}
+        return sw;
+    }
+
+    private RadioButton createRadio(JSONObject json) {
+        RadioButton rb = new androidx.appcompat.widget.AppCompatRadioButton(activity);
+        JSONObject p = json.optJSONObject("props");
+        if (p != null) {
+            rb.setText(p.optString("label", ""));
+            rb.setChecked(p.optBoolean("selected", false));
+        }
+        styleToggle(rb, json.optJSONObject("style"));
+        return rb;
+    }
+
+    /** Shared polish for Checkbox / Radio / Switch rows. */
+    private void styleToggle(CompoundButton button, JSONObject s) {
+        int accent = parseColor(s != null ? s.optString("activeColor", "") : "",
+                                PydrudTheme.primary);
+        PydrudTheme.applyTextDefaults(button, 15f, 500, PydrudTheme.onSurface);
+        PydrudTheme.tintCompound(button, accent);
+        int minH = PydrudTheme.touchTarget();
+        button.setMinHeight(minH);
+        button.setMinimumHeight(minH);
+        button.setGravity(Gravity.CENTER_VERTICAL);
+        button.setPaddingRelative(dp(8), dp(6), dp(4), dp(6));
+        button.setCompoundDrawablePadding(dp(10));
+        button.setBackground(PydrudTheme.ripple(
+            PydrudTheme.shape(Color.TRANSPARENT, dp(10)),
+            PydrudTheme.alpha(accent, 0.10f), dp(10)));
+    }
+
+    private ProgressBar createProgressBar(JSONObject json) {
+        JSONObject s = json.optJSONObject("style");
+        boolean circular = s != null && s.optBoolean("circular", false);
+        ProgressBar pb = circular
+            ? new ProgressBar(activity)
+            : new ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal);
+        JSONObject p = json.optJSONObject("props");
+        boolean indeterminate = p == null || p.optBoolean("indeterminate", true);
+        int accent = parseColor(s != null ? s.optString("color", "") : "",
+                                PydrudTheme.primary);
+
+        if (!circular) {
+            int height = PydrudTheme.adaptive(
+                s != null ? (float) s.optDouble("thickness", 6) : 6f);
+            pb.setProgressDrawable(PydrudTheme.trackDrawable(
+                PydrudTheme.alpha(accent, PydrudTheme.dark ? 0.24f : 0.16f),
+                accent, height));
+            pb.setMinimumHeight(height);
+            pb.setIndeterminateTintList(
+                android.content.res.ColorStateList.valueOf(accent));
+        } else {
+            int size = PydrudTheme.adaptive(
+                s != null ? (float) s.optDouble("size", 36) : 36f);
+            pb.setLayoutParams(new ViewGroup.LayoutParams(size, size));
+            pb.setIndeterminateTintList(
+                android.content.res.ColorStateList.valueOf(accent));
+            pb.setProgressTintList(
+                android.content.res.ColorStateList.valueOf(accent));
+        }
+
+        pb.setIndeterminate(indeterminate);
+        if (!indeterminate && p != null) {
+            pb.setMax(1000);
+            pb.setProgress((int) Math.round(p.optDouble("value", 0) * 1000));
+        }
+        return pb;
+    }
+
+    private SeekBar createSlider(JSONObject json) {
+        SeekBar sb = new androidx.appcompat.widget.AppCompatSeekBar(activity);
+        JSONObject p = json.optJSONObject("props");
+        JSONObject s = json.optJSONObject("style");
+        double min = p != null ? p.optDouble("min", 0) : 0;
+        double max = p != null ? p.optDouble("max", 100) : 100;
+        double value = p != null ? p.optDouble("value", min) : min;
+        sb.setMax(1000);
+        double span = (max - min) == 0 ? 1 : (max - min);
+        sb.setProgress((int) Math.round((value - min) / span * 1000));
+        // Keyed tags need an *application-specific* resource id — a
+        // framework id (android.R.id.text1) throws at runtime and kills
+        // every slider render.
+        sb.setTag(R.id.pydrud_tag_range, new double[]{min, max});
+
+        int accent = parseColor(s != null ? s.optString("color", "") : "",
+                                PydrudTheme.primary);
+        int trackH = PydrudTheme.adaptive(6);
+        int thumbSize = PydrudTheme.adaptive(20);
+        sb.setProgressDrawable(PydrudTheme.trackDrawable(
+            PydrudTheme.alpha(accent, PydrudTheme.dark ? 0.26f : 0.18f), accent, trackH));
+        sb.setThumb(PydrudTheme.thumbDrawable(accent, thumbSize));
+        sb.setThumbOffset(0);
+        sb.setSplitTrack(false);
+        sb.setMinimumHeight(PydrudTheme.touchTarget());
+        int padH = thumbSize / 2;
+        sb.setPadding(padH, dp(12), padH, dp(12));
+        return sb;
+    }
+
+    private Spinner createDropdown(JSONObject json) {
+        Spinner sp = new androidx.appcompat.widget.AppCompatSpinner(activity);
+        JSONObject p = json.optJSONObject("props");
+        JSONObject s = json.optJSONObject("style");
+        final List<String> options = new ArrayList<>();
+        if (p != null) {
+            JSONArray arr = p.optJSONArray("options");
+            if (arr != null) {
+                for (int i = 0; i < arr.length(); i++) options.add(arr.optString(i, ""));
+            }
+        }
+
+        final int accent = parseColor(s != null ? s.optString("accent", "") : "",
+                                      PydrudTheme.primary);
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(
+                activity, android.R.layout.simple_spinner_item, options) {
+            @Override public View getView(int position, View convertView, ViewGroup parent) {
+                TextView tv = rowView(convertView, parent, false);
+                tv.setText(position < options.size() ? options.get(position) : "");
+                return tv;
+            }
+            @Override public View getDropDownView(int position, View convertView,
+                                                  ViewGroup parent) {
+                TextView tv = rowView(convertView, parent, true);
+                tv.setText(position < options.size() ? options.get(position) : "");
+                return tv;
+            }
+            private TextView rowView(View convertView, ViewGroup parent, boolean dropdown) {
+                TextView tv = (convertView instanceof TextView)
+                    ? (TextView) convertView : new TextView(activity);
+                PydrudTheme.applyTextDefaults(tv, 15f, dropdown ? 400 : 500,
+                                              PydrudTheme.onSurface);
+                int padH = PydrudTheme.adaptive(dropdown ? 18 : 2);
+                int padV = PydrudTheme.adaptive(dropdown ? 14 : 2);
+                tv.setPadding(padH, padV, padH, padV);
+                tv.setSingleLine(true);
+                tv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                tv.setGravity(Gravity.CENTER_VERTICAL);
+                if (dropdown) {
+                    tv.setMinHeight(PydrudTheme.touchTarget());
+                    tv.setBackground(PydrudTheme.ripple(
+                        PydrudTheme.shape(Color.TRANSPARENT, 0),
+                        PydrudTheme.alpha(accent, 0.12f), 0));
+                }
+                return tv;
+            }
+        };
+        sp.setAdapter(adapter);
+
+        int index = p != null ? p.optInt("index", 0) : 0;
+        if (index >= 0 && index < options.size()) sp.setSelection(index, false);
+
+        // The stock spinner background is a grey gradient from 2012.
+        float radius = s != null && s.has("borderRadius")
+            ? dp(s.optInt("borderRadius", 14)) : dp(14);
+        android.graphics.drawable.LayerDrawable box =
+            new android.graphics.drawable.LayerDrawable(
+                new android.graphics.drawable.Drawable[]{
+                    PydrudTheme.shape(PydrudTheme.surfaceVariant, radius,
+                                      dp(1.2f), PydrudTheme.outline),
+                    PydrudIcons.drawable("expand_more", PydrudTheme.onSurfaceVariant,
+                                         PydrudTheme.adaptive(20))
+                });
+        box.setLayerGravity(1, Gravity.END | Gravity.CENTER_VERTICAL);
+        box.setLayerInsetEnd(1, PydrudTheme.adaptive(14));
+        sp.setBackground(PydrudTheme.ripple(box, PydrudTheme.alpha(accent, 0.10f), radius));
+        int padH = PydrudTheme.adaptive(16);
+        int padV = PydrudTheme.adaptive(13);
+        sp.setPaddingRelative(padH, padV, PydrudTheme.adaptive(42), padV);
+        sp.setMinimumHeight(PydrudTheme.adaptive(PydrudTheme.inputHeight));
+
+        try {
+            sp.setPopupBackgroundDrawable(PydrudTheme.shape(
+                PydrudTheme.surface, dp(PydrudTheme.radiusInput),
+                dp(PydrudTheme.borderWidth), PydrudTheme.outline));
+            sp.setDropDownVerticalOffset(PydrudTheme.adaptive(PydrudTheme.inputHeight));
+        } catch (Throwable ignored) {}
+        return sp;
+    }
+
+    private View createDivider(JSONObject json) {
+        View v = new View(activity);
+        JSONObject s = json.optJSONObject("style");
+        int color = parseColor(s != null ? s.optString("color", "") : "",
+                               PydrudTheme.outline);
+        v.setBackgroundColor(color);
+        return v;
+    }
+
+    // ── Events ──────────────────────────────────────────────────────────────
+
+    private void bindEvents(View view, JSONObject json) {
+        final String key = json.optString("key", "");
+        if (key.isEmpty() || eventDispatcher == null) return;
+
+        List<String> events = new ArrayList<>();
+        JSONArray arr = json.optJSONArray("events");
+        if (arr != null) {
+            for (int i = 0; i < arr.length(); i++) events.add(arr.optString(i, ""));
+        } else if (json.optBoolean("has_events", false)) {
+            // Older protocol: assume the natural event for the widget type.
+            events.add("click");
+            events.add("change");
+            events.add("submit");
+        }
+        if (events.isEmpty()) return;
+        eventDispatcher.subscribe(key, events.toArray(new String[0]));
+
+        if (events.contains("click")) {
+            view.setClickable(true);
+            view.setOnClickListener(v -> eventDispatcher.dispatch("click", key));
+            addTouchFeedback(view, json);
+        }
+        if (events.contains("long_press")) {
+            view.setLongClickable(true);
+            view.setOnLongClickListener(v -> {
+                eventDispatcher.dispatch("long_press", key);
+                return true;
+            });
+        }
+        if (events.contains("focus")) {
+            view.setOnFocusChangeListener((v, hasFocus) ->
+                eventDispatcher.dispatch("focus", key, data("focused", hasFocus)));
+        }
+
+        if (view instanceof EditText) {
+            final EditText et = (EditText) view;
+            if (events.contains("change")) {
+                et.addTextChangedListener(new android.text.TextWatcher() {
+                    @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+                    @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
+                    @Override public void afterTextChanged(android.text.Editable s) {
+                        eventDispatcher.dispatch("change", key, data("value", s.toString()));
+                    }
+                });
+            }
+            if (events.contains("submit")) {
+                et.setOnEditorActionListener((v, actionId, event) -> {
+                    if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE
+                        || actionId == android.view.inputmethod.EditorInfo.IME_ACTION_GO
+                        || actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEND) {
+                        eventDispatcher.dispatch("submit", key,
+                            data("value", et.getText().toString()));
+                        return true;
+                    }
+                    return false;
+                });
+            }
+        } else if (view instanceof CompoundButton) {
+            if (events.contains("change")) {
+                CompoundButton.OnCheckedChangeListener listener = (btn, isChecked) ->
+                    eventDispatcher.dispatch("change", key, data("value", isChecked));
+                ((CompoundButton) view).setOnCheckedChangeListener(listener);
+                // Application-specific tag key (framework ids are rejected
+                // by setTag and used to crash switch/checkbox/chip builds).
+                view.setTag(R.id.pydrud_tag_listener, listener);
+            }
+        } else if (view instanceof SeekBar) {
+            final SeekBar sb = (SeekBar) view;
+            if (events.contains("change")) {
+                sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                    @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                        if (!fromUser) return;
+                        double[] range = rangeOf(bar);
+                        double value = range[0] + (range[1] - range[0]) * (progress / 1000.0);
+                        eventDispatcher.dispatch("change", key, data("value", value));
+                    }
+                    @Override public void onStartTrackingTouch(SeekBar bar) {}
+                    @Override public void onStopTrackingTouch(SeekBar bar) {}
+                });
+            }
+        } else if (view instanceof Spinner) {
+            if (events.contains("change")) {
+                ((Spinner) view).setOnItemSelectedListener(
+                    new AdapterView.OnItemSelectedListener() {
+                        @Override public void onItemSelected(AdapterView<?> parent, View v, int pos, long id) {
+                            try {
+                                JSONObject d = new JSONObject();
+                                d.put("value", String.valueOf(parent.getItemAtPosition(pos)));
+                                d.put("index", pos);
+                                eventDispatcher.dispatch("change", key, d);
+                            } catch (JSONException ignored) {}
+                        }
+                        @Override public void onNothingSelected(AdapterView<?> parent) {}
+                    });
+            }
+        }
+    }
+
+    /**
+     * Make a tappable widget feel alive.
+     *
+     * <p>Anything clickable gets a bounded ripple plus (for small targets) a
+     * gentle press animation, and icons grow an invisible 48dp hit area so a
+     * thumb actually lands on them. Widgets that already draw their own
+     * feedback — buttons, switches, inputs — are skipped.
+     */
+    private void addTouchFeedback(View view, JSONObject json) {
+        if (view == null) return;
+        if (view instanceof Button || view instanceof CompoundButton
+            || view instanceof EditText || view instanceof SeekBar
+            || view instanceof Spinner) {
+            return;
+        }
+        String type = json != null ? json.optString("type", "") : "";
+        JSONObject s = json != null ? json.optJSONObject("style") : null;
+        if (s != null && !s.optBoolean("feedback", true)) return;
+
+        int tint = PydrudTheme.rippleOn(parseColor(
+            s != null ? s.optString("bg", "") : "", PydrudTheme.surface));
+
+        boolean circular = "Icon".equals(type) || "Avatar".equals(type)
+            || (s != null && s.optBoolean("circular", false))
+            || (s != null && "FAB".equals(s.optString("role", "")));
+
+        if (circular) {
+            PydrudTheme.addCircleRipple(view, tint);
+            PydrudTheme.pressFeedback(view, 0.88f, 0f, 0f);
+            PydrudTheme.expandTouch(view, PydrudTheme.touchTarget());
+        } else {
+            float radius = s != null && s.has("borderRadius")
+                ? dp(s.optInt("borderRadius", 0)) : 0f;
+            PydrudTheme.addRipple(view, tint, radius);
+            if ("Card".equals(type)) {
+                PydrudTheme.pressFeedback(view, 0.985f, 0f, 2f);
+            }
+        }
+    }
+
+    private double[] rangeOf(SeekBar bar) {
+        Object tag = bar.getTag(R.id.pydrud_tag_range);
+        if (tag instanceof double[]) return (double[]) tag;
+        return new double[]{0, 100};
+    }
+
+    private JSONObject data(String name, Object value) {
+        JSONObject d = new JSONObject();
+        try { d.put(name, value); } catch (JSONException ignored) {}
+        return d;
+    }
+
+    // ── Layout params ───────────────────────────────────────────────────────
+
+    /**
+     * Widget kinds that stretch to the full available width by default —
+     * bars, inputs, tiles and charts. Everything else (a {@code Container}
+     * above all) hugs its content like Flutter's Container, so a padded
+     * wrapper around an icon stays a compact 48dp target instead of
+     * stretching across the whole screen.
+     */
+    /**
+     * Widget kinds that are expensive to rebuild and hold internal state
+     * worth keeping (scroll position, camera session, WebView page, canvas
+     * surface). These are re-used in place when a diff re-creates the same
+     * key with the same type; everything else is cheap enough to rebuild.
+     */
+    private static boolean isReusableType(String type) {
+        switch (type) {
+            case "Canvas":
+            case "MapView":
+            case "CameraPreview":
+            case "ReorderableList":
+            case "InfiniteList":
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static boolean fillsWidthByDefault(String type) {
+        switch (type) {
+            case "Column": case "Row": case "Card":
+            case "ListView": case "GridView": case "Divider": case "Padding":
+            case "Slider": case "ProgressBar":
+            case "TextField": case "SearchBar": case "ListTile":
+            case "ExpansionTile": case "Tabs": case "BottomNavigationBar":
+            case "SegmentedButton": case "Chart": case "RefreshIndicator":
+            case "Form":
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /** Give every view a sensible default size before styles are applied. */
+    private void applyDefaultSize(View view, JSONObject json) {
+        String type = json.optString("type", "");
+        int w = fillsWidthByDefault(type)
+            ? ViewGroup.LayoutParams.MATCH_PARENT
+            : ViewGroup.LayoutParams.WRAP_CONTENT;
+        int h = ViewGroup.LayoutParams.WRAP_CONTENT;
+        if ("Center".equals(type) || "Stack".equals(type)) {
+            w = ViewGroup.LayoutParams.MATCH_PARENT;
+            h = ViewGroup.LayoutParams.MATCH_PARENT;
+        }
+        if ("Divider".equals(type)) {
+            JSONObject s = json.optJSONObject("style");
+            h = dp(s != null ? s.optInt("thickness", 1) : 1);
+        }
+        view.setLayoutParams(new ViewGroup.MarginLayoutParams(w, h));
+    }
+
+    private LinearLayout.LayoutParams linearParams(JSONObject json, int orientation) {
+        ViewGroup.LayoutParams base = sizeFor(json);
+        // Inside a horizontal layout a full-width child (a Card, a Column,
+        // an input…) would swallow the whole row and starve its siblings —
+        // the classic symptom was an app bar whose title vanished behind
+        // one oversized action slot. Block widgets hug their content here
+        // unless they declare a width or expand to claim the space.
+        if (orientation == LinearLayout.HORIZONTAL
+                && base.width == ViewGroup.LayoutParams.MATCH_PARENT
+                && !declaresWidth(json)) {
+            base.width = ViewGroup.LayoutParams.WRAP_CONTENT;
+        }
+        LinearLayout.LayoutParams lp =
+            new LinearLayout.LayoutParams(base.width, base.height);
+        applyMargins(lp, json);
+
+        int expand = json != null && !json.isNull("expand") ? json.optInt("expand", 0) : 0;
+        boolean isSpacer = json != null && "Spacer".equals(json.optString("type", ""));
+        if (isSpacer && expand == 0) expand = 1;
+        if (expand > 0) {
+            lp.weight = expand;
+            // A weighted child must give up its main-axis size.
+            if (orientation == LinearLayout.VERTICAL) lp.height = 0;
+            else lp.width = 0;
+        }
+        if (isSpacer) {
+            if (orientation == LinearLayout.VERTICAL) lp.width = LinearLayout.LayoutParams.MATCH_PARENT;
+            else lp.height = LinearLayout.LayoutParams.MATCH_PARENT;
+        }
+        // A width-capped child centres itself in the leftover space instead
+        // of hugging the start edge — the "readable column" layout.
+        JSONObject cs = json != null ? json.optJSONObject("style") : null;
+        if (cs != null && cs.has("maxWidth") && !cs.has("alignment")
+                && orientation == LinearLayout.VERTICAL
+                && lp.width != LinearLayout.LayoutParams.MATCH_PARENT) {
+            lp.gravity = Gravity.CENTER_HORIZONTAL;
+        }
+        return lp;
+    }
+
+    private FrameLayout.LayoutParams frameParams(JSONObject json, int parentGravity) {
+        ViewGroup.LayoutParams base = sizeFor(json);
+        FrameLayout.LayoutParams lp =
+            new FrameLayout.LayoutParams(base.width, base.height);
+        applyMargins(lp, json);
+
+        JSONObject s = json != null ? json.optJSONObject("style") : null;
+        int grav = parentGravity;
+        if (s != null && "absolute".equals(s.optString("position", ""))) {
+            grav = Gravity.NO_GRAVITY;
+            if (s.has("left"))   { grav |= Gravity.START;  lp.leftMargin = dp(s.optInt("left", 0)); }
+            if (s.has("right"))  { grav |= Gravity.END;    lp.rightMargin = dp(s.optInt("right", 0)); }
+            if (s.has("top"))    { grav |= Gravity.TOP;    lp.topMargin = dp(s.optInt("top", 0)); }
+            if (s.has("bottom")) {
+                grav |= Gravity.BOTTOM;
+                // Floating elements clear the gesture bar as well as their
+                // own offset, otherwise a FAB sits on top of it.
+                lp.bottomMargin = dp(s.optInt("bottom", 0))
+                    + (s.optBoolean("safeAreaBottom", true) ? PydrudTheme.insetBottom : 0);
+            }
+            if (grav == Gravity.NO_GRAVITY) grav = Gravity.TOP | Gravity.START;
+        } else if (s != null && s.has("alignment")) {
+            grav = gravity(s.optString("alignment", ""));
+        }
+        if (grav != Gravity.NO_GRAVITY) lp.gravity = grav;
+        return lp;
+    }
+
+    /** Resolve the declared width/height of a node (defaults per widget type). */
+    private ViewGroup.LayoutParams sizeFor(JSONObject json) {
+        int w = ViewGroup.LayoutParams.WRAP_CONTENT;
+        int h = ViewGroup.LayoutParams.WRAP_CONTENT;
+        if (json == null) return new ViewGroup.LayoutParams(w, h);
+
+        String type = json.optString("type", "");
+        if (fillsWidthByDefault(type)) w = ViewGroup.LayoutParams.MATCH_PARENT;
+        if ("Center".equals(type) || "Stack".equals(type)) {
+            w = ViewGroup.LayoutParams.MATCH_PARENT;
+            h = ViewGroup.LayoutParams.MATCH_PARENT;
+        }
+        if ("Divider".equals(type)) {
+            JSONObject ds = json.optJSONObject("style");
+            h = dp(ds != null ? ds.optInt("thickness", 1) : 1);
+        }
+
+        JSONObject s = json.optJSONObject("style");
+        if (s != null) {
+            if (s.has("width"))  w = dimension(s, "width", w);
+            if (s.has("height")) h = dimension(s, "height", h);
+            // maxWidth / maxHeight cap a stretched child on big screens, so
+            // a form on a tablet stays readable instead of spanning 1200dp.
+            if (s.has("maxWidth")) {
+                int max = dimension(s, "maxWidth", -1);
+                int current = (w == ViewGroup.LayoutParams.MATCH_PARENT)
+                    ? PydrudTheme.screenWidthPx() : w;
+                if (max > 0 && current > max) w = max;
+            }
+            if (s.has("maxHeight")) {
+                int max = dimension(s, "maxHeight", -1);
+                int current = (h == ViewGroup.LayoutParams.MATCH_PARENT)
+                    ? PydrudTheme.screenHeightPx() : h;
+                if (max > 0 && current > max) h = max;
+            }
+        }
+        return new ViewGroup.LayoutParams(w, h);
+    }
+
+    private void applyMargins(ViewGroup.MarginLayoutParams lp, JSONObject json) {
+        JSONObject s = json != null ? json.optJSONObject("style") : null;
+        if (s == null || !s.has("margin")) return;
+        JSONObject m = s.optJSONObject("margin");
+        if (m == null) return;
+        if (m.has("all")) {
+            int a = dp(m.optInt("all", 0));
+            lp.setMargins(a, a, a, a);
+        } else {
+            lp.setMargins(dp(m.optInt("left", 0)), dp(m.optInt("top", 0)),
+                           dp(m.optInt("right", 0)), dp(m.optInt("bottom", 0)));
+        }
+    }
+
+    /** Does the node pin its own width (``style.width``)? */
+    private static boolean declaresWidth(JSONObject json) {
+        JSONObject s = json != null ? json.optJSONObject("style") : null;
+        return s != null && s.has("width");
+    }
+
+    /** Re-apply width/height onto an existing view's layout params. */
+    private void applySize(View view, JSONObject s) {
+        if (s == null) return;
+        if (!s.has("width") && !s.has("height")) return;
+        ViewGroup.LayoutParams lp = view.getLayoutParams();
+        if (lp == null) {
+            lp = new ViewGroup.MarginLayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        if (s.has("width"))  lp.width = dimension(s, "width", lp.width);
+        if (s.has("height")) lp.height = dimension(s, "height", lp.height);
+        view.setLayoutParams(lp);
+    }
+
+    /**
+     * Parse a size from a style field.
+     *
+     * <p>Accepted forms — all resolved against the *current* window, so
+     * they stay correct after a rotation or a split-screen resize:
+     *
+     * <ul>
+     *   <li>{@code 120} or {@code "120"} — dp</li>
+     *   <li>{@code "match"} / {@code "fill"} — MATCH_PARENT</li>
+     *   <li>{@code "wrap"} / {@code "auto"} — WRAP_CONTENT</li>
+     *   <li>{@code "50%"} — percent of the window on this axis</li>
+     *   <li>{@code "50%w"} / {@code "50%h"} — percent of width / height</li>
+     *   <li>{@code "50%s"} — percent of the shortest side (square-ish art)</li>
+     *   <li>{@code "40vw"} / {@code "40vh"} — CSS-style viewport units</li>
+     *   <li>{@code "100px"} — raw pixels, no density scaling</li>
+     * </ul>
+     */
+    private int dimension(JSONObject s, String name, int fallback) {
+        Object raw = s.opt(name);
+        if (raw == null) return fallback;
+        if (raw instanceof Number) return dp((int) Math.round(((Number) raw).doubleValue()));
+        if (!(raw instanceof String)) return fallback;
+
+        String str = ((String) raw).trim().toLowerCase(java.util.Locale.US);
+        if (str.isEmpty()) return fallback;
+        if (str.equals("match") || str.equals("match_parent") || str.equals("fill")
+            || str.equals("100%") || str.equals("expand")) {
+            return ViewGroup.LayoutParams.MATCH_PARENT;
+        }
+        if (str.equals("wrap") || str.equals("wrap_content") || str.equals("auto")) {
+            return ViewGroup.LayoutParams.WRAP_CONTENT;
+        }
+
+        boolean vertical = "height".equals(name) || "minHeight".equals(name);
+        try {
+            if (str.endsWith("%w") || str.endsWith("%h") || str.endsWith("%s")) {
+                char axis = str.charAt(str.length() - 1);
+                float pct = Float.parseFloat(str.substring(0, str.length() - 2));
+                if (axis == 'w') return PydrudTheme.percentWidth(pct);
+                if (axis == 'h') return PydrudTheme.percentHeight(pct);
+                return PydrudTheme.percentShortest(pct);
+            }
+            if (str.endsWith("vw")) {
+                return PydrudTheme.percentWidth(
+                    Float.parseFloat(str.substring(0, str.length() - 2)));
+            }
+            if (str.endsWith("vh")) {
+                return PydrudTheme.percentHeight(
+                    Float.parseFloat(str.substring(0, str.length() - 2)));
+            }
+            if (str.endsWith("%")) {
+                float pct = Float.parseFloat(str.substring(0, str.length() - 1));
+                return vertical ? PydrudTheme.percentHeight(pct)
+                                : PydrudTheme.percentWidth(pct);
+            }
+            if (str.endsWith("px")) {
+                return Math.round(Float.parseFloat(str.substring(0, str.length() - 2)));
+            }
+            if (str.endsWith("dp")) {
+                return dp(Float.parseFloat(str.substring(0, str.length() - 2)));
+            }
+            return dp((float) Double.parseDouble(str));
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    /** Attach a freshly created view to a parent with correct layout params. */
+    private void addChild(ViewGroup parent, View child, JSONObject json, int index) {
+        ViewGroup.LayoutParams lp;
+        if (parent instanceof LinearLayout) {
+            lp = linearParams(json, ((LinearLayout) parent).getOrientation());
+        } else if (parent instanceof FrameLayout) {
+            lp = frameParams(json, Gravity.NO_GRAVITY);
+        } else {
+            lp = sizeFor(json);
+        }
+        int at = (index < 0 || index > parent.getChildCount()) ? parent.getChildCount() : index;
+        parent.addView(child, at, lp);
+        applySpacing(parent);
+    }
+
+    /** The child's own ``style.margin`` on the main axis, in px. */
+    private int baseMargin(View child, boolean vertical) {
+        Object tag = child.getTag();
+        if (!(tag instanceof String)) return 0;
+        JSONObject node = nodeMap.get((String) tag);
+        JSONObject style = node != null ? node.optJSONObject("style") : null;
+        JSONObject margin = style != null ? style.optJSONObject("margin") : null;
+        if (margin == null) return 0;
+        if (margin.has("all")) return dp(margin.optInt("all", 0));
+        return dp(margin.optInt(vertical ? "top" : "left", 0));
+    }
+
+    /**
+     * Re-apply a Column/Row's gap after its children changed.
+     *
+     * <p>Every child except the first gets a leading margin on the main
+     * axis, so inserting or removing a row keeps the rhythm correct and
+     * never leaves a stray gap behind.
+     */
+    private void applySpacing(ViewGroup parent) {
+        if (parent == null || !(parent instanceof LinearLayout)) return;
+        Integer gap = linearSpacing.get(parent);
+        if (gap == null || gap <= 0) return;
+        LinearLayout ll = (LinearLayout) parent;
+        boolean vertical = ll.getOrientation() == LinearLayout.VERTICAL;
+        int visibleIndex = 0;
+        for (int i = 0; i < ll.getChildCount(); i++) {
+            View child = ll.getChildAt(i);
+            ViewGroup.LayoutParams lp = child.getLayoutParams();
+            if (!(lp instanceof ViewGroup.MarginLayoutParams)) continue;
+            ViewGroup.MarginLayoutParams mlp = (ViewGroup.MarginLayoutParams) lp;
+            boolean gone = child.getVisibility() == View.GONE;
+            int lead = (visibleIndex == 0 || gone) ? 0 : gap;
+            // The child keeps its own style margin; the gap is added on top.
+            lead += baseMargin(child, vertical);
+            if (vertical) mlp.topMargin = lead; else mlp.leftMargin = lead;
+            child.setLayoutParams(mlp);
+            if (!gone) visibleIndex++;
+        }
+    }
+
+    /** Find the ViewGroup that children of *parentKey* should be added to. */
+    private ViewGroup containerFor(String parentKey) {
+        View parent = viewMap.get(parentKey);
+        if (parent instanceof ScrollView || parent instanceof HorizontalScrollView) {
+            ViewGroup sv = (ViewGroup) parent;
+            if (sv.getChildCount() > 0 && sv.getChildAt(0) instanceof ViewGroup) {
+                return (ViewGroup) sv.getChildAt(0);
+            }
+        }
+        return childHost(parent);
+    }
+
+    /**
+     * Where a composite view's Pydrud children belong.
+     *
+     * <p>A widget such as Tabs or ExpansionTile builds its own chrome (a tab
+     * strip, a header) and tags the container its children must go into, so
+     * both the first render and later patches put them in the same place.
+     */
+    static ViewGroup childHost(View view) {
+        if (view == null) return null;
+        Object tag = view.getTag(R.id.pydrud_tag_children);
+        if (tag instanceof ViewGroup) return (ViewGroup) tag;
+        return view instanceof ViewGroup ? (ViewGroup) view : null;
+    }
+
+    /** Build and attach the children of *json* into *view*'s child host. */
+    private void attachChildren(View view, JSONObject json) {
+        JSONArray arr = json != null ? json.optJSONArray("children") : null;
+        if (arr == null || arr.length() == 0) return;
+        ViewGroup host = childHost(view);
+        if (host == null) return;
+        String parentKey = json.optString("key", "");
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject childJson = arr.optJSONObject(i);
+            View child = createView(childJson);
+            if (child == null) continue;
+            if (childJson != null) {
+                String childKey = childJson.optString("key", "");
+                if (!childKey.isEmpty()) parentMap.put(childKey, parentKey);
+            }
+            addChild(host, child, childJson, -1);
+        }
+    }
+
+    /** Remove a view and purge every descendant key from the lookup maps. */
+    private void removeViewTree(String key) {
+        View v = viewMap.remove(key);
+        nodeMap.remove(key);
+        parentMap.remove(key);
+        List<String> orphans = new ArrayList<>();
+        for (Map.Entry<String, String> e : parentMap.entrySet()) {
+            if (key.equals(e.getValue())) orphans.add(e.getKey());
+        }
+        for (String child : orphans) removeViewTree(child);
+        if (v != null && v.getParent() instanceof ViewGroup) {
+            ((ViewGroup) v.getParent()).removeView(v);
+        }
+    }
+
+    private void mergeInto(JSONObject node, String section, JSONObject values) {
+        if (node == null || values == null) return;
+        JSONObject target = node.optJSONObject(section);
+        try {
+            if (target == null) {
+                node.put(section, values);
+                return;
+            }
+            java.util.Iterator<String> it = values.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                if (values.isNull(k)) target.remove(k);
+                else target.put(k, values.get(k));
+            }
+        } catch (JSONException ignored) {}
+    }
+
+    // ── Style ───────────────────────────────────────────────────────────────
+
+    private void applyStyle(View view, JSONObject s) {
+        if (s == null) return;
+        try {
+            int radius = s.has("borderRadius") ? dp(s.optInt("borderRadius", 0)) : 0;
+            boolean hasBorder = s.has("border");
+            boolean hasBg = s.has("bg");
+            boolean hasGradient = s.has("gradient");
+            boolean skipBackground = view instanceof Button || view instanceof EditText
+                || view instanceof CompoundButton || view instanceof SeekBar
+                || view instanceof Spinner;
+
+            if (skipBackground) {
+                // These widgets own their background (ripple + state layers);
+                // overwriting it here would undo the Material styling.
+            } else if (hasGradient) {
+                GradientDrawable gd = gradientDrawable(s.optJSONObject("gradient"));
+                gd.setCornerRadius(radius);
+                applyBorder(gd, s);
+                view.setBackground(withSideBorders(gd, s));
+                if (radius > 0) view.setClipToOutline(true);
+            } else if (hasBg && radius == 0 && !hasBorder) {
+                int c = parseColor(s.optString("bg", ""), Color.TRANSPARENT);
+                view.setBackgroundColor(c);
+            } else if (hasBg || radius > 0 || hasBorder) {
+                GradientDrawable gd = new GradientDrawable();
+                gd.setCornerRadius(radius);
+                gd.setColor(hasBg ? parseColor(s.optString("bg", ""), Color.TRANSPARENT)
+                                  : Color.TRANSPARENT);
+                applyBorder(gd, s);
+                view.setBackground(withSideBorders(gd, s));
+                if (radius > 0) view.setClipToOutline(true);
+            }
+
+            // Minimum sizes keep rows on the 48dp touch grid even when
+            // their content is short.
+            if (s.has("minHeight")) view.setMinimumHeight(dp((float) s.optDouble("minHeight", 0)));
+            if (s.has("minWidth")) view.setMinimumWidth(dp((float) s.optDouble("minWidth", 0)));
+
+            // Padding
+            if (s.has("padding")) {
+                JSONObject p = s.optJSONObject("padding");
+                if (p != null) {
+                    if (p.has("all")) {
+                        int a = dp(p.optInt("all", 0));
+                        view.setPadding(a, a, a, a);
+                    } else {
+                        view.setPadding(dp(p.optInt("left", 0)), dp(p.optInt("top", 0)),
+                                        dp(p.optInt("right", 0)), dp(p.optInt("bottom", 0)));
+                    }
+                }
+            }
+
+            // Margin (when the view already has margin-capable params)
+            if (s.has("margin") && view.getLayoutParams() instanceof ViewGroup.MarginLayoutParams) {
+                JSONObject m = s.optJSONObject("margin");
+                ViewGroup.MarginLayoutParams mlp =
+                    (ViewGroup.MarginLayoutParams) view.getLayoutParams();
+                if (m != null) {
+                    if (m.has("all")) {
+                        int a = dp(m.optInt("all", 0));
+                        mlp.setMargins(a, a, a, a);
+                    } else {
+                        mlp.setMargins(dp(m.optInt("left", 0)), dp(m.optInt("top", 0)),
+                                       dp(m.optInt("right", 0)), dp(m.optInt("bottom", 0)));
+                    }
+                }
+            }
+
+            // Gravity for layout containers / text
+            if (s.has("alignment")) {
+                int g = gravity(s.optString("alignment", ""));
+                if (view instanceof TextView) ((TextView) view).setGravity(g);
+                else if (view instanceof LinearLayout) ((LinearLayout) view).setGravity(g);
+                else if (view instanceof FrameLayout) {
+                    FrameLayout fl = (FrameLayout) view;
+                    for (int i = 0; i < fl.getChildCount(); i++) {
+                        View child = fl.getChildAt(i);
+                        ViewGroup.LayoutParams clp = child.getLayoutParams();
+                        if (clp instanceof FrameLayout.LayoutParams) {
+                            ((FrameLayout.LayoutParams) clp).gravity = g;
+                            child.setLayoutParams(clp);
+                        }
+                    }
+                }
+            }
+
+            // Font — real weights (API 28+), tuned tracking and line height.
+            if (s.has("font") && view instanceof TextView) {
+                JSONObject f = s.optJSONObject("font");
+                TextView tv = (TextView) view;
+                if (f != null) {
+                    float size = (float) f.optDouble("size", tv.getTextSize()
+                        / activity.getResources().getDisplayMetrics().scaledDensity);
+                    if (f.has("size")) {
+                        tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP,
+                                       PydrudTheme.scaledSp(size));
+                    }
+                    if (f.has("color")) {
+                        tv.setTextColor(parseColor(f.optString("color", ""),
+                                                   tv.getCurrentTextColor()));
+                    }
+                    int weight = f.optInt("weight", 400);
+                    boolean italic = f.optBoolean("italic", false);
+                    String family = f.optString("family", "");
+                    tv.setTypeface(family.isEmpty()
+                        ? PydrudTheme.typeface(weight, italic)
+                        : PydrudTheme.typeface(family, weight, italic));
+                    if (f.has("size") || f.has("weight")) {
+                        tv.setLetterSpacing(PydrudTheme.letterSpacingFor(size, weight));
+                        tv.setLineSpacing(0f, size >= PydrudTheme.textHeadline
+                            ? PydrudTheme.lineHeight * 0.82f : PydrudTheme.lineHeight);
+                    }
+                    if (f.has("lineHeight")) {
+                        tv.setLineSpacing(0f, (float) f.optDouble("lineHeight", 1.22));
+                    }
+                    if (f.has("letterSpacing")) {
+                        tv.setLetterSpacing((float) f.optDouble("letterSpacing", 0));
+                    }
+                    if (f.optBoolean("underline", false)) {
+                        tv.setPaintFlags(tv.getPaintFlags()
+                            | android.graphics.Paint.UNDERLINE_TEXT_FLAG);
+                    }
+                    if (f.optBoolean("strikethrough", false)) {
+                        tv.setPaintFlags(tv.getPaintFlags()
+                            | android.graphics.Paint.STRIKE_THRU_TEXT_FLAG);
+                    }
+                }
+            }
+
+            // Text alignment
+            if (s.has("textAlign") && view instanceof TextView) {
+                TextView tv = (TextView) view;
+                switch (s.optString("textAlign", "left")) {
+                    case "center": tv.setGravity(Gravity.CENTER); break;
+                    case "right":  tv.setGravity(Gravity.END | Gravity.CENTER_VERTICAL); break;
+                    default:       tv.setGravity(Gravity.START | Gravity.CENTER_VERTICAL); break;
+                }
+            }
+
+            if (s.has("opacity")) view.setAlpha((float) s.optDouble("opacity", 1.0));
+            if (s.has("rotate")) view.setRotation((float) s.optDouble("rotate", 0));
+            if (s.has("elevation")) {
+                PydrudTheme.elevate(view, (float) s.optDouble("elevation", 0));
+            }
+            if (s.has("visible")) {
+                view.setVisibility(s.optBoolean("visible", true) ? View.VISIBLE : View.GONE);
+            }
+            if (s.has("tooltip") && android.os.Build.VERSION.SDK_INT >= 26) {
+                view.setTooltipText(s.optString("tooltip", ""));
+            }
+            if (s.has("fit") && view instanceof ImageView) {
+                ((ImageView) view).setScaleType(scaleType(s.optString("fit", "contain")));
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Style error", e);
+        }
+    }
+
+    // ── Props update ─────────────────────────────────────────────────────────
+
+    /**
+     * Apply changed props to an existing view.
+     *
+     * @return true when the view was actually refreshed. A false result
+     *         means the widget draws itself from props the factory cannot
+     *         patch, and {@link #recreateInPlace} rebuilds it instead — so
+     *         a property change is never silently dropped.
+     */
+    private boolean updateProps(View view, JSONObject p, JSONObject node) {
+        if (p == null) return true;
+        boolean handled = true;
+
+        if (p.has("_visible")) {
+            view.setVisibility(p.optBoolean("_visible", true) ? View.VISIBLE : View.GONE);
+            if (view.getParent() instanceof ViewGroup) {
+                applySpacing((ViewGroup) view.getParent());
+            }
+        }
+        if (p.has("_tooltip") && android.os.Build.VERSION.SDK_INT >= 26) {
+            view.setTooltipText(p.optString("_tooltip", ""));
+        }
+        if (p.has("_expand") && view.getLayoutParams() instanceof LinearLayout.LayoutParams) {
+            LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) view.getLayoutParams();
+            lp.weight = (float) p.optDouble("_expand", 0);
+            view.setLayoutParams(lp);
+        }
+        if (p.has("_events") && node != null) {
+            try { node.put("events", p.getJSONArray("_events")); }
+            catch (JSONException ignored) {}
+            bindEvents(view, node);
+        }
+
+        // Only the bookkeeping keys changed — nothing else to do.
+        if (!hasRealProps(p)) return true;
+
+        if (view instanceof PydrudNavigation.PydrudNavBar) {
+            ((PydrudNavigation.PydrudNavBar) view).applyProps(p);
+            return true;
+        }
+        if (view instanceof PydrudNavigation.PydrudTabBar) {
+            ((PydrudNavigation.PydrudTabBar) view).applyProps(p);
+            return true;
+        }
+        {
+            ViewGroup host = view instanceof ViewGroup ? (ViewGroup) view : null;
+            View strip = host != null && host.getChildCount() > 0
+                ? host.getChildAt(0) : null;
+            if (strip instanceof PydrudNavigation.PydrudTabBar) {
+                // Tabs = a tab strip plus the selected tab's content below.
+                ((PydrudNavigation.PydrudTabBar) strip).applyProps(p);
+                return true;
+            }
+        }
+
+        if (view instanceof Spinner) {
+            Spinner sp = (Spinner) view;
+            if (p.has("options")) {
+                JSONArray arr = p.optJSONArray("options");
+                List<String> options = new ArrayList<>();
+                if (arr != null) {
+                    for (int i = 0; i < arr.length(); i++) options.add(arr.optString(i, ""));
+                }
+                ArrayAdapter<String> adapter = new ArrayAdapter<>(
+                    activity, android.R.layout.simple_spinner_item, options);
+                adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+                sp.setAdapter(adapter);
+            }
+            if (p.has("index")) {
+                int idx = p.optInt("index", 0);
+                if (idx >= 0 && idx < sp.getCount() && idx != sp.getSelectedItemPosition()) {
+                    AdapterView.OnItemSelectedListener listener = sp.getOnItemSelectedListener();
+                    sp.setOnItemSelectedListener(null);
+                    sp.setSelection(idx, false);
+                    sp.post(() -> sp.setOnItemSelectedListener(listener));
+                }
+            }
+            return true;
+        }
+
+        if (view instanceof SeekBar) {
+            SeekBar sb = (SeekBar) view;
+            double[] range = rangeOf(sb);
+            double min = p.has("min") ? p.optDouble("min", range[0]) : range[0];
+            double max = p.has("max") ? p.optDouble("max", range[1]) : range[1];
+            sb.setTag(R.id.pydrud_tag_range, new double[]{min, max});
+            if (p.has("value")) {
+                double span = (max - min) == 0 ? 1 : (max - min);
+                sb.setProgress((int) Math.round((p.optDouble("value", min) - min) / span * 1000));
+            }
+            return true;
+        }
+
+        if (view instanceof ProgressBar) {
+            ProgressBar pb = (ProgressBar) view;
+            if (p.has("indeterminate")) pb.setIndeterminate(p.optBoolean("indeterminate", false));
+            if (p.has("value")) {
+                pb.setMax(100);
+                pb.setProgress((int) Math.round(p.optDouble("value", 0) * 100));
+            }
+            return true;
+        }
+
+        if (view instanceof CompoundButton) {
+            CompoundButton cb = (CompoundButton) view;
+            if (p.has("label")) cb.setText(p.optString("label", ""));
+            // Mute the listener while we set the value programmatically,
+            // otherwise the UI echoes a change event straight back to Python.
+            if (p.has("checked") || p.has("active") || p.has("selected")) {
+                boolean next = p.optBoolean("checked", p.optBoolean("active",
+                               p.optBoolean("selected", cb.isChecked())));
+                if (cb.isChecked() != next) {
+                    Object tag = cb.getTag(R.id.pydrud_tag_listener);
+                    CompoundButton.OnCheckedChangeListener listener =
+                        (tag instanceof CompoundButton.OnCheckedChangeListener)
+                            ? (CompoundButton.OnCheckedChangeListener) tag : null;
+                    cb.setOnCheckedChangeListener(null);
+                    cb.setChecked(next);
+                    cb.setOnCheckedChangeListener(listener);
+                }
+            }
+            return true;
+        }
+
+        if (view instanceof EditText) {
+            EditText et = (EditText) view;
+            if (p.has("value")) {
+                String value = p.optString("value", "");
+                if (!value.equals(et.getText().toString())) {
+                    int selection = et.getSelectionStart();
+                    et.setText(value);
+                    et.setSelection(Math.min(selection, value.length()));
+                }
+            }
+            if (p.has("hint")) et.setHint(p.optString("hint", ""));
+            return true;
+        }
+
+        if (view instanceof ImageView && p.has("name")) {
+            ImageView iv = (ImageView) view;
+            JSONObject style = node != null ? node.optJSONObject("style") : null;
+            JSONObject font = style != null ? style.optJSONObject("font") : null;
+            float size = font != null ? (float) font.optDouble("size", 24) : 24f;
+            int tint = font != null
+                ? parseColor(font.optString("color", ""), PydrudTheme.onSurfaceVariant)
+                : PydrudTheme.onSurfaceVariant;
+            iv.setImageDrawable(PydrudIcons.drawable(
+                p.optString("name", "star"), tint, PydrudTheme.adaptive(size)));
+            return true;
+        }
+
+        // Image: a new src must actually reload the bitmap.
+        if (view instanceof ImageView && p.has("src")) {
+            loadImage((ImageView) view, p.optString("src", ""));
+            return true;
+        }
+
+        if (view instanceof TextView) {
+            TextView tv = (TextView) view;
+            if (p.has("value") || p.has("text") || p.has("label")) {
+                tv.setText(p.optString("value",
+                    p.optString("text", p.optString("label", tv.getText().toString()))));
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** True when the patch carries widget props, not just bookkeeping keys. */
+    private boolean hasRealProps(JSONObject p) {
+        java.util.Iterator<String> keys = p.keys();
+        while (keys.hasNext()) {
+            if (!keys.next().startsWith("_")) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Rebuild a view from its (already merged) node, in place.
+     *
+     * <p>The safety net for widgets whose look is computed from props at
+     * build time — a Chip's selected state, a Rating's value, a Banner's
+     * message. Re-creating the subtree is cheap and guarantees the UI
+     * never lags behind the Python state.
+     */
+    /**
+     * Record parent links for a whole subtree.
+     *
+     * <p>Deleting a key purges its descendants through {@code parentMap}, so
+     * the map has to be complete after a full render too — otherwise stale
+     * child views linger in the lookup maps and later patches address views
+     * that are no longer on screen.
+     */
+    private void indexParents(JSONObject node) {
+        if (node == null) return;
+        String key = node.optString("key", "");
+        JSONArray kids = node.optJSONArray("children");
+        if (kids == null) return;
+        for (int i = 0; i < kids.length(); i++) {
+            JSONObject child = kids.optJSONObject(i);
+            if (child == null) continue;
+            String childKey = child.optString("key", "");
+            if (!key.isEmpty() && !childKey.isEmpty()) parentMap.put(childKey, key);
+            indexParents(child);
+        }
+    }
+
+    /** Keep a parent node's children array in step with a structural patch. */
+    private void recordChild(String parentKey, JSONObject childJson, int index) {
+        JSONObject parent = parentKey == null ? null : nodeMap.get(parentKey);
+        if (parent == null || childJson == null) return;
+        JSONArray kids = parent.optJSONArray("children");
+        if (kids == null) {
+            kids = new JSONArray();
+            try { parent.put("children", kids); } catch (JSONException ignored) { return; }
+        }
+        int at = (index < 0 || index > kids.length()) ? kids.length() : index;
+        JSONArray next = new JSONArray();
+        for (int i = 0; i < kids.length() + 1; i++) {
+            if (i == at) next.put(childJson);
+            else next.put(kids.opt(i > at ? i - 1 : i));
+        }
+        try { parent.put("children", next); } catch (JSONException ignored) {}
+    }
+
+    /** Drop a child from its parent node's children array. */
+    private void forgetChild(String parentKey, String key) {
+        JSONObject parent = parentKey == null ? null : nodeMap.get(parentKey);
+        if (parent == null) return;
+        JSONArray kids = parent.optJSONArray("children");
+        if (kids == null) return;
+        JSONArray next = new JSONArray();
+        for (int i = 0; i < kids.length(); i++) {
+            JSONObject child = kids.optJSONObject(i);
+            if (child != null && key.equals(child.optString("key", ""))) continue;
+            next.put(kids.opt(i));
+        }
+        try { parent.put("children", next); } catch (JSONException ignored) {}
+    }
+
+    private void recreateInPlace(String key, JSONObject node) {
+        View old = viewMap.get(key);
+        if (old == null || node == null) return;
+        ViewGroup parent = old.getParent() instanceof ViewGroup
+            ? (ViewGroup) old.getParent() : null;
+        if (parent == null) return;
+        int at = parent.indexOfChild(old);
+        String parentKey = parentMap.get(key);
+
+        removeViewTree(key);
+        View fresh = createView(node);
+        if (fresh == null) return;
+        if (parentKey != null) parentMap.put(key, parentKey);
+        addChild(parent, fresh, node, at);
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    private int dp(int value) {
+        return PydrudTheme.dp(value);
+    }
+
+    private int dp(float value) {
+        return PydrudTheme.dp(value);
+    }
+
+    private int parseColor(String value, int fallback) {
+        return PydrudTheme.parse(value, fallback);
+    }
+
+    /** Build a linear gradient background from ``style.gradient``. */
+    private GradientDrawable gradientDrawable(JSONObject g) {
+        GradientDrawable gd = new GradientDrawable();
+        if (g == null) return gd;
+        JSONArray colorsJson = g.optJSONArray("colors");
+        int[] colors;
+        if (colorsJson != null && colorsJson.length() >= 2) {
+            colors = new int[colorsJson.length()];
+            for (int i = 0; i < colorsJson.length(); i++) {
+                colors[i] = parseColor(colorsJson.optString(i, ""), PydrudTheme.primary);
+            }
+        } else {
+            colors = new int[]{PydrudTheme.primary,
+                               PydrudTheme.lighten(PydrudTheme.primary, 0.3f)};
+        }
+        gd.setColors(colors);
+        gd.setOrientation(gradientOrientation(g.optString("direction", "vertical")));
+        if ("radial".equals(g.optString("kind", "linear"))) {
+            gd.setGradientType(GradientDrawable.RADIAL_GRADIENT);
+            gd.setGradientRadius(dp((float) g.optDouble("radius", 160)));
+        }
+        return gd;
+    }
+
+    private GradientDrawable.Orientation gradientOrientation(String direction) {
+        switch (direction) {
+            case "horizontal": return GradientDrawable.Orientation.LEFT_RIGHT;
+            case "diagonal":   return GradientDrawable.Orientation.TL_BR;
+            case "diagonal_up": return GradientDrawable.Orientation.BL_TR;
+            case "up":         return GradientDrawable.Orientation.BOTTOM_TOP;
+            default:           return GradientDrawable.Orientation.TOP_BOTTOM;
+        }
+    }
+
+    /**
+     * Uniform borders are drawn as a stroke so they follow the corner
+     * radius. Non-uniform ones (e.g. a single hairline under an app bar)
+     * are handled by {@link #withSideBorders}.
+     */
+    private void applyBorder(GradientDrawable gd, JSONObject s) {
+        JSONObject b = s.optJSONObject("border");
+        if (b == null) return;
+        JSONObject side = b.optJSONObject("all");
+        if (side == null && uniformBorder(b)) side = b.optJSONObject("left");
+        if (side == null) {
+            // Flat "border": {"width": 1, "color": "#..."} shorthand.
+            if (b.has("width") || b.has("color")) side = b;
+            else return;
+        }
+        int width = dp((float) side.optDouble("width", 1));
+        if (width <= 0) return;
+        gd.setStroke(width, parseColor(side.optString("color", ""), PydrudTheme.outline));
+    }
+
+    /** True when every declared side has the same width and colour. */
+    private boolean uniformBorder(JSONObject b) {
+        String[] names = {"left", "top", "right", "bottom"};
+        double width = -1;
+        String color = null;
+        for (String name : names) {
+            JSONObject side = b.optJSONObject(name);
+            if (side == null) return false;           // a side is missing
+            double w = side.optDouble("width", 1);
+            String c = side.optString("color", "");
+            if (width < 0) { width = w; color = c; }
+            else if (w != width || !c.equals(color)) return false;
+        }
+        return true;
+    }
+
+    /**
+     * Draw individual edges by painting the border colour behind the
+     * background and insetting the background by each side's width — the
+     * only way to get a bottom-only rule that works at any height.
+     */
+    private android.graphics.drawable.Drawable withSideBorders(
+            android.graphics.drawable.Drawable background, JSONObject s) {
+        JSONObject b = s.optJSONObject("border");
+        if (b == null || b.optJSONObject("all") != null || uniformBorder(b)) return background;
+        int[] widths = new int[4];
+        int color = PydrudTheme.outline;
+        String[] names = {"left", "top", "right", "bottom"};
+        boolean any = false;
+        for (int i = 0; i < names.length; i++) {
+            JSONObject side = b.optJSONObject(names[i]);
+            if (side == null) continue;
+            widths[i] = dp((float) side.optDouble("width", 1));
+            if (widths[i] > 0) {
+                any = true;
+                color = parseColor(side.optString("color", ""), PydrudTheme.outline);
+            }
+        }
+        if (!any) return background;
+        android.graphics.drawable.LayerDrawable layers =
+            new android.graphics.drawable.LayerDrawable(
+                new android.graphics.drawable.Drawable[] {
+                    new android.graphics.drawable.ColorDrawable(color), background });
+        layers.setLayerInset(1, widths[0], widths[1], widths[2], widths[3]);
+        return layers;
+    }
+
+    private ImageView.ScaleType scaleType(String fit) {
+        switch (fit) {
+            case "cover":     return ImageView.ScaleType.CENTER_CROP;
+            case "fill":      return ImageView.ScaleType.FIT_XY;
+            case "fitWidth":  return ImageView.ScaleType.FIT_START;
+            case "fitHeight": return ImageView.ScaleType.FIT_END;
+            case "none":      return ImageView.ScaleType.CENTER;
+            default:          return ImageView.ScaleType.FIT_CENTER;
+        }
+    }
+
+    private int gravity(String align) {
+        switch (align) {
+            case "topLeft":      return Gravity.TOP | Gravity.START;
+            case "topCenter":    return Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+            case "topRight":     return Gravity.TOP | Gravity.END;
+            case "centerLeft":   case "start": case "left":
+                                   return Gravity.CENTER_VERTICAL | Gravity.START;
+            case "center":       return Gravity.CENTER;
+            case "centerRight":  case "end": case "right":
+                                   return Gravity.CENTER_VERTICAL | Gravity.END;
+            case "bottomLeft":   return Gravity.BOTTOM | Gravity.START;
+            case "bottomCenter": return Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+            case "bottomRight":  return Gravity.BOTTOM | Gravity.END;
+            // Plain single-axis names used by Row/Column alignment params.
+            case "top":          return Gravity.TOP;
+            case "bottom":       return Gravity.BOTTOM;
+            default:             return Gravity.NO_GRAVITY;
+        }
+    }
+
+    // ── Animations ──────────────────────────────────────────────────────
+
+    /** Apply opacity / scale / rotation from the style to a fresh view. */
+    private void applyTransforms(View view, JSONObject style) {
+        if (style == null) return;
+        if (style.has("opacity")) {
+            view.setAlpha((float) style.optDouble("opacity", 1.0));
+        }
+        if (style.has("scale")) {
+            float scale = (float) style.optDouble("scale", 1.0);
+            view.setScaleX(scale);
+            view.setScaleY(scale);
+        }
+        if (style.has("rotation")) {
+            view.setRotation((float) style.optDouble("rotation", 0));
+        }
+    }
+
+    /** Play a one-shot entrance animation for FadeIn / SlideIn / ScaleIn. */
+    private void playEntrance(final View view, String type, JSONObject json) {
+        if (!"FadeIn".equals(type) && !"SlideIn".equals(type)
+                && !"ScaleIn".equals(type)) {
+            return;
+        }
+        JSONObject style = json.optJSONObject("style");
+        JSONObject spec = style != null ? style.optJSONObject("animation") : null;
+        long duration = spec != null ? spec.optLong("duration", 250) : 250;
+        long delay = spec != null ? spec.optLong("delay", 0) : 0;
+        JSONObject props = json.optJSONObject("props");
+
+        view.setAlpha(0f);
+        android.view.ViewPropertyAnimator animator = view.animate()
+            .alpha(1f).setDuration(duration).setStartDelay(delay)
+            .setInterpolator(interpolator(spec));
+
+        if ("ScaleIn".equals(type)) {
+            view.setScaleX(0.8f);
+            view.setScaleY(0.8f);
+            animator.scaleX(1f).scaleY(1f);
+        } else if ("SlideIn".equals(type)) {
+            float distance = dp(props != null
+                ? (int) props.optDouble("distance", 24) : 24);
+            String direction = props != null
+                ? props.optString("direction", "up") : "up";
+            switch (direction) {
+                case "down":  view.setTranslationY(-distance); break;
+                case "left":  view.setTranslationX(distance);  break;
+                case "right": view.setTranslationX(-distance); break;
+                default:      view.setTranslationY(distance);
+            }
+            animator.translationX(0f).translationY(0f);
+        }
+        animator.start();
+    }
+
+    /** Animate a style change instead of snapping, when the node opted in. */
+    private boolean animateStyleChange(View view, JSONObject node,
+                                       JSONObject changed) {
+        JSONObject style = node != null ? node.optJSONObject("style") : null;
+        JSONObject spec = style != null ? style.optJSONObject("animation") : null;
+        if (spec == null || changed == null) return false;
+
+        long duration = spec.optLong("duration", 250);
+        long delay = spec.optLong("delay", 0);
+        android.view.ViewPropertyAnimator animator = view.animate()
+            .setDuration(duration).setStartDelay(delay)
+            .setInterpolator(interpolator(spec));
+        boolean animated = false;
+
+        if (changed.has("opacity")) {
+            animator.alpha((float) changed.optDouble("opacity", 1.0));
+            animated = true;
+        }
+        if (changed.has("scale")) {
+            float scale = (float) changed.optDouble("scale", 1.0);
+            animator.scaleX(scale).scaleY(scale);
+            animated = true;
+        }
+        if (changed.has("rotation")) {
+            animator.rotation((float) changed.optDouble("rotation", 0));
+            animated = true;
+        }
+        if (changed.has("width") || changed.has("height")) {
+            animateSize(view, changed, duration);
+            animated = true;
+        }
+        if (animated) animator.start();
+        return animated;
+    }
+
+    private void animateSize(final View view, JSONObject changed, long duration) {
+        final ViewGroup.LayoutParams lp = view.getLayoutParams();
+        if (lp == null) return;
+        if (changed.has("width")) {
+            animateDimension(view, lp.width,
+                             dimension(changed, "width", lp.width), duration, true);
+        }
+        if (changed.has("height")) {
+            animateDimension(view, lp.height,
+                             dimension(changed, "height", lp.height), duration, false);
+        }
+    }
+
+    private void animateDimension(final View view, int from, int to,
+                                  long duration, final boolean horizontal) {
+        if (from < 0 || to < 0) return;
+        android.animation.ValueAnimator animator =
+            android.animation.ValueAnimator.ofInt(from, to);
+        animator.setDuration(duration);
+        animator.addUpdateListener(
+            new android.animation.ValueAnimator.AnimatorUpdateListener() {
+                @Override public void onAnimationUpdate(
+                        android.animation.ValueAnimator value) {
+                    ViewGroup.LayoutParams lp = view.getLayoutParams();
+                    if (lp == null) return;
+                    int v = (Integer) value.getAnimatedValue();
+                    if (horizontal) lp.width = v; else lp.height = v;
+                    view.setLayoutParams(lp);
+                }
+            });
+        animator.start();
+    }
+
+    private android.view.animation.Interpolator interpolator(JSONObject spec) {
+        String curve = spec != null ? spec.optString("curve", "ease_in_out") : "ease_in_out";
+        switch (curve) {
+            case "linear":      return new android.view.animation.LinearInterpolator();
+            case "ease_in":     case "accelerate":
+                return new android.view.animation.AccelerateInterpolator();
+            case "ease_out":    case "decelerate":
+                return new android.view.animation.DecelerateInterpolator();
+            case "bounce":      return new android.view.animation.BounceInterpolator();
+            case "overshoot":   return new android.view.animation.OvershootInterpolator();
+            case "anticipate":  return new android.view.animation.AnticipateInterpolator();
+            default:            return new android.view.animation.AccelerateDecelerateInterpolator();
+        }
+    }
+
+    private int getIconRes(String name) {
+        switch (name) {
+            case "star":     return android.R.drawable.star_on;
+            case "home":     return android.R.drawable.ic_menu_myplaces;
+            case "search":   return android.R.drawable.ic_menu_search;
+            case "settings": return android.R.drawable.ic_menu_preferences;
+            case "info":     return android.R.drawable.ic_menu_info_details;
+            case "edit":     return android.R.drawable.ic_menu_edit;
+            case "delete":   return android.R.drawable.ic_menu_delete;
+            case "add":      return android.R.drawable.ic_menu_add;
+            case "share":    return android.R.drawable.ic_menu_share;
+            case "email":    return android.R.drawable.ic_menu_send;
+            case "call":     return android.R.drawable.ic_menu_call;
+            case "menu":     return android.R.drawable.ic_menu_more;
+            case "close":    return android.R.drawable.ic_menu_close_clear_cancel;
+            case "back":     return android.R.drawable.ic_menu_revert;
+            case "forward":  return android.R.drawable.ic_menu_directions;
+            case "refresh":  return android.R.drawable.ic_menu_rotate;
+            case "save":     return android.R.drawable.ic_menu_save;
+            case "upload":   return android.R.drawable.ic_menu_upload;
+            case "camera":   return android.R.drawable.ic_menu_camera;
+            case "gallery":  return android.R.drawable.ic_menu_gallery;
+            case "lock":     return android.R.drawable.ic_lock_lock;
+            case "person":   return android.R.drawable.ic_menu_myplaces;
+            case "agenda":   return android.R.drawable.ic_menu_agenda;
+            case "sort":     return android.R.drawable.ic_menu_sort_by_size;
+            case "favorite": return android.R.drawable.btn_star_big_on;
+            case "favorite_border": return android.R.drawable.btn_star_big_off;
+            case "bookmark": return android.R.drawable.ic_menu_agenda;
+            case "notifications": return android.R.drawable.ic_popup_reminder;
+            case "check":    case "check_circle": return android.R.drawable.checkbox_on_background;
+            case "cancel":   return android.R.drawable.ic_delete;
+            case "warning":  return android.R.drawable.ic_dialog_alert;
+            case "error":    return android.R.drawable.stat_notify_error;
+            case "download": return android.R.drawable.stat_sys_download;
+            case "folder":   return android.R.drawable.ic_menu_save;
+            case "file":     case "list": return android.R.drawable.ic_menu_agenda;
+            case "image":    return android.R.drawable.ic_menu_gallery;
+            case "video":    return android.R.drawable.ic_media_play;
+            case "music":    return android.R.drawable.ic_media_play;
+            case "mic":      return android.R.drawable.ic_btn_speak_now;
+            case "play":     return android.R.drawable.ic_media_play;
+            case "pause":    return android.R.drawable.ic_media_pause;
+            case "stop":     return android.R.drawable.ic_media_pause;
+            case "skip_next":     return android.R.drawable.ic_media_next;
+            case "skip_previous": return android.R.drawable.ic_media_previous;
+            case "volume":   return android.R.drawable.ic_lock_silent_mode_off;
+            case "location": case "map": return android.R.drawable.ic_menu_mylocation;
+            case "calendar": return android.R.drawable.ic_menu_my_calendar;
+            case "clock":    return android.R.drawable.ic_menu_recent_history;
+            case "filter":   return android.R.drawable.ic_menu_sort_alphabetically;
+            case "more_vert": case "more_horiz": return android.R.drawable.ic_menu_more;
+            case "expand_more":    return android.R.drawable.arrow_down_float;
+            case "expand_less":    return android.R.drawable.arrow_up_float;
+            case "chevron_right":  return android.R.drawable.ic_media_ff;
+            case "chevron_left":   return android.R.drawable.ic_media_rew;
+            case "logout":   case "login": return android.R.drawable.ic_lock_power_off;
+            case "cart":     case "payment": return android.R.drawable.ic_menu_agenda;
+            case "wifi":     return android.R.drawable.stat_sys_download_done;
+            case "bluetooth": return android.R.drawable.stat_sys_data_bluetooth;
+            case "battery":  return android.R.drawable.ic_lock_idle_charging;
+            case "dark_mode": case "light_mode": return android.R.drawable.ic_menu_day;
+            case "visibility": case "visibility_off": return android.R.drawable.ic_menu_view;
+            case "copy":     case "paste": return android.R.drawable.ic_menu_crop;
+            case "link":     return android.R.drawable.ic_menu_set_as;
+            case "send":     case "chat": return android.R.drawable.ic_menu_send;
+            case "group":    return android.R.drawable.ic_menu_myplaces;
+            case "dashboard": case "grid": return android.R.drawable.ic_menu_sort_by_size;
+            default:         return android.R.drawable.ic_menu_help;
+        }
+    }
+
+    /** Props object of a node, never null. */
+    private JSONObject props(JSONObject json) {
+        JSONObject p = json.optJSONObject("props");
+        return p == null ? new JSONObject() : p;
+    }
+
+    /**
+     * CameraX preview surface. The Python side drives capture/flash/zoom
+     * through PlatformServices, so here we only mount the view.
+     */
+    private View createCameraPreview(JSONObject json) {
+        androidx.camera.view.PreviewView preview =
+            new androidx.camera.view.PreviewView(activity);
+        JSONObject p = props(json);
+        preview.setScaleType("contain".equals(p.optString("fit", "cover"))
+            ? androidx.camera.view.PreviewView.ScaleType.FIT_CENTER
+            : androidx.camera.view.PreviewView.ScaleType.FILL_CENTER);
+        activity.bindCameraPreview(json.optString("key", ""), preview, p);
+        return preview;
+    }
+
+    /** RecyclerView-backed ReorderableList / InfiniteList. */
+    private View createRecyclerList(JSONObject json, String key,
+                                    boolean reorderable) {
+        androidx.recyclerview.widget.RecyclerView list =
+            advanced.createList(key, props(json), reorderable);
+        java.util.List<View> rows = new java.util.ArrayList<>();
+        JSONArray children = json.optJSONArray("children");
+        for (int i = 0; children != null && i < children.length(); i++) {
+            View row = createView(children.optJSONObject(i));
+            if (row != null) rows.add(row);
+        }
+        advanced.setListViews(list, rows);
+        return list;
+    }
+
+}

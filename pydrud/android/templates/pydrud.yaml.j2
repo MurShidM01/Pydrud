@@ -1,0 +1,43 @@
+# Pydrud project configuration
+# This is the source of truth for the generated Android project. Edit it,
+# then run `pydrud sync`; do not hand-edit generated Android build files.
+app_name: "{{ project_name }}"
+package: "{{ package }}"
+version_code: {{ version_code | default(1) }}
+version_name: "{{ version_name | default("1.0.0") }}"
+
+# Android SDK and native targets
+min_sdk: {{ min_sdk }}
+target_sdk: {{ target_sdk }}
+compile_sdk: {{ compile_sdk }}
+ndk: "{{ ndk }}"
+abi_filters:
+{% for abi in abi_filters_list | default(["arm64-v8a", "armeabi-v7a", "x86_64"]) %}
+  - "{{ abi }}"
+{% endfor %}
+
+# Android application behavior
+assets_dir: "{{ assets_dir | default("assets") }}"
+scheme: "{{ scheme | default(pydrud_app_name) }}"
+app_links_host: "{{ app_links_host | default("") }}"
+permissions:
+{% for permission in permissions | default([]) %}
+  - "{{ permission }}"
+{% endfor %}
+capabilities:
+{% for capability in capabilities_list | default([]) %}
+  - "{{ capability }}"
+{% endfor %}
+firebase: {{ "true" if firebase | default(false) else "false" }}
+shrink: {{ shrink | default("false") }}
+
+# Generated runtime and Android build toolchain
+python_version: "{{ python_version }}"
+framework_version: "{{ pydrud_runtime_version | default("2.0.0") }}"
+protocol_version: {{ protocol_version | default(2) }}
+chaquopy_version: "{{ chaquopy_version | default("17.0.0") }}"
+agp_version: "{{ agp_version | default("8.13.2") }}"
+gradle_version: "{{ gradle_version | default("8.14.4") }}"
+
+# Managed by `pydrud sync`; it records which release generated Android.
+pydrud_version: "{{ pydrud_version }}"

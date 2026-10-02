@@ -1,0 +1,52 @@
+"""
+{{ project_name }} — entry point.
+
+This module wires the app together; the screens themselves live in
+``app/screens/``:
+
+    app/
+      config.py      routes, destinations, design presets
+      state.py       the State objects every screen shares
+      runtime.py     the router and the live App handle
+      ui/            page shell + reusable components
+      screens/       one module per screen
+      jobs.py        background work (WorkManager)
+
+Edit a screen, then run ``pydrud run`` for interactive Flutter-style hot
+reload (press ``r`` for hot reload, ``R`` for hot restart).
+"""
+
+from pydrud import App, Theme
+
+from app.config import APP_NAME
+from app.jobs import JOBS, job, run_background_job   # noqa: F401 (Java entry)
+from app.runtime import bind, current, refresh, router
+from app.screens import home_screen, settings_screen, showcase_screen
+from app.state import accent
+
+# ── Routes ──────────────────────────────────────────────────────────────────
+
+router.define("home", home_screen)
+router.define("showcase", showcase_screen)
+router.define("settings", settings_screen)
+router.initial("home")
+
+
+def main(page):
+    """Build the current screen (called on startup and on every update)."""
+    router.build_root()(page)
+
+
+def start_app():
+    """Called by MainActivity via Chaquopy."""
+    Theme.seed(accent.value)
+    app = bind(App(target=router.build_root(), title=APP_NAME))
+    app.attach_router(router)
+    # Deep links ({{ scheme }}://showcase), launcher shortcuts and push
+    # notification taps all arrive here and are routed automatically.
+    app.on_deep_link(lambda url: print(f"[{APP_NAME}] link:", url))
+    app.run()
+
+
+__all__ = ["JOBS", "bind", "current", "job", "main", "refresh", "router",
+           "run_background_job", "start_app"]

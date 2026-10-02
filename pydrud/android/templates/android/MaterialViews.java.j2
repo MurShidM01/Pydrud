@@ -1,0 +1,1161 @@
+package {{ package }};
+
+import android.content.Context;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.text.TextUtils;
+import android.util.Log;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.webkit.WebChromeClient;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
+import android.widget.RatingBar;
+import android.widget.TextView;
+import android.widget.VideoView;
+
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
+
+import com.google.android.material.bottomnavigation.BottomNavigationView;
+import com.google.android.material.chip.Chip;
+import com.google.android.material.tabs.TabLayout;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+/**
+ * MaterialViews — creates the Material 3 component views for the widget
+ * types added in Pydrud 1.2 (ListTile, Chip, Badge, Avatar, Tabs,
+ * BottomNavigationBar, Drawer, SearchBar, Rating, Chart, WebView, …).
+ *
+ * It is a companion of {@link ViewFactory}: the factory owns the tree,
+ * styles and patching; this class only knows how to build one view from one
+ * JSON node, and reports interactions through the shared EventDispatcher.
+ */
+public class MaterialViews {
+
+    private static final String TAG = "PydrudMaterial";
+
+    private final {{ app_name }}Activity activity;
+    private final ViewFactory factory;
+    private EventDispatcher events;
+
+    public MaterialViews({{ app_name }}Activity activity, ViewFactory factory) {
+        this.activity = activity;
+        this.factory = factory;
+    }
+
+    public void setEventDispatcher(EventDispatcher d) { this.events = d; }
+
+    /** @return true when this class knows how to render {@code type}. */
+    public boolean handles(String type) {
+        switch (type) {
+            case "ListTile":
+            case "ExpansionTile":
+            case "Chip":
+            case "Badge":
+            case "Avatar":
+            case "Banner":
+            case "Tooltip":
+            case "Tabs":
+            case "BottomNavigationBar":
+            case "NavigationRail":
+            case "Drawer":
+            case "SegmentedButton":
+            case "SearchBar":
+            case "Rating":
+            case "CircularProgress":
+            case "Skeleton":
+            case "RefreshIndicator":
+            case "Stepper":
+            case "WebView":
+            case "VideoPlayer":
+            case "Chart":
+            case "Form":
+            case "FormField":
+            case "GestureDetector":
+            case "InkWell":
+            case "Dismissible":
+            case "Draggable":
+            case "Hero":
+            case "AnimatedContainer":
+            case "AnimatedOpacity":
+            case "AnimatedScale":
+            case "AnimatedRotation":
+            case "AnimatedSwitcher":
+            case "FadeIn":
+            case "SlideIn":
+            case "ScaleIn":
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    public View create(JSONObject json) {
+        String type = json.optString("type", "");
+        JSONObject props = json.optJSONObject("props");
+        if (props == null) props = new JSONObject();
+        final String key = json.optString("key", "");
+        try {
+            switch (type) {
+                case "ListTile":            return createListTile(key, props);
+                case "ExpansionTile":       return createExpansionTile(key, props);
+                case "Chip":                return createChip(key, props);
+                case "Badge":               return createBadge(key, props);
+                case "Avatar":              return createAvatar(key, props);
+                case "Banner":              return createBanner(key, props);
+                case "SearchBar":           return createSearchBar(key, props);
+                case "Rating":              return createRating(key, props);
+                case "CircularProgress":    return createCircularProgress(props);
+                case "Skeleton":            return createSkeleton(props);
+                case "Tabs":                return createTabs(key, props);
+                case "BottomNavigationBar": return createBottomNav(key, props);
+                case "NavigationRail":      return createRail(key, props);
+                case "SegmentedButton":     return createSegmented(key, props);
+                case "Stepper":             return createStepper(props);
+                case "RefreshIndicator":    return createRefresh(key, props);
+                case "WebView":             return createWebView(key, props);
+                case "VideoPlayer":         return createVideo(key, props);
+                case "Chart":               return new ChartView(activity, props);
+                default:
+                    // Transparent wrappers: Drawer, Tooltip, gestures,
+                    // animations and form containers are plain hosts whose
+                    // children the ViewFactory attaches.
+                    return createWrapper(type, props);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "create " + type + " failed", e);
+            return new FrameLayout(activity);
+        }
+    }
+
+    // ── lists ────────────────────────────────────────────────────────────
+
+    private View createListTile(final String key, JSONObject p) {
+        LinearLayout row = new LinearLayout(activity);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        boolean dense = p.optBoolean("dense", false);
+        int vertical = dp(dense ? 8 : 12);
+        int gutter = dp(PydrudTheme.cardPadding);
+        row.setPaddingRelative(gutter, vertical, gutter, vertical);
+        row.setMinimumHeight(PydrudTheme.adaptive(
+            dense ? PydrudTheme.listTileHeight - 8 : PydrudTheme.listTileHeight + 8));
+
+        float radius = dp(PydrudTheme.radiusCard * 0.75f);
+        boolean selected = p.optBoolean("selected", false);
+        android.graphics.drawable.Drawable base = PydrudTheme.shape(
+            selected ? PydrudTheme.alpha(PydrudTheme.primary, 0.12f)
+                     : android.graphics.Color.TRANSPARENT, radius);
+        row.setBackground(PydrudTheme.ripple(
+            base, PydrudTheme.alpha(PydrudTheme.primary, PydrudTheme.rippleOpacity),
+            radius));
+
+        String leading = p.optString("leadingIcon", "");
+        if (!leading.isEmpty()) {
+            ImageView icon = new ImageView(activity);
+            icon.setImageDrawable(factory.icon(leading,
+                parseColor(p.optString("leadingColor", ""), PydrudTheme.primary), dp(24)));
+            LinearLayout.LayoutParams lp =
+                new LinearLayout.LayoutParams(dp(24), dp(24));
+            lp.rightMargin = dp(16);
+            row.addView(icon, lp);
+        }
+
+        LinearLayout labels = new LinearLayout(activity);
+        labels.setOrientation(LinearLayout.VERTICAL);
+        TextView title = new TextView(activity);
+        title.setText(p.optString("title", ""));
+        PydrudTheme.applyTextDefaults(title, 15.5f, 500, PydrudTheme.onSurface);
+        title.setMaxLines(1);
+        title.setEllipsize(TextUtils.TruncateAt.END);
+        labels.addView(title);
+
+        String subtitle = p.optString("subtitle", "");
+        if (!subtitle.isEmpty()) {
+            TextView sub = new TextView(activity);
+            sub.setText(subtitle);
+            PydrudTheme.applyTextDefaults(sub, 13f, 400, PydrudTheme.onSurfaceVariant);
+            sub.setMaxLines(p.optBoolean("threeLine", false) ? 2 : 1);
+            sub.setEllipsize(TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+            subLp.topMargin = dp(3);
+            labels.addView(sub, subLp);
+        }
+        LinearLayout.LayoutParams labelLp = new LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        row.addView(labels, labelLp);
+
+        String trailing = p.optString("trailingIcon", "");
+        if (!trailing.isEmpty()) {
+            ImageView icon = new ImageView(activity);
+            icon.setImageDrawable(factory.icon(trailing,
+                parseColor(p.optString("trailingColor", ""), PydrudTheme.onSurfaceVariant), dp(22)));
+            LinearLayout.LayoutParams lp =
+                new LinearLayout.LayoutParams(dp(24), dp(24));
+            lp.leftMargin = dp(16);
+            row.addView(icon, lp);
+        }
+
+        if (!p.optBoolean("enabled", true)) {
+            row.setAlpha(0.4f);
+            row.setEnabled(false);
+        }
+        return row;
+    }
+
+    private View createExpansionTile(final String key, JSONObject p) {
+        LinearLayout column = new LinearLayout(activity);
+        column.setOrientation(LinearLayout.VERTICAL);
+
+        final boolean expanded = p.optBoolean("expanded", false);
+        LinearLayout header = new LinearLayout(activity);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPadding(dp(16), dp(14), dp(16), dp(14));
+
+        TextView title = new TextView(activity);
+        title.setText(p.optString("title", ""));
+        title.setTextSize(16);
+        title.setTypeface(null, Typeface.BOLD);
+        header.addView(title, new LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        ImageView chevron = new ImageView(activity);
+        chevron.setImageDrawable(factory.icon(
+            expanded ? "expand_less" : "expand_more",
+            PydrudTheme.onSurfaceVariant, dp(22)));
+        header.addView(chevron, new LinearLayout.LayoutParams(dp(24), dp(24)));
+
+        header.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (events != null) {
+                    JSONObject data = new JSONObject();
+                    try { data.put("expanded", !expanded); } catch (Exception ignored) {}
+                    events.dispatch("expand", key, data);
+                }
+            }
+        });
+        column.addView(header, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // The body goes under the header and is the tile's child host, so
+        // the children Python declared actually render (and collapse).
+        LinearLayout body = new LinearLayout(activity);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(dp(16), 0, dp(16), dp(12));
+        body.setVisibility(expanded ? View.VISIBLE : View.GONE);
+        column.addView(body, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT));
+        // Application-specific tag id — framework ids (android.R.id.content)
+        // are rejected by View.setTag and used to fail the whole tile.
+        column.setTag(R.id.pydrud_tag_children, body);
+        return column;
+    }
+
+    // ── small components ─────────────────────────────────────────────────
+
+    private View createChip(final String key, JSONObject p) {
+        Chip chip = new Chip(activity);
+        chip.setText(p.optString("label", ""));
+        chip.setCheckable("filter".equals(p.optString("variant", "assist")));
+        chip.setChecked(p.optBoolean("selected", false));
+        chip.setCloseIconVisible(p.optBoolean("deletable", false));
+
+        // Match the Pydrud palette instead of the stock grey pill.
+        int accent = parseColor(p.optString("color", ""), PydrudTheme.primary);
+        boolean checked = p.optBoolean("selected", false);
+        chip.setChipBackgroundColor(new android.content.res.ColorStateList(
+            new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}},
+            new int[]{PydrudTheme.alpha(accent, PydrudTheme.dark ? 0.32f : 0.16f),
+                      PydrudTheme.surfaceVariant}));
+        chip.setChipStrokeColor(new android.content.res.ColorStateList(
+            new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}},
+            new int[]{PydrudTheme.alpha(accent, 0.55f), PydrudTheme.outline}));
+        chip.setChipStrokeWidth(dp(PydrudTheme.borderWidth));
+        chip.setTextColor(new android.content.res.ColorStateList(
+            new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}},
+            new int[]{PydrudTheme.dark ? PydrudTheme.lighten(accent, 0.35f)
+                                       : PydrudTheme.darken(accent, 0.25f),
+                      PydrudTheme.onSurface}));
+        chip.setRippleColor(android.content.res.ColorStateList.valueOf(
+            PydrudTheme.alpha(accent, 0.14f)));
+        chip.setTypeface(PydrudTheme.typeface(checked ? 600 : 500, false));
+        chip.setChipMinHeight(PydrudTheme.adaptive(36));
+        chip.setChipCornerRadius(dp(12));
+        chip.setCloseIconTint(
+            android.content.res.ColorStateList.valueOf(PydrudTheme.onSurfaceVariant));
+        chip.setOnCheckedChangeListener(
+            new android.widget.CompoundButton.OnCheckedChangeListener() {
+                @Override public void onCheckedChanged(
+                        android.widget.CompoundButton button, boolean checked) {
+                    if (events == null || !button.isPressed()) return;
+                    JSONObject data = new JSONObject();
+                    try { data.put("selected", checked); } catch (Exception ignored) {}
+                    events.dispatch("change", key, data);
+                }
+            });
+        chip.setOnCloseIconClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (events != null) events.dispatch("delete", key, null);
+            }
+        });
+        return chip;
+    }
+
+    private View createBadge(final String key, JSONObject p) {
+        // A FrameLayout host; the child view is added by ViewFactory, the
+        // badge bubble floats in the top-right corner.
+        FrameLayout host = new FrameLayout(activity);
+        if (!p.optBoolean("show", true)) return host;
+
+        TextView bubble = new TextView(activity);
+        bubble.setText(p.optString("label", ""));
+        bubble.setTextSize(10);
+        bubble.setTextColor(parseColor(p.optString("textColor", ""), PydrudTheme.onError));
+        bubble.setGravity(Gravity.CENTER);
+        bubble.setPadding(dp(5), dp(1), dp(5), dp(1));
+        GradientDrawable shape = new GradientDrawable();
+        shape.setShape(GradientDrawable.RECTANGLE);
+        shape.setCornerRadius(dp(10));
+        shape.setColor(parseColor(p.optString("color", ""), PydrudTheme.error));
+        bubble.setBackground(shape);
+        bubble.setTag("__badge__");
+
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
+        lp.setMargins(0, 0, 0, 0);
+        host.addView(bubble, lp);
+        return host;
+    }
+
+    private View createAvatar(final String key, JSONObject p) {
+        int size = dp((float) p.optDouble("size", PydrudTheme.avatarSize));
+        FrameLayout host = new FrameLayout(activity);
+        GradientDrawable circle = new GradientDrawable();
+        circle.setShape(GradientDrawable.OVAL);
+        circle.setColor(parseColor(p.optString("bg", ""), PydrudTheme.primary));
+        host.setBackground(circle);
+        host.setLayoutParams(new ViewGroup.LayoutParams(size, size));
+
+        String source = p.optString("source", "");
+        String icon = p.optString("icon", "");
+        if (!source.isEmpty()) {
+            ImageView image = new ImageView(activity);
+            image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            factory.loadImage(image, source);
+            host.addView(image, new FrameLayout.LayoutParams(size, size));
+        } else if (!icon.isEmpty()) {
+            ImageView image = new ImageView(activity);
+            image.setImageDrawable(factory.icon(icon,
+                parseColor(p.optString("color", ""), PydrudTheme.onPrimary), size / 2));
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                size / 2, size / 2, Gravity.CENTER);
+            host.addView(image, lp);
+        } else {
+            TextView initials = new TextView(activity);
+            initials.setText(p.optString("initials", ""));
+            initials.setTextColor(parseColor(p.optString("color", ""), PydrudTheme.onPrimary));
+            initials.setTextSize(size / 3f / activity.getResources()
+                .getDisplayMetrics().density * 2f);
+            initials.setGravity(Gravity.CENTER);
+            host.addView(initials, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER));
+        }
+        return host;
+    }
+
+    private View createBanner(final String key, JSONObject p) {
+        LinearLayout banner = new LinearLayout(activity);
+        banner.setOrientation(LinearLayout.HORIZONTAL);
+        banner.setGravity(Gravity.CENTER_VERTICAL);
+        banner.setPadding(dp(16), dp(12), dp(16), dp(12));
+        int color = parseColor(p.optString("color", ""), PydrudTheme.primary);
+        banner.setBackgroundColor(withAlpha(color, 0x1F));
+
+        String icon = p.optString("icon", "");
+        if (!icon.isEmpty()) {
+            ImageView view = new ImageView(activity);
+            view.setImageDrawable(factory.icon(icon, color, dp(20)));
+            LinearLayout.LayoutParams lp =
+                new LinearLayout.LayoutParams(dp(20), dp(20));
+            lp.rightMargin = dp(12);
+            banner.addView(view, lp);
+        }
+
+        TextView message = new TextView(activity);
+        message.setText(p.optString("message", ""));
+        message.setTextSize(14);
+        banner.addView(message, new LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        String action = p.optString("action", "");
+        if (!action.isEmpty()) {
+            TextView button = new TextView(activity);
+            button.setText(action.toUpperCase());
+            button.setTextColor(color);
+            button.setTypeface(null, Typeface.BOLD);
+            button.setPadding(dp(12), 0, 0, 0);
+            button.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    if (events != null) events.dispatch("click", key, null);
+                }
+            });
+            banner.addView(button);
+        }
+        if (p.optBoolean("dismissible", true)) {
+            ImageView close = new ImageView(activity);
+            close.setImageDrawable(factory.icon("close", color, dp(18)));
+            LinearLayout.LayoutParams lp =
+                new LinearLayout.LayoutParams(dp(18), dp(18));
+            lp.leftMargin = dp(12);
+            close.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    if (events != null) events.dispatch("dismiss", key, null);
+                }
+            });
+            banner.addView(close, lp);
+        }
+        return banner;
+    }
+
+    private View createSearchBar(final String key, JSONObject p) {
+        LinearLayout box = new LinearLayout(activity);
+        box.setOrientation(LinearLayout.HORIZONTAL);
+        box.setGravity(Gravity.CENTER_VERTICAL);
+        box.setPadding(dp(16), dp(6), dp(12), dp(6));
+        box.setMinimumHeight(PydrudTheme.adaptive(PydrudTheme.inputHeight));
+        box.setBackground(PydrudTheme.shape(PydrudTheme.surfaceVariant, dp(26),
+            dp(1), PydrudTheme.alpha(PydrudTheme.outline, 0.9f)));
+
+        ImageView search = new ImageView(activity);
+        search.setImageDrawable(factory.icon("search",
+            PydrudTheme.onSurfaceVariant, dp(20)));
+        LinearLayout.LayoutParams iconLp =
+            new LinearLayout.LayoutParams(dp(20), dp(20));
+        iconLp.rightMargin = dp(8);
+        box.addView(search, iconLp);
+
+        final android.widget.EditText input =
+            new androidx.appcompat.widget.AppCompatEditText(activity);
+        input.setHint(p.optString("hint", "Search"));
+        input.setText(p.optString("value", ""));
+        input.setBackground(null);
+        input.setSingleLine(true);
+        input.setPadding(0, 0, 0, 0);
+        PydrudTheme.applyTextDefaults(input, 15f, 400, PydrudTheme.onSurface);
+        input.setHintTextColor(PydrudTheme.alpha(PydrudTheme.onSurfaceVariant, 0.8f));
+        input.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);
+        box.addView(input, new LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        input.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void afterTextChanged(android.text.Editable e) {
+                if (events == null || !input.hasFocus()) return;
+                JSONObject data = new JSONObject();
+                try { data.put("value", e.toString()); } catch (Exception ignored) {}
+                events.dispatch("change", key, data);
+            }
+        });
+        input.setOnEditorActionListener(
+            new TextView.OnEditorActionListener() {
+                @Override public boolean onEditorAction(TextView v, int id,
+                                                        android.view.KeyEvent ev) {
+                    if (events != null) {
+                        JSONObject data = new JSONObject();
+                        try { data.put("value", v.getText().toString()); }
+                        catch (Exception ignored) {}
+                        events.dispatch("submit", key, data);
+                    }
+                    return true;
+                }
+            });
+
+        ImageView clear = new ImageView(activity);
+        clear.setImageDrawable(factory.icon("close",
+            PydrudTheme.onSurfaceVariant, dp(18)));
+        clear.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                input.setText("");
+                if (events != null) events.dispatch("clear", key, null);
+            }
+        });
+        LinearLayout.LayoutParams clearLp =
+            new LinearLayout.LayoutParams(dp(18), dp(18));
+        clearLp.leftMargin = dp(8);
+        box.addView(clear, clearLp);
+
+        if (p.optBoolean("autofocus", false)) input.requestFocus();
+        return box;
+    }
+
+    /**
+     * A row of real star glyphs. The stock {@link RatingBar} draws tiny,
+     * pixellated framework stars that look nothing like the rest of the app.
+     */
+    private View createRating(final String key, JSONObject p) {
+        LinearLayout row = new LinearLayout(activity);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+
+        final int count = Math.max(1, p.optInt("count", 5));
+        final double value = p.optDouble("value", 0);
+        final boolean readonly = p.optBoolean("readonly", false);
+        final int starSize = PydrudTheme.adaptive((float) p.optDouble("size", 28));
+        final int active = parseColor(p.optString("color", ""), 0xFFF59E0B);
+        final int idle = PydrudTheme.alpha(PydrudTheme.onSurfaceVariant, 0.35f);
+
+        for (int i = 0; i < count; i++) {
+            final int index = i;
+            ImageView star = new ImageView(activity);
+            boolean filled = value >= i + 1;
+            boolean half = !filled && value > i && value >= i + 0.5;
+            star.setImageDrawable(factory.icon(
+                filled ? "star" : half ? "star" : "star_border",
+                filled ? active : half ? PydrudTheme.alpha(active, 0.55f) : idle,
+                starSize));
+            LinearLayout.LayoutParams lp =
+                new LinearLayout.LayoutParams(starSize, starSize);
+            lp.setMarginEnd(dp(4));
+            if (!readonly) {
+                star.setClickable(true);
+                PydrudTheme.addCircleRipple(star, PydrudTheme.alpha(active, 0.22f));
+                PydrudTheme.pressFeedback(star, 0.82f, 0f, 0f);
+                star.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) {
+                        if (events == null) return;
+                        JSONObject data = new JSONObject();
+                        try { data.put("value", index + 1); } catch (Exception ignored) {}
+                        events.dispatch("change", key, data);
+                    }
+                });
+            }
+            row.addView(star, lp);
+        }
+        return row;
+    }
+
+    private View createCircularProgress(JSONObject p) {
+        ProgressBar bar = new ProgressBar(activity, null,
+            android.R.attr.progressBarStyleLarge);
+        if (!p.optBoolean("indeterminate", true)) {
+            bar.setIndeterminate(false);
+            bar.setMax(100);
+            bar.setProgress((int) Math.round(p.optDouble("value", 0) * 100));
+        }
+        String color = p.optString("color", "");
+        if (!color.isEmpty()) {
+            bar.setIndeterminateTintList(
+                android.content.res.ColorStateList.valueOf(parseColor(color)));
+        }
+        int size = dp((int) p.optDouble("size", 36));
+        bar.setLayoutParams(new ViewGroup.LayoutParams(size, size));
+        return bar;
+    }
+
+    /** Shimmering placeholder blocks — a real sweep, not a blinking box. */
+    private View createSkeleton(JSONObject p) {
+        LinearLayout column = new LinearLayout(activity);
+        column.setOrientation(LinearLayout.VERTICAL);
+        int lines = Math.max(1, p.optInt("lines", 1));
+        int base = PydrudTheme.dark
+            ? PydrudTheme.blend(PydrudTheme.surface, 0xFFFFFFFF, 0.08f)
+            : PydrudTheme.surfaceVariant;
+        int highlight = PydrudTheme.dark
+            ? PydrudTheme.blend(base, 0xFFFFFFFF, 0.12f)
+            : PydrudTheme.blend(base, 0xFFFFFFFF, 0.65f);
+
+        for (int i = 0; i < lines; i++) {
+            final View bar = new View(activity);
+            final GradientDrawable shape = new GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[]{base, highlight, base});
+            shape.setCornerRadius(dp((float) p.optDouble("radius", 10)));
+            bar.setBackground(shape);
+
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                PydrudTheme.adaptive((float) p.optDouble("height", 16)));
+            lp.bottomMargin = dp(10);
+            // The last line is short, the way real content wraps.
+            if (lines > 1 && i == lines - 1) lp.width = 0;
+            if (lines > 1 && i == lines - 1) lp.weight = 0.6f;
+            column.addView(bar, lp);
+
+            android.animation.ValueAnimator sweep =
+                android.animation.ValueAnimator.ofFloat(-1f, 2f);
+            sweep.setDuration(1150);
+            sweep.setStartDelay(i * 90L);
+            sweep.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+            sweep.setInterpolator(new android.view.animation.LinearInterpolator());
+            sweep.addUpdateListener(
+                new android.animation.ValueAnimator.AnimatorUpdateListener() {
+                    @Override public void onAnimationUpdate(
+                            android.animation.ValueAnimator animation) {
+                        float t = (Float) animation.getAnimatedValue();
+                        bar.setTranslationX(0f);
+                        shape.setGradientCenter(Math.max(0.01f, Math.min(0.99f,
+                            (t + 1f) / 3f)), 0.5f);
+                        bar.invalidate();
+                    }
+                });
+            sweep.start();
+        }
+        return column;
+    }
+
+    // ── navigation ───────────────────────────────────────────────────────
+
+    private View createTabs(final String key, JSONObject p) {
+        LinearLayout host = new LinearLayout(activity);
+        host.setOrientation(LinearLayout.VERTICAL);
+
+        final PydrudNavigation.PydrudTabBar bar =
+            new PydrudNavigation.PydrudTabBar(activity);
+        bar.setLayoutParams(new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            PydrudTheme.dp((float) p.optDouble("tabHeight", 48))));
+        bar.applyProps(p);
+        bar.setOnSelect(new PydrudNavigation.PydrudTabBar.OnSelect() {
+            @Override public void onSelect(int index) {
+                if (events == null) return;
+                JSONObject data = new JSONObject();
+                try { data.put("value", index); } catch (Exception ignored) {}
+                events.dispatch("change", key, data);
+            }
+        });
+        host.addView(bar);
+
+        // The selected tab's body lives *below* the strip. Tagging it marks
+        // it as the child host, so both the first render and later patches
+        // put the tab content in the right place (it used to land above the
+        // tab bar — or nowhere at all on the very first frame). The tag key
+        // must be an application-specific id — android.R.id.content throws
+        // "The key must be an application-specific resource id" and used to
+        // replace every Tabs with an empty box.
+        LinearLayout content = new LinearLayout(activity);
+        content.setOrientation(LinearLayout.VERTICAL);
+        host.addView(content, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT));
+        host.setTag(R.id.pydrud_tag_children, content);
+        return host;
+    }
+
+    /**
+     * Bottom navigation.
+     *
+     * <p>Pydrud draws the bar itself ({@link PydrudNavigation.PydrudNavBar}) so
+     * every property from Python is honoured. Pass {@code native=True} on the
+     * widget to get the stock Material {@code BottomNavigationView} instead.
+     */
+    private View createBottomNav(final String key, JSONObject p) {
+        if (!p.optBoolean("native", false)) {
+            final PydrudNavigation.PydrudNavBar nav =
+                new PydrudNavigation.PydrudNavBar(activity);
+            nav.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                PydrudTheme.dp((float) p.optDouble("height", PydrudTheme.navHeight))));
+            nav.applyProps(p);
+            nav.setOnSelect(new PydrudNavigation.PydrudNavBar.OnSelect() {
+                @Override public void onSelect(int index) {
+                    if (events == null) return;
+                    JSONObject data = new JSONObject();
+                    try { data.put("value", index); } catch (Exception ignored) {}
+                    events.dispatch("change", key, data);
+                }
+            });
+            return nav;
+        }
+        return createNativeBottomNav(key, p);
+    }
+
+    private View createNativeBottomNav(final String key, JSONObject p) {
+        BottomNavigationView nav = new BottomNavigationView(activity);
+        JSONArray items = p.optJSONArray("items");
+        int count = items == null ? 0 : items.length();
+        for (int i = 0; i < count; i++) {
+            JSONObject item = items.optJSONObject(i);
+            if (item == null) continue;
+            android.view.MenuItem menuItem =
+                nav.getMenu().add(0, i, i, item.optString("label", ""));
+            String icon = item.optString("icon", "");
+            if (!icon.isEmpty()) {
+                menuItem.setIcon(factory.icon(icon, PydrudTheme.onSurfaceVariant,
+                                              dp(PydrudTheme.iconSize)));
+            }
+            menuItem.setEnabled(item.optBoolean("enabled", true));
+            String badge = item.optString("badge", "");
+            if (!badge.isEmpty()) {
+                com.google.android.material.badge.BadgeDrawable drawable =
+                    nav.getOrCreateBadge(i);
+                try {
+                    drawable.setNumber(Integer.parseInt(badge));
+                } catch (NumberFormatException ignored) {
+                    drawable.setVisible(true);
+                }
+            }
+        }
+        int selected = p.optInt("selected", 0);
+        if (selected >= 0 && selected < count) nav.setSelectedItemId(selected);
+        String behavior = p.optString("labelBehavior",
+            p.optBoolean("showLabels", true) ? "always" : "never");
+        nav.setLabelVisibilityMode(
+            "never".equals(behavior)
+                ? com.google.android.material.navigation.NavigationBarView.LABEL_VISIBILITY_UNLABELED
+            : "selected".equals(behavior)
+                ? com.google.android.material.navigation.NavigationBarView.LABEL_VISIBILITY_SELECTED
+                : com.google.android.material.navigation.NavigationBarView.LABEL_VISIBILITY_LABELED);
+        String bg = p.optString("bg", "");
+        if (!bg.isEmpty()) nav.setBackgroundColor(parseColor(bg));
+
+        nav.setOnItemSelectedListener(
+            new com.google.android.material.navigation.NavigationBarView.OnItemSelectedListener() {
+                @Override public boolean onNavigationItemSelected(android.view.MenuItem item) {
+                    if (events != null) {
+                        JSONObject data = new JSONObject();
+                        try { data.put("value", item.getItemId()); }
+                        catch (Exception ignored) {}
+                        events.dispatch("change", key, data);
+                    }
+                    return true;
+                }
+            });
+        return nav;
+    }
+
+    private View createRail(final String key, JSONObject p) {
+        LinearLayout rail = new LinearLayout(activity);
+        rail.setOrientation(LinearLayout.VERTICAL);
+        rail.setPadding(dp(4), dp(8), dp(4), dp(8));
+        rail.setBackgroundColor(PydrudTheme.background);
+
+        JSONArray items = p.optJSONArray("items");
+        final int selected = p.optInt("selected", 0);
+        int count = items == null ? 0 : items.length();
+        for (int i = 0; i < count; i++) {
+            JSONObject item = items.optJSONObject(i);
+            if (item == null) continue;
+            final int index = i;
+            LinearLayout cell = new LinearLayout(activity);
+            cell.setOrientation(LinearLayout.VERTICAL);
+            cell.setGravity(Gravity.CENTER);
+            cell.setPadding(dp(12), dp(12), dp(12), dp(12));
+
+            ImageView icon = new ImageView(activity);
+            icon.setImageDrawable(factory.icon(item.optString("icon", ""),
+                i == selected ? PydrudTheme.primary : PydrudTheme.onSurfaceVariant,
+                dp(24)));
+            cell.addView(icon, new LinearLayout.LayoutParams(dp(24), dp(24)));
+
+            if (p.optBoolean("extended", false)) {
+                TextView label = new TextView(activity);
+                label.setText(item.optString("label", ""));
+                label.setTextSize(11);
+                label.setGravity(Gravity.CENTER);
+                cell.addView(label);
+            }
+            cell.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    if (events == null) return;
+                    JSONObject data = new JSONObject();
+                    try { data.put("value", index); } catch (Exception ignored) {}
+                    events.dispatch("change", key, data);
+                }
+            });
+            rail.addView(cell);
+        }
+        return rail;
+    }
+
+    private View createSegmented(final String key, JSONObject p) {
+        LinearLayout group = new LinearLayout(activity);
+        group.setOrientation(LinearLayout.HORIZONTAL);
+        JSONArray options = p.optJSONArray("options");
+        int count = options == null ? 0 : options.length();
+        final boolean multi = p.optBoolean("multi", false);
+        for (int i = 0; i < count; i++) {
+            final int index = i;
+            TextView segment = new TextView(activity);
+            segment.setText(options.optString(i, ""));
+            segment.setGravity(Gravity.CENTER);
+            segment.setPadding(dp(16), dp(11), dp(16), dp(11));
+            segment.setMinHeight(PydrudTheme.adaptive(44));
+            boolean isSelected = multi
+                ? containsIndex(p.optJSONArray("selected"), i)
+                : p.optInt("selected", 0) == i;
+            int accent = parseColor(p.optString("color", ""), PydrudTheme.primary);
+            GradientDrawable shape = new GradientDrawable();
+            shape.setColor(isSelected
+                ? PydrudTheme.alpha(accent, PydrudTheme.dark ? 0.30f : 0.16f)
+                : PydrudTheme.surfaceVariant);
+            shape.setStroke(dp(1), isSelected
+                ? PydrudTheme.alpha(accent, 0.5f) : PydrudTheme.outline);
+            shape.setCornerRadii(cornerRadii(i, count));
+            segment.setBackground(PydrudTheme.ripple(
+                shape, PydrudTheme.alpha(accent, 0.14f), dp(20)));
+            PydrudTheme.applyTextDefaults(segment, 14f, isSelected ? 600 : 500,
+                isSelected
+                    ? (PydrudTheme.dark ? PydrudTheme.lighten(accent, 0.4f)
+                                        : PydrudTheme.darken(accent, 0.25f))
+                    : PydrudTheme.onSurfaceVariant);
+            segment.setGravity(Gravity.CENTER);
+            segment.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    if (events == null) return;
+                    JSONObject data = new JSONObject();
+                    try { data.put("value", index); } catch (Exception ignored) {}
+                    events.dispatch("change", key, data);
+                }
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            group.addView(segment, lp);
+        }
+        return group;
+    }
+
+    private View createStepper(JSONObject p) {
+        LinearLayout host = new LinearLayout(activity);
+        boolean horizontal = "horizontal".equals(p.optString("orientation", "horizontal"));
+        host.setOrientation(horizontal ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+        host.setGravity(Gravity.CENTER_VERTICAL);
+        host.setPadding(dp(16), dp(12), dp(16), dp(12));
+
+        JSONArray steps = p.optJSONArray("steps");
+        int count = steps == null ? 0 : steps.length();
+        int current = p.optInt("current", 0);
+        for (int i = 0; i < count; i++) {
+            TextView bubble = new TextView(activity);
+            bubble.setText(String.valueOf(i + 1));
+            bubble.setGravity(Gravity.CENTER);
+            bubble.setTextColor(Color.WHITE);
+            GradientDrawable circle = new GradientDrawable();
+            circle.setShape(GradientDrawable.OVAL);
+            circle.setColor(i <= current ? PydrudTheme.primary
+                                         : PydrudTheme.outlineStrong);
+            bubble.setBackground(circle);
+            host.addView(bubble, new LinearLayout.LayoutParams(dp(28), dp(28)));
+
+            if (i < count - 1) {
+                View line = new View(activity);
+                line.setBackgroundColor(i < current ? PydrudTheme.primary
+                                                    : PydrudTheme.outlineStrong);
+                LinearLayout.LayoutParams lp = horizontal
+                    ? new LinearLayout.LayoutParams(0, dp(2), 1f)
+                    : new LinearLayout.LayoutParams(dp(2), dp(24));
+                lp.setMargins(dp(4), 0, dp(4), 0);
+                host.addView(line, lp);
+            }
+        }
+        return host;
+    }
+
+    private View createRefresh(final String key, JSONObject p) {
+        SwipeRefreshLayout layout = new SwipeRefreshLayout(activity);
+        layout.setRefreshing(p.optBoolean("refreshing", false));
+        String color = p.optString("color", "");
+        if (!color.isEmpty()) layout.setColorSchemeColors(parseColor(color));
+        layout.setOnRefreshListener(new SwipeRefreshLayout.OnRefreshListener() {
+            @Override public void onRefresh() {
+                if (events != null) events.dispatch("refresh", key, null);
+            }
+        });
+        return layout;
+    }
+
+    // ── media ────────────────────────────────────────────────────────────
+
+    private View createWebView(final String key, JSONObject p) {
+        WebView web = new WebView(activity);
+        web.getSettings().setJavaScriptEnabled(p.optBoolean("javascript", false));
+        web.getSettings().setBuiltInZoomControls(p.optBoolean("zoom", false));
+        web.getSettings().setDisplayZoomControls(false);
+        web.setWebChromeClient(new WebChromeClient());
+        web.setWebViewClient(new WebViewClient() {
+            @Override public void onPageFinished(WebView view, String url) {
+                if (events != null) {
+                    JSONObject data = new JSONObject();
+                    try { data.put("url", url); } catch (Exception ignored) {}
+                    events.dispatch("load", key, data);
+                }
+            }
+        });
+        if (p.optBoolean("javascript", false) && p.optBoolean("allowNativeBridge", false)) {
+            web.addJavascriptInterface(new JsBridge(key), "Pydrud");
+        }
+        String html = p.optString("html", "");
+        String url = p.optString("url", "");
+        if (!html.isEmpty()) {
+            web.loadDataWithBaseURL(null, html, "text/html", "utf-8", null);
+        } else if (!url.isEmpty()) {
+            web.loadUrl(url);
+        }
+        return web;
+    }
+
+    /** Exposes {@code Pydrud.postMessage("…")} to the hosted page. */
+    public class JsBridge {
+        private final String key;
+
+        JsBridge(String key) { this.key = key; }
+
+        @android.webkit.JavascriptInterface
+        public void postMessage(String message) {
+            if (events == null) return;
+            JSONObject data = new JSONObject();
+            try { data.put("message", message); } catch (Exception ignored) {}
+            events.dispatch("message", key, data);
+        }
+    }
+
+    private View createVideo(final String key, JSONObject p) {
+        VideoView video = new VideoView(activity);
+        String source = p.optString("source", "");
+        if (!source.isEmpty()) {
+            video.setVideoURI(android.net.Uri.parse(source));
+        }
+        if (p.optBoolean("controls", true)) {
+            android.widget.MediaController controller =
+                new android.widget.MediaController(activity);
+            controller.setAnchorView(video);
+            video.setMediaController(controller);
+        }
+        final boolean loop = p.optBoolean("loop", false);
+        video.setOnPreparedListener(new android.media.MediaPlayer.OnPreparedListener() {
+            @Override public void onPrepared(android.media.MediaPlayer mp) {
+                mp.setLooping(loop);
+                if (p.optBoolean("muted", false)) mp.setVolume(0f, 0f);
+            }
+        });
+        video.setOnCompletionListener(new android.media.MediaPlayer.OnCompletionListener() {
+            @Override public void onCompletion(android.media.MediaPlayer mp) {
+                if (events != null) events.dispatch("complete", key, null);
+            }
+        });
+        if (p.optBoolean("autoplay", false)) video.start();
+        return video;
+    }
+
+    // ── wrappers ─────────────────────────────────────────────────────────
+
+    private View createWrapper(String type, JSONObject p) {
+        if ("Drawer".equals(type)) {
+            LinearLayout drawer = new LinearLayout(activity);
+            drawer.setOrientation(LinearLayout.VERTICAL);
+            drawer.setBackgroundColor(parseColor(p.optString("bg", ""), PydrudTheme.surface));
+            drawer.setVisibility(View.GONE);   // opened via the drawer command
+            return drawer;
+        }
+        if ("Form".equals(type) || "FormField".equals(type)) {
+            LinearLayout column = new LinearLayout(activity);
+            column.setOrientation(LinearLayout.VERTICAL);
+            String label = p.optString("label", "");
+            if (!label.isEmpty()) {
+                TextView text = new TextView(activity);
+                text.setText(label);
+                text.setTextSize(13);
+                text.setTextColor(PydrudTheme.onSurfaceVariant);
+                text.setPadding(0, 0, 0, dp(4));
+                column.addView(text);
+            }
+            return column;
+        }
+        return new FrameLayout(activity);
+    }
+
+    /** Appends the error/helper line under a FormField after its child. */
+    public void decorateFormField(View view, JSONObject props) {
+        if (!(view instanceof LinearLayout)) return;
+        String error = props.optString("error", "");
+        String helper = props.optString("helper", "");
+        if (error.isEmpty() && helper.isEmpty()) return;
+        TextView text = new TextView(activity);
+        text.setText(error.isEmpty() ? helper : error);
+        text.setTextSize(12);
+        text.setPadding(0, dp(4), 0, 0);
+        text.setTextColor(error.isEmpty()
+            ? PydrudTheme.onSurfaceVariant
+            : parseColor(props.optString("errorColor", ""), PydrudTheme.error));
+        ((LinearLayout) view).addView(text);
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────
+
+    private boolean containsIndex(JSONArray array, int index) {
+        if (array == null) return false;
+        for (int i = 0; i < array.length(); i++) {
+            if (array.optInt(i, -1) == index) return true;
+        }
+        return false;
+    }
+
+    private float[] cornerRadii(int index, int count) {
+        float r = dp(20);
+        boolean first = index == 0;
+        boolean last = index == count - 1;
+        return new float[] {
+            first ? r : 0, first ? r : 0,
+            last ? r : 0,  last ? r : 0,
+            last ? r : 0,  last ? r : 0,
+            first ? r : 0, first ? r : 0,
+        };
+    }
+
+    private int withAlpha(int color, int alpha) {
+        return Color.argb(alpha, Color.red(color), Color.green(color),
+                          Color.blue(color));
+    }
+
+    private int parseColor(String value) {
+        try {
+            return Color.parseColor(value);
+        } catch (Exception e) {
+            return PydrudTheme.primary;
+        }
+    }
+
+    private int dp(int value) {
+        return PydrudTheme.dp(value);
+    }
+
+    private int dp(float value) {
+        return PydrudTheme.dp(value);
+    }
+
+    private int parseColor(String value, int fallback) {
+        return PydrudTheme.parse(value, fallback);
+    }
+
+    /**
+     * ChartView — a tiny Canvas chart (line / area / bar / pie) so apps can
+     * show data without pulling in a charting dependency.
+     */
+    public static class ChartView extends View {
+
+        private final JSONObject props;
+        private final android.graphics.Paint paint = new android.graphics.Paint(
+            android.graphics.Paint.ANTI_ALIAS_FLAG);
+
+        public ChartView(Context context, JSONObject props) {
+            super(context);
+            this.props = props == null ? new JSONObject() : props;
+        }
+
+        @Override protected void onDraw(android.graphics.Canvas canvas) {
+            super.onDraw(canvas);
+            JSONArray values = props.optJSONArray("values");
+            if (values == null || values.length() == 0) return;
+            String kind = props.optString("kind", "line");
+            int count = values.length();
+            float max = (float) Math.max(0.0001, props.optDouble("max", 1));
+            float w = getWidth();
+            float h = getHeight();
+            float pad = h * 0.08f;
+            int color = firstColor();
+
+            paint.setStrokeWidth(Math.max(2f, h * 0.02f));
+            paint.setColor(color);
+
+            if ("pie".equals(kind)) {
+                drawPie(canvas, values, w, h);
+                return;
+            }
+            if (props.optBoolean("showGrid", true)) {
+                paint.setColor(PydrudTheme.outline);
+                paint.setStyle(android.graphics.Paint.Style.STROKE);
+                for (int i = 0; i <= 4; i++) {
+                    float y = pad + (h - 2 * pad) * i / 4f;
+                    canvas.drawLine(0, y, w, y, paint);
+                }
+                paint.setColor(color);
+            }
+            float step = count > 1 ? w / (count - 1) : w;
+            if ("bar".equals(kind)) {
+                paint.setStyle(android.graphics.Paint.Style.FILL);
+                float barWidth = w / (count * 1.6f);
+                for (int i = 0; i < count; i++) {
+                    float value = (float) values.optDouble(i, 0);
+                    float barHeight = (h - 2 * pad) * (value / max);
+                    float cx = (i + 0.5f) * (w / count);
+                    float radius = Math.min(barWidth / 2f, PydrudTheme.dp(6));
+                    canvas.drawRoundRect(cx - barWidth / 2, h - pad - barHeight,
+                                         cx + barWidth / 2, h - pad,
+                                         radius, radius, paint);
+                }
+                return;
+            }
+            android.graphics.Path path = new android.graphics.Path();
+            for (int i = 0; i < count; i++) {
+                float value = (float) values.optDouble(i, 0);
+                float x = i * step;
+                float y = h - pad - (h - 2 * pad) * (value / max);
+                if (i == 0) path.moveTo(x, y); else path.lineTo(x, y);
+            }
+            paint.setStyle(android.graphics.Paint.Style.STROKE);
+            canvas.drawPath(path, paint);
+            if ("area".equals(kind)) {
+                path.lineTo(w, h - pad);
+                path.lineTo(0, h - pad);
+                path.close();
+                paint.setStyle(android.graphics.Paint.Style.FILL);
+                paint.setAlpha(60);
+                canvas.drawPath(path, paint);
+                paint.setAlpha(255);
+            }
+        }
+
+        private void drawPie(android.graphics.Canvas canvas, JSONArray values,
+                             float w, float h) {
+            float total = 0;
+            for (int i = 0; i < values.length(); i++) {
+                total += (float) values.optDouble(i, 0);
+            }
+            if (total <= 0) return;
+            float size = Math.min(w, h);
+            android.graphics.RectF box = new android.graphics.RectF(
+                (w - size) / 2f, (h - size) / 2f,
+                (w + size) / 2f, (h + size) / 2f);
+            float start = -90f;
+            JSONArray colors = props.optJSONArray("colors");
+            paint.setStyle(android.graphics.Paint.Style.FILL);
+            for (int i = 0; i < values.length(); i++) {
+                float sweep = 360f * (float) values.optDouble(i, 0) / total;
+                String c = colors != null
+                    ? colors.optString(i % Math.max(1, colors.length()), "")
+                    : "";
+                // Unlabelled slices walk the theme palette instead of
+                // repeating one colour.
+                paint.setColor(c.isEmpty()
+                    ? PydrudTheme.seriesColor(i)
+                    : PydrudTheme.parse(c, PydrudTheme.seriesColor(i)));
+                canvas.drawArc(box, start, sweep, true, paint);
+                start += sweep;
+            }
+        }
+
+        private int firstColor() {
+            JSONArray colors = props.optJSONArray("colors");
+            if (colors != null && colors.length() > 0) {
+                return PydrudTheme.parse(colors.optString(0, ""),
+                                         PydrudTheme.primary);
+            }
+            return PydrudTheme.primary;
+        }
+    }
+}

@@ -1,0 +1,817 @@
+package {{ package }};
+
+import android.animation.AnimatorSet;
+import android.animation.ObjectAnimator;
+import android.animation.StateListAnimator;
+import android.content.Context;
+import android.content.res.ColorStateList;
+import android.content.res.Configuration;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.LayerDrawable;
+import android.graphics.drawable.RippleDrawable;
+import android.graphics.drawable.ShapeDrawable;
+import android.graphics.drawable.StateListDrawable;
+import android.graphics.drawable.shapes.OvalShape;
+import android.os.Build;
+import android.util.DisplayMetrics;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.CompoundButton;
+import android.widget.TextView;
+
+import org.json.JSONObject;
+
+/**
+ * PydrudTheme — the design system behind every Pydrud widget.
+ *
+ * <p>One place owns the colour roles, the type scale, the spacing and radius
+ * tokens, the ripple/elevation recipes and the density maths, so a Pydrud app
+ * looks consistent and modern without the developer styling anything.
+ *
+ * <p>Python can push a palette at startup (``page.theme(...)`` →
+ * {@link #apply(JSONObject)}); everything that is not supplied is derived
+ * from the seed colours, Material-3 style.
+ */
+public final class PydrudTheme {
+
+    private PydrudTheme() {}
+
+    // ── density ──────────────────────────────────────────────────────────
+
+    private static float density = 2.0f;
+    private static float fontScale = 1.0f;
+    private static int widthDp = 360;
+    private static int heightDp = 640;
+    private static int widthPx = 720;
+    private static int heightPx = 1280;
+    private static float xdpi = 320f;
+    private static float ydpi = 320f;
+    /** Visible IME height in px, 0 when the keyboard is hidden. */
+    public static int keyboardPx = 0;
+    /** Clamped width factor used to breathe on tablets without wrecking phones. */
+    private static float adaptiveScale = 1.0f;
+
+    public static void init(Context context) {
+        if (context == null) return;
+        refreshMetrics(context);
+        Configuration cfg = context.getResources().getConfiguration();
+        boolean night = (cfg.uiMode & Configuration.UI_MODE_NIGHT_MASK)
+            == Configuration.UI_MODE_NIGHT_YES;
+        if (night && !explicitMode) useDark();
+    }
+
+    /**
+     * Re-read the window size, density and font scale.
+     *
+     * <p>Called on every configuration change (rotation, split screen,
+     * foldable unfold, font-size change) so dp maths and the adaptive
+     * scale always describe the window the user is actually looking at.
+     * Unlike {@link #init(Context)} this never touches the palette.
+     *
+     * @return true when something actually changed.
+     */
+    public static boolean refreshMetrics(Context context) {
+        if (context == null) return false;
+        float oldDensity = density;
+        int oldW = widthDp, oldH = heightDp;
+        float oldFont = fontScale;
+
+        DisplayMetrics dm = context.getResources().getDisplayMetrics();
+        density = dm.density <= 0 ? 2.0f : dm.density;
+        Configuration cfg = context.getResources().getConfiguration();
+        fontScale = cfg.fontScale <= 0 ? 1.0f : cfg.fontScale;
+        widthPx = dm.widthPixels;
+        heightPx = dm.heightPixels;
+        xdpi = dm.xdpi <= 0 ? density * 160f : dm.xdpi;
+        ydpi = dm.ydpi <= 0 ? density * 160f : dm.ydpi;
+
+        // The window (not the physical display) is what layouts must follow:
+        // in split screen or on a freeform desktop these differ a lot.
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            try {
+                android.view.WindowManager wm =
+                    (android.view.WindowManager) context.getSystemService(
+                        Context.WINDOW_SERVICE);
+                if (wm != null) {
+                    android.graphics.Rect bounds =
+                        wm.getCurrentWindowMetrics().getBounds();
+                    if (bounds.width() > 0 && bounds.height() > 0) {
+                        widthPx = bounds.width();
+                        heightPx = bounds.height();
+                    }
+                }
+            } catch (Throwable ignored) { }
+        }
+
+        // Configuration dp values already exclude system decorations, so
+        // prefer them and fall back to the pixel maths.
+        widthDp = cfg.screenWidthDp > 0 ? cfg.screenWidthDp
+                                        : (int) (widthPx / density);
+        heightDp = cfg.screenHeightDp > 0 ? cfg.screenHeightDp
+                                          : (int) (heightPx / density);
+        if (widthDp <= 0) widthDp = 360;
+        if (heightDp <= 0) heightDp = 640;
+
+        int shortest = Math.min(widthDp, heightDp);
+        float factor = shortest / 360f;
+        adaptiveScale = Math.max(0.92f, Math.min(1.22f, factor));
+
+        return oldW != widthDp || oldH != heightDp
+            || oldDensity != density || oldFont != fontScale;
+    }
+
+    /** dp → px. */
+    public static int dp(float value) {
+        return Math.round(value * density);
+    }
+
+    /**
+     * dp → px with a gentle screen-size factor.
+     *
+     * <p>Component padding, heights and icon sizes use this so a 7" tablet
+     * gets a roomier layout and a 4.5" phone stays compact — the same idea as
+     * Flutter's visual density, without ever doubling a size.
+     */
+    public static int adaptive(float value) {
+        return Math.round(value * density * adaptiveScale);
+    }
+
+    /** sp value adjusted for the screen (the TextView still applies fontScale). */
+    public static float scaledSp(float sp) {
+        float factor = Math.max(0.96f, Math.min(1.12f, adaptiveScale));
+        return Math.round(sp * factor * 10f) / 10f;
+    }
+
+    public static float density()   { return density; }
+    public static float fontScale() { return fontScale; }
+    public static int screenWidthDp()  { return widthDp; }
+    public static int screenHeightDp() { return heightDp; }
+    public static float adaptiveScale() { return adaptiveScale; }
+    public static boolean isTablet() { return Math.min(widthDp, heightDp) >= 600; }
+    public static boolean isCompact() { return Math.min(widthDp, heightDp) < 360; }
+    public static int screenWidthPx()  { return widthPx; }
+    public static int screenHeightPx() { return heightPx; }
+    public static float xdpi() { return xdpi; }
+    public static float ydpi() { return ydpi; }
+    public static boolean isLandscape() { return widthDp > heightDp; }
+
+    /** The Material 3 window size class of the current window. */
+    public static String breakpoint() {
+        if (widthDp >= 1600) return "xlarge";
+        if (widthDp >= 1200) return "large";
+        if (widthDp >= 840) return "expanded";
+        if (widthDp >= 600) return "medium";
+        return "compact";
+    }
+
+    /** {@code percent}% of the window width, in px. */
+    public static int percentWidth(float percent) {
+        return Math.round(widthDp * density * percent / 100f);
+    }
+
+    /** {@code percent}% of the window height, in px. */
+    public static int percentHeight(float percent) {
+        return Math.round(heightDp * density * percent / 100f);
+    }
+
+    /** {@code percent}% of the shortest window side, in px. */
+    public static int percentShortest(float percent) {
+        return Math.round(Math.min(widthDp, heightDp) * density * percent / 100f);
+    }
+
+    // ── colour roles ─────────────────────────────────────────────────────
+
+    public static int primary            = 0xFF6366F1;
+    public static int onPrimary          = 0xFFFFFFFF;
+    public static int primaryContainer   = 0xFFE0E7FF;
+    public static int onPrimaryContainer = 0xFF312E81;
+    public static int secondary          = 0xFF14B8A6;
+    public static int onSecondary        = 0xFFFFFFFF;
+    public static int background         = 0xFFF7F8FA;
+    public static int onBackground       = 0xFF111827;
+    public static int surface            = 0xFFFFFFFF;
+    public static int onSurface          = 0xFF1F2937;
+    public static int surfaceVariant     = 0xFFF3F4F6;
+    public static int onSurfaceVariant   = 0xFF6B7280;
+    public static int outline            = 0xFFE5E7EB;
+    public static int outlineStrong      = 0xFFD1D5DB;
+    public static int error              = 0xFFEF4444;
+    public static int onError            = 0xFFFFFFFF;
+    public static int disabledBg         = 0xFFE9EAEE;
+    public static int disabledFg         = 0xFFA1A7B3;
+    public static int shadow             = 0x33101828;
+    public static boolean dark = false;
+
+    private static boolean explicitMode = false;
+
+    /** Adopt a palette pushed from Python. Missing roles are derived. */
+    public static void apply(JSONObject scheme) {
+        if (scheme == null) return;
+        if (scheme.has("dark")) {
+            explicitMode = true;
+            if (scheme.optBoolean("dark", false)) useDark(); else useLight();
+        }
+        primary    = color(scheme, "primary", primary);
+        secondary  = color(scheme, "secondary", secondary);
+        background = color(scheme, "background", background);
+        surface    = color(scheme, "surface", surface);
+        onSurface  = color(scheme, "on_surface", onSurface);
+        error      = color(scheme, "error", error);
+        outline    = color(scheme, "outline", outline);
+        derive();
+        if (scheme.has("on_primary")) onPrimary = color(scheme, "on_primary", onPrimary);
+        if (scheme.has("surface_variant")) {
+            surfaceVariant = color(scheme, "surface_variant", surfaceVariant);
+        }
+        if (scheme.has("primary_container")) {
+            primaryContainer = color(scheme, "primary_container", primaryContainer);
+        }
+        applyTokens(scheme.optJSONObject("tokens"));
+    }
+
+    /**
+     * Follow the system dark-mode switch.
+     *
+     * <p>Ignored once Python has pushed an explicit {@code dark} flag, so an
+     * app that forces a palette keeps it across configuration changes.
+     */
+    public static void setNight(boolean night) {
+        if (explicitMode || night == dark) return;
+        if (night) useDark(); else useLight();
+    }
+
+    public static void useLight() {
+        dark = false;
+        background       = 0xFFF7F8FA;
+        onBackground     = 0xFF111827;
+        surface          = 0xFFFFFFFF;
+        onSurface        = 0xFF1F2937;
+        surfaceVariant   = 0xFFF3F4F6;
+        onSurfaceVariant = 0xFF6B7280;
+        outline          = 0xFFE5E7EB;
+        outlineStrong    = 0xFFD1D5DB;
+        disabledBg       = 0xFFE9EAEE;
+        disabledFg       = 0xFFA1A7B3;
+        shadow           = 0x33101828;
+        derive();
+    }
+
+    public static void useDark() {
+        dark = true;
+        background       = 0xFF0F1420;
+        onBackground     = 0xFFF8FAFC;
+        surface          = 0xFF18202F;
+        onSurface        = 0xFFF1F5F9;
+        surfaceVariant   = 0xFF222B3C;
+        onSurfaceVariant = 0xFF9BA6B8;
+        outline          = 0xFF2C3545;
+        outlineStrong    = 0xFF3B4559;
+        disabledBg       = 0xFF252D3B;
+        disabledFg       = 0xFF5B6678;
+        shadow           = 0x66000000;
+        derive();
+    }
+
+    /** Recompute the roles that follow from primary / surface. */
+    private static void derive() {
+        onPrimary = onColorFor(primary);
+        onSecondary = onColorFor(secondary);
+        onBackground = onSurface;
+        if (dark) {
+            primaryContainer = blend(primary, surface, 0.78f);
+            onPrimaryContainer = lighten(primary, 0.55f);
+        } else {
+            primaryContainer = blend(primary, 0xFFFFFFFF, 0.88f);
+            onPrimaryContainer = darken(primary, 0.45f);
+        }
+        onError = onColorFor(error);
+    }
+
+    private static int color(JSONObject json, String name, int fallback) {
+        String raw = json.optString(name, "");
+        return parse(raw, fallback);
+    }
+
+    /** Parse "#AARRGGBB" / "#RRGGBB" / "#RGB", falling back when invalid. */
+    public static int parse(String value, int fallback) {
+        if (value == null) return fallback;
+        String v = value.trim();
+        if (v.isEmpty()) return fallback;
+        try {
+            return Color.parseColor(v);
+        } catch (Exception ignored) {
+            return fallback;
+        }
+    }
+
+    // ── colour maths ─────────────────────────────────────────────────────
+
+    /** Same colour at a different opacity (0..1). */
+    public static int alpha(int color, float fraction) {
+        int a = Math.max(0, Math.min(255, Math.round(255 * fraction)));
+        return (color & 0x00FFFFFF) | (a << 24);
+    }
+
+    /** Mix {@code color} towards {@code towards} by {@code t} (0..1). */
+    public static int blend(int color, int towards, float t) {
+        float k = Math.max(0f, Math.min(1f, t));
+        int a = Math.round(Color.alpha(color) + (Color.alpha(towards) - Color.alpha(color)) * k);
+        int r = Math.round(Color.red(color)   + (Color.red(towards)   - Color.red(color))   * k);
+        int g = Math.round(Color.green(color) + (Color.green(towards) - Color.green(color)) * k);
+        int b = Math.round(Color.blue(color)  + (Color.blue(towards)  - Color.blue(color))  * k);
+        return Color.argb(a, r, g, b);
+    }
+
+    public static int lighten(int color, float t) { return blend(color, 0xFFFFFFFF, t); }
+    public static int darken(int color, float t)  { return blend(color, 0xFF0B0F17, t); }
+
+    /** Perceived luminance test — decides black vs white content. */
+    public static boolean isLight(int color) {
+        double l = (0.299 * Color.red(color) + 0.587 * Color.green(color)
+                  + 0.114 * Color.blue(color)) / 255.0;
+        return l > 0.62;
+    }
+
+    // ── window insets ────────────────────────────────────────────────────
+    //
+    // Pydrud draws edge to edge: the activity reports the system-bar
+    // insets here and the widgets that touch a screen edge (app bar,
+    // bottom navigation, full-bleed bodies) pad themselves, so their
+    // surface continues behind the status and gesture bars.
+
+    public static int insetTop = 0;
+    public static int insetBottom = 0;
+    public static int insetLeft = 0;
+    public static int insetRight = 0;
+
+    public static void setInsets(int left, int top, int right, int bottom) {
+        insetLeft = left;
+        insetTop = top;
+        insetRight = right;
+        insetBottom = bottom;
+    }
+
+    /** A readable foreground colour for any background. */
+    public static int onColorFor(int bg) {
+        return isLight(bg) ? 0xFF111827 : 0xFFFFFFFF;
+    }
+
+    /** Ripple colour that reads on top of {@code bg}. */
+    public static int rippleOn(int bg) {
+        return isLight(bg) ? alpha(0xFF000000, 0.10f) : alpha(0xFFFFFFFF, 0.22f);
+    }
+
+    /**
+     * Palette for charts and other multi-series graphics: brand colours
+     * first, then evenly spaced hues so neighbouring series stay
+     * distinguishable no matter how many there are.
+     */
+    public static int seriesColor(int index) {
+        int i = Math.max(0, index);
+        switch (i) {
+            case 0: return primary;
+            case 1: return secondary;
+            case 2: return blend(primary, 0xFFFFFFFF, dark ? 0.35f : 0.45f);
+            case 3: return error;
+            default: break;
+        }
+        float[] hsv = new float[3];
+        Color.colorToHSV(primary, hsv);
+        hsv[0] = (hsv[0] + (i - 3) * 47f) % 360f;
+        hsv[1] = Math.min(1f, Math.max(0.35f, hsv[1]));
+        hsv[2] = dark ? Math.min(1f, hsv[2] + 0.12f) : hsv[2];
+        return Color.HSVToColor(hsv);
+    }
+
+    // ── shapes, ripples, elevation ───────────────────────────────────────
+
+    public static GradientDrawable shape(int fill, float radiusPx) {
+        GradientDrawable gd = new GradientDrawable();
+        gd.setShape(GradientDrawable.RECTANGLE);
+        gd.setColor(fill);
+        gd.setCornerRadius(radiusPx);
+        return gd;
+    }
+
+    public static GradientDrawable shape(int fill, float radiusPx,
+                                         int strokePx, int strokeColor) {
+        GradientDrawable gd = shape(fill, radiusPx);
+        if (strokePx > 0) gd.setStroke(strokePx, strokeColor);
+        return gd;
+    }
+
+    /** Rounded ripple over a background drawable. */
+    public static Drawable ripple(Drawable content, int rippleColor, float radiusPx) {
+        GradientDrawable mask = shape(0xFFFFFFFF, radiusPx);
+        return new RippleDrawable(ColorStateList.valueOf(rippleColor), content, mask);
+    }
+
+    /** Circular ripple — for icon buttons and FABs. */
+    public static Drawable circleRipple(Drawable content, int rippleColor) {
+        ShapeDrawable mask = new ShapeDrawable(new OvalShape());
+        mask.getPaint().setColor(0xFFFFFFFF);
+        return new RippleDrawable(ColorStateList.valueOf(rippleColor), content, mask);
+    }
+
+    /** Add a bounded ripple on top of whatever the view already draws. */
+    public static void addRipple(View view, int rippleColor, float radiusPx) {
+        if (view == null) return;
+        try {
+            GradientDrawable mask = shape(0xFFFFFFFF, radiusPx);
+            view.setForeground(new RippleDrawable(
+                ColorStateList.valueOf(rippleColor), null, mask));
+        } catch (Throwable ignored) {}
+    }
+
+    public static void addCircleRipple(View view, int rippleColor) {
+        if (view == null) return;
+        try {
+            ShapeDrawable mask = new ShapeDrawable(new OvalShape());
+            mask.getPaint().setColor(0xFFFFFFFF);
+            view.setForeground(new RippleDrawable(
+                ColorStateList.valueOf(rippleColor), null, mask));
+        } catch (Throwable ignored) {}
+    }
+
+    /**
+     * Flutter-style press feedback: the view dips and lifts again.
+     *
+     * <p>Implemented with a {@link StateListAnimator} so it never competes
+     * with a touch or gesture listener bound to the same view.
+     */
+    public static void pressFeedback(View view, float pressedScale, float restZ, float pressedZ) {
+        if (view == null) return;
+        try {
+            StateListAnimator sla = new StateListAnimator();
+
+            AnimatorSet down = new AnimatorSet();
+            down.playTogether(
+                ObjectAnimator.ofFloat(view, "scaleX", pressedScale).setDuration(90),
+                ObjectAnimator.ofFloat(view, "scaleY", pressedScale).setDuration(90),
+                ObjectAnimator.ofFloat(view, "translationZ", dp(pressedZ)).setDuration(90));
+
+            AnimatorSet up = new AnimatorSet();
+            up.playTogether(
+                ObjectAnimator.ofFloat(view, "scaleX", 1f).setDuration(160),
+                ObjectAnimator.ofFloat(view, "scaleY", 1f).setDuration(160),
+                ObjectAnimator.ofFloat(view, "translationZ", dp(restZ)).setDuration(160));
+
+            sla.addState(new int[]{android.R.attr.state_pressed}, down);
+            sla.addState(new int[]{}, up);
+            view.setStateListAnimator(sla);
+        } catch (Throwable ignored) {}
+    }
+
+    /** Soft, modern shadow (Material shadows are harsh by default). */
+    public static void elevate(View view, float elevationDp) {
+        if (view == null) return;
+        try {
+            view.setElevation(dp(elevationDp));
+            if (Build.VERSION.SDK_INT >= 28) {
+                view.setOutlineSpotShadowColor(shadow);
+                view.setOutlineAmbientShadowColor(alpha(shadow, 0.10f));
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    // ── design tokens (owned by Python) ──────────────────────────────────
+    //
+    // Every metric the renderer draws with lives here, and every one of
+    // them is overwritten by the `tokens` object inside the `theme`
+    // command.  Java holds the Pydrud defaults so a device that somehow
+    // renders before the first theme push still looks right; the moment
+    // Python speaks, Python wins.
+
+    // shape
+    public static float radiusButton = 14f;
+    public static float radiusCard   = 16f;
+    public static float radiusInput  = 14f;
+    public static float radiusChip   = 999f;
+    public static float radiusSheet  = 24f;
+    public static float radiusDialog = 24f;
+    public static float radiusFab    = 28f;
+    public static float radiusImage  = 12f;
+
+    // size
+    public static float appBarHeight   = 56f;
+    public static float navHeight      = 64f;
+    public static float railWidth      = 80f;
+    public static float fabSize        = 56f;
+    public static float inputHeight    = 52f;
+    public static float buttonHeightSm = 38f;
+    public static float buttonHeightMd = 48f;
+    public static float buttonHeightLg = 56f;
+    public static float touchTargetDp  = 48f;
+    public static float iconSize       = 24f;
+    public static float avatarSize     = 40f;
+    public static float dividerThickness = 1f;
+    public static float borderWidth    = 1f;
+    public static float listTileHeight = 56f;
+    public static float listTileHeightTwoLine = 72f;
+
+    // spacing
+    public static float gutter       = 20f;
+    public static float section      = 24f;
+    public static float cardPadding  = 16f;
+    public static float contentMaxWidth = 0f;
+
+    // depth
+    public static float elevationCard   = 0f;
+    public static float elevationButton = 1.5f;
+    public static float elevationFab    = 6f;
+    public static float elevationAppBar = 0f;
+    public static float elevationSheet  = 12f;
+    public static float elevationDialog = 16f;
+
+    // motion
+    public static int durationFast   = 140;
+    public static int durationNormal = 220;
+    public static int durationSlow   = 320;
+    public static float pressScale    = 0.97f;
+    public static float rippleOpacity = 0.12f;
+    public static float stateHover    = 0.08f;
+    public static float statePressed  = 0.12f;
+    public static float stateDisabled = 0.38f;
+    public static boolean animateLayout = true;
+
+    // type
+    public static String fontFamily = "";
+    public static float fontScaleToken = 1.0f;
+    public static float textDisplay  = 34f;
+    public static float textHeadline = 24f;
+    public static float textTitle    = 18f;
+    public static float textSubtitle = 16f;
+    public static float textBody     = 15f;
+    public static float textLabel    = 14f;
+    public static float textCaption  = 12f;
+    public static int weightRegular = 400;
+    public static int weightMedium  = 500;
+    public static int weightBold    = 700;
+    public static float letterSpacingToken = 0f;
+    public static float lineHeight = 1.32f;
+
+    // behaviour
+    public static boolean haptics = true;
+    public static boolean overscrollGlow = false;
+
+    /** Apply the `tokens` object from a `theme` command. */
+    public static void applyTokens(JSONObject t) {
+        if (t == null) return;
+        radiusButton = num(t, "radius_button", radiusButton);
+        radiusCard   = num(t, "radius_card", radiusCard);
+        radiusInput  = num(t, "radius_input", radiusInput);
+        radiusChip   = num(t, "radius_chip", radiusChip);
+        radiusSheet  = num(t, "radius_sheet", radiusSheet);
+        radiusDialog = num(t, "radius_dialog", radiusDialog);
+        radiusFab    = num(t, "radius_fab", radiusFab);
+        radiusImage  = num(t, "radius_image", radiusImage);
+
+        appBarHeight   = num(t, "app_bar_height", appBarHeight);
+        navHeight      = num(t, "nav_height", navHeight);
+        railWidth      = num(t, "rail_width", railWidth);
+        fabSize        = num(t, "fab_size", fabSize);
+        inputHeight    = num(t, "input_height", inputHeight);
+        buttonHeightSm = num(t, "button_height_sm", buttonHeightSm);
+        buttonHeightMd = num(t, "button_height_md", buttonHeightMd);
+        buttonHeightLg = num(t, "button_height_lg", buttonHeightLg);
+        touchTargetDp  = num(t, "touch_target", touchTargetDp);
+        iconSize       = num(t, "icon_size", iconSize);
+        avatarSize     = num(t, "avatar_size", avatarSize);
+        dividerThickness = num(t, "divider_thickness", dividerThickness);
+        borderWidth    = num(t, "border_width", borderWidth);
+        listTileHeight = num(t, "list_tile_height", listTileHeight);
+        listTileHeightTwoLine =
+            num(t, "list_tile_height_two_line", listTileHeightTwoLine);
+
+        gutter      = num(t, "gutter", gutter);
+        section     = num(t, "section", section);
+        cardPadding = num(t, "card_padding", cardPadding);
+        contentMaxWidth = num(t, "content_max_width", contentMaxWidth);
+
+        elevationCard   = num(t, "elevation_card", elevationCard);
+        elevationButton = num(t, "elevation_button", elevationButton);
+        elevationFab    = num(t, "elevation_fab", elevationFab);
+        elevationAppBar = num(t, "elevation_app_bar", elevationAppBar);
+        elevationSheet  = num(t, "elevation_sheet", elevationSheet);
+        elevationDialog = num(t, "elevation_dialog", elevationDialog);
+
+        durationFast   = (int) num(t, "duration_fast", durationFast);
+        durationNormal = (int) num(t, "duration_normal", durationNormal);
+        durationSlow   = (int) num(t, "duration_slow", durationSlow);
+        pressScale     = num(t, "press_scale", pressScale);
+        rippleOpacity  = num(t, "ripple_opacity", rippleOpacity);
+        stateHover     = num(t, "state_hover", stateHover);
+        statePressed   = num(t, "state_pressed", statePressed);
+        stateDisabled  = num(t, "state_disabled", stateDisabled);
+        animateLayout  = t.optBoolean("animate_layout", animateLayout);
+
+        fontFamily     = t.optString("font_family", fontFamily);
+        fontScaleToken = num(t, "font_scale", fontScaleToken);
+        textDisplay    = num(t, "text_display", textDisplay);
+        textHeadline   = num(t, "text_headline", textHeadline);
+        textTitle      = num(t, "text_title", textTitle);
+        textSubtitle   = num(t, "text_subtitle", textSubtitle);
+        textBody       = num(t, "text_body", textBody);
+        textLabel      = num(t, "text_label", textLabel);
+        textCaption    = num(t, "text_caption", textCaption);
+        weightRegular  = (int) num(t, "weight_regular", weightRegular);
+        weightMedium   = (int) num(t, "weight_medium", weightMedium);
+        weightBold     = (int) num(t, "weight_bold", weightBold);
+        letterSpacingToken = num(t, "letter_spacing", letterSpacingToken);
+        lineHeight     = num(t, "line_height", lineHeight);
+
+        haptics        = t.optBoolean("haptics", haptics);
+        overscrollGlow = t.optBoolean("overscroll_glow", overscrollGlow);
+    }
+
+    private static float num(JSONObject json, String key, float fallback) {
+        return (float) json.optDouble(key, fallback);
+    }
+
+    // ── typography ───────────────────────────────────────────────────────
+
+    // The type ramp is a view onto the tokens, so Theme.configure(
+    // text_title=22) in Python moves every title on the device.
+    public static float display()  { return textDisplay * 1.3f; }
+    public static float headline() { return textHeadline; }
+    public static float title()    { return textTitle; }
+    public static float subtitle() { return textSubtitle; }
+    public static float body()     { return textBody; }
+    public static float label()    { return textLabel; }
+    public static float caption()  { return textCaption; }
+
+    /** Real font weights on API 28+, graceful family fallback below. */
+    public static Typeface typeface(int weight, boolean italic) {
+        if (fontFamily != null && !fontFamily.isEmpty()) {
+            return typeface(fontFamily, weight, italic);
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= 28) {
+                int w = Math.max(100, Math.min(900, weight));
+                return Typeface.create(Typeface.SANS_SERIF, w, italic);
+            }
+        } catch (Throwable ignored) {}
+        String family = "sans-serif";
+        if (weight >= 800)      family = "sans-serif-black";
+        else if (weight >= 600) family = "sans-serif-medium";
+        else if (weight <= 300) family = "sans-serif-light";
+        return Typeface.create(family, italic ? Typeface.ITALIC : Typeface.NORMAL);
+    }
+
+    public static Typeface typeface(String familyName, int weight, boolean italic) {
+        if (familyName == null || familyName.isEmpty()) return typeface(weight, italic);
+        try {
+            if (Build.VERSION.SDK_INT >= 28) {
+                return Typeface.create(Typeface.create(familyName, Typeface.NORMAL),
+                                       Math.max(100, Math.min(900, weight)), italic);
+            }
+        } catch (Throwable ignored) {}
+        int style = Typeface.NORMAL;
+        if (weight >= 600 && italic) style = Typeface.BOLD_ITALIC;
+        else if (weight >= 600) style = Typeface.BOLD;
+        else if (italic) style = Typeface.ITALIC;
+        return Typeface.create(familyName, style);
+    }
+
+    /** Tight, readable text metrics — the single biggest visual upgrade. */
+    public static void applyTextDefaults(TextView tv, float sizeSp, int weight, int color) {
+        if (tv == null) return;
+        tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP,
+                       scaledSp(sizeSp * fontScaleToken));
+        tv.setTextColor(color);
+        tv.setTypeface(typeface(weight, false));
+        tv.setIncludeFontPadding(false);
+        tv.setLineSpacing(0f, sizeSp >= textHeadline ? lineHeight * 0.82f : lineHeight);
+        tv.setLetterSpacing(letterSpacingFor(sizeSp, weight));
+    }
+
+    /** Large text tracks tighter, small caps-ish labels track wider. */
+    public static float letterSpacingFor(float sizeSp, int weight) {
+        if (letterSpacingToken != 0f) return letterSpacingToken;
+        if (sizeSp >= 32) return -0.02f;
+        if (sizeSp >= 20) return -0.01f;
+        if (sizeSp <= 12) return 0.02f;
+        return weight >= 600 ? 0.005f : 0.0f;
+    }
+
+    // ── widget recipes ───────────────────────────────────────────────────
+
+    /** Minimum comfortable tap target (Material + WCAG): 48dp. */
+    public static int touchTarget() { return adaptive(touchTargetDp); }
+
+    /** Grow a view's hit rect to the minimum tap target. */
+    public static void expandTouch(final View view, final int minPx) {
+        if (view == null) return;
+        final View parent = (view.getParent() instanceof View) ? (View) view.getParent() : null;
+        if (parent == null) return;
+        parent.post(new Runnable() {
+            @Override public void run() {
+                try {
+                    android.graphics.Rect r = new android.graphics.Rect();
+                    view.getHitRect(r);
+                    int dw = Math.max(0, (minPx - r.width()) / 2);
+                    int dh = Math.max(0, (minPx - r.height()) / 2);
+                    if (dw == 0 && dh == 0) return;
+                    r.inset(-dw, -dh);
+                    parent.setTouchDelegate(new android.view.TouchDelegate(r, view));
+                } catch (Throwable ignored) {}
+            }
+        });
+    }
+
+    /** Button background: fill + pressed/disabled states + ripple. */
+    public static Drawable buttonBackground(int fill, float radiusPx, boolean enabled) {
+        if (!enabled) return shape(disabledBg, radiusPx);
+        StateListDrawable states = new StateListDrawable();
+        states.addState(new int[]{-android.R.attr.state_enabled}, shape(disabledBg, radiusPx));
+        states.addState(new int[]{}, shape(fill, radiusPx));
+        return ripple(states, rippleOn(fill), radiusPx);
+    }
+
+    /** Outlined/text button background: transparent fill, tinted ripple. */
+    public static Drawable outlineBackground(int strokeColor, float radiusPx,
+                                             int strokePx, int rippleColor) {
+        GradientDrawable base = shape(Color.TRANSPARENT, radiusPx, strokePx, strokeColor);
+        return ripple(base, rippleColor, radiusPx);
+    }
+
+    /** Input background that reacts to focus, like a Flutter TextField. */
+    public static Drawable inputBackground(int fill, int focusedFill, float radiusPx,
+                                           int idleStroke, int focusStroke, int strokePx) {
+        StateListDrawable states = new StateListDrawable();
+        states.addState(new int[]{-android.R.attr.state_enabled},
+            shape(disabledBg, radiusPx, strokePx, outline));
+        states.addState(new int[]{android.R.attr.state_focused},
+            shape(focusedFill, radiusPx, Math.max(strokePx, dp(1.6f)), focusStroke));
+        states.addState(new int[]{}, shape(fill, radiusPx, strokePx, idleStroke));
+        return states;
+    }
+
+    /** Rounded, two-layer track used by sliders and progress bars. */
+    public static LayerDrawable trackDrawable(int trackColor, int fillColor, int heightPx) {
+        GradientDrawable track = shape(trackColor, heightPx / 2f);
+        GradientDrawable fill = shape(fillColor, heightPx / 2f);
+        android.graphics.drawable.ClipDrawable clip =
+            new android.graphics.drawable.ClipDrawable(
+                fill, android.view.Gravity.START,
+                android.graphics.drawable.ClipDrawable.HORIZONTAL);
+        LayerDrawable layers = new LayerDrawable(new Drawable[]{track, clip});
+        layers.setId(0, android.R.id.background);
+        layers.setId(1, android.R.id.progress);
+        return layers;
+    }
+
+    /** Circular slider thumb with a soft halo. */
+    public static Drawable thumbDrawable(int color, int sizePx) {
+        GradientDrawable thumb = new GradientDrawable();
+        thumb.setShape(GradientDrawable.OVAL);
+        thumb.setColor(color);
+        thumb.setSize(sizePx, sizePx);
+        thumb.setStroke(dp(2), 0xFFFFFFFF);
+        return thumb;
+    }
+
+    /** Tint a checkbox / radio / switch to the app palette. */
+    public static void tintCompound(CompoundButton button, int activeColor) {
+        if (button == null) return;
+        try {
+            ColorStateList tint = new ColorStateList(
+                new int[][]{
+                    new int[]{-android.R.attr.state_enabled},
+                    new int[]{android.R.attr.state_checked},
+                    new int[]{},
+                },
+                new int[]{disabledFg, activeColor, onSurfaceVariant});
+            androidx.core.widget.CompoundButtonCompat.setButtonTintList(button, tint);
+        } catch (Throwable ignored) {}
+    }
+
+    /** Give a container a smooth add/remove/resize animation. */
+    public static void animateLayout(ViewGroup group) {
+        if (group == null) return;
+        try {
+            android.animation.LayoutTransition transition =
+                new android.animation.LayoutTransition();
+            transition.setDuration(180);
+            transition.enableTransitionType(android.animation.LayoutTransition.CHANGING);
+            transition.setAnimateParentHierarchy(false);
+            group.setLayoutTransition(transition);
+        } catch (Throwable ignored) {}
+    }
+
+    /** Fade + lift a freshly created view into place. */
+    public static void enter(View view, long delayMs) {
+        if (view == null) return;
+        try {
+            view.setAlpha(0f);
+            view.setTranslationY(dp(8));
+            view.animate().alpha(1f).translationY(0f)
+                .setDuration(220).setStartDelay(delayMs)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                .start();
+        } catch (Throwable ignored) {}
+    }
+}
