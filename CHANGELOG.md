@@ -2,6 +2,70 @@
 
 All notable changes to Pydrud are documented here.
 
+## [Unreleased] — Runtime architecture and Android hardening
+
+This development line focuses on making the Python-to-Android runtime more
+explicit, transactional and upgradeable. It is the foundation for the next
+major runtime iteration; it does not claim full device-matrix certification
+yet.
+
+### Added
+* **Protocol v2.** Render transactions carry a transaction id, desired revision
+  and patch base revision; Android responds with explicit `render_ack` or
+  `render_nack` messages.
+* **Persistent Elements.** Added `Element` and `ElementTree` primitives to
+  give widgets a durable identity layer between declarative Python state and
+  native Android Views.
+* **Compatibility metadata.** Generated projects record framework, protocol,
+  Android runtime, Chaquopy, AGP, Gradle, Python, SDK and NDK compatibility
+  defaults.
+* **Runtime regression tests.** Added coverage for duplicate keys, protocol
+  envelope validation, render revision metadata, state distinct semantics and
+  compatibility requirements.
+* **CI scaffolding.** Added Python test/compile jobs plus generated-Java static
+  validation for pull requests.
+
+### Changed
+* **Rendering is acknowledgement-aware.** Python does not treat a render as
+  confirmed until the native runtime acknowledges it; pending updates are
+  coalesced behind an in-flight transaction.
+* **Widget keys are validated.** Duplicate or empty identity keys now fail
+  early instead of producing ambiguous keyed diffs.
+* **State subscriptions are cancellable.** `State`, `Store` and related
+  subscription APIs expose explicit lifetime handles.
+* **State scheduling is explicit.** Watchers can marshal callbacks through the
+  app scheduler, and `distinct=True` enables equal-value suppression without
+  changing the default behavior.
+* **Task failures propagate.** Worker exceptions remain visible through the
+  returned future instead of being silently converted to a successful
+  `None` result.
+* **Android project defaults are modernized.** Generated projects move to SDK
+  36, AGP 8.13.2, Gradle 8.13 and Chaquopy 17.0.0, with Python 3.11/JDK 17
+  defaults.
+* **WebView defaults are safer.** JavaScript is disabled by default and the
+  native bridge is no longer exposed automatically.
+* **Foreground-service behavior is tightened.** Services use
+  `START_NOT_STICKY` and include the newer timeout handling path.
+* **Back handling is modernized.** Generated activities use
+  `OnBackPressedDispatcher` while preserving the legacy callback entry
+  point.
+* **Manifest generation is least-privilege by default.** Optional permissions
+  and components are capability-gated rather than always emitted.
+
+### Fixed
+* Reduced the chance of Python state racing ahead of the last native render
+  acknowledgement during rapid successive updates.
+* Prevented duplicate widget identity from silently collapsing keyed diff
+  indexes.
+* Improved cleanup semantics for app-owned subscriptions during shutdown.
+
+### Validation
+* Repository-level Python and generated-code checks are included in the PR.
+* A real Android build/device matrix, lifecycle/process-death tests, 16 KB
+  page-size validation, performance benchmarks and end-to-end native
+  reconciliation tests remain follow-up validation before calling the new
+  runtime fully production-certified.
+
 ## [1.5.1] — Live-update fixes
 
 A bug-hunt release: every defect here made the on-screen UI disagree

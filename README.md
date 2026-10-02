@@ -33,6 +33,98 @@ pydrud run                            # Build, install, launch
 
 ---
 
+## Upcoming — Runtime 2.0 / production hardening
+
+The current development line adds a stronger runtime contract between
+Python's declarative widget tree and the generated Android renderer.
+These changes are intentionally documented here before the next package
+release so the runtime behavior and migration surface stay visible.
+
+### Transactional rendering
+
+UI updates now carry protocol metadata instead of being fire-and-forget:
+
+* protocol **v2** adds a transaction id, desired revision and patch base revision
+* Android returns an explicit **render ACK or NACK**
+* Python advances its confirmed snapshot only after acknowledgement
+* updates that arrive while a render is in flight are coalesced into the next
+  transaction
+* duplicate and invalid widget keys are rejected before they can corrupt the
+  diff
+
+The important distinction is **desired state vs confirmed native state**. A
+Python rebuild describes what the app wants; the renderer confirms what the
+Android View tree actually accepted.
+
+### Persistent element identity
+
+Pydrud now has a first-class `Element`/`ElementTree` layer between widgets
+and native Views. Elements retain stable keys, parent relationships, desired
+and confirmed properties, listener/resource ownership metadata and the native
+reference associated with a mounted widget.
+
+This is the foundation for preserving native View identity across updates
+instead of treating every Python render as an unrelated tree.
+
+### Safer reactive state and lifetimes
+
+Subscriptions are represented by cancellable handles and can be retained by
+the owning `App`. State watchers may be marshalled through a scheduler, equal
+values can use explicit distinct semantics, and worker task failures remain
+failed futures instead of being silently converted into successful results.
+
+For existing code, legacy watcher behavior remains available unless
+`distinct=True` is selected.
+
+### Modern Android project defaults
+
+New generated projects target the current Android release requirements used
+by this development line:
+
+| Toolchain | Default |
+|-----------|---------|
+| Compile / target SDK | 36 |
+| Android Gradle Plugin | 8.13.2 |
+| Gradle | 8.13 |
+| Chaquopy | 17.0.0 |
+| Python runtime | 3.11 |
+| JDK | 17 |
+| Min SDK | 24 |
+| NDK | 28.2.13676358 |
+
+Generated projects also include compatibility metadata for the Python-side
+framework, protocol and Android runtime so upgrades can be made deliberately.
+
+### Android hardening
+
+The generated runtime now includes:
+
+* WebView JavaScript disabled by default; the native JavaScript bridge is
+  opt-in rather than automatic.
+* Optional manifest permissions/components are generated only when the
+  corresponding capability is requested.
+* Foreground services use `START_NOT_STICKY` and implement the newer timeout
+  callback path.
+* Back handling is wired through AndroidX's modern `OnBackPressedDispatcher`
+  path while retaining the legacy entry point for compatibility.
+* Oversized or invalid bridge frames are rejected with protocol errors instead
+  of being processed as arbitrary input.
+
+### Tests and CI
+
+The development line adds regression and compatibility coverage for:
+
+* duplicate-key rejection and keyed tree invariants
+* protocol envelope size/version/revision handling
+* subscription/state scheduling behavior
+* generated-project compatibility defaults
+* generated Java static checks in CI
+
+The PR still needs real Android build/device validation before these defaults
+should be treated as a fully certified production matrix.
+
+---
+
 ## What You Get
 
 | Feature | Description |
