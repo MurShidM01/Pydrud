@@ -12,6 +12,7 @@ import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
+import androidx.activity.OnBackPressedCallback;
 
 import com.chaquo.python.PyObject;
 import com.chaquo.python.Python;
@@ -84,6 +85,10 @@ public class {{ app_name }}Activity extends AppCompatActivity {
 
         // A deep link (myapp://route), launcher shortcut or notification tap
         // may have started us — forward it once Python is listening.
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override public void handleOnBackPressed() { requestPydrudBack(); }
+        });
+
         handleDeepLinkIntent(getIntent());
 
         eventDispatcher = new EventDispatcher();
@@ -383,7 +388,12 @@ public class {{ app_name }}Activity extends AppCompatActivity {
     // ── Back button ───────────────────────────────────────────────────────
 
     @Override
+    @SuppressWarnings("deprecation")
     public void onBackPressed() {
+        requestPydrudBack();
+    }
+
+    private void requestPydrudBack() {
         // Ask Python first: the Router may want to pop a screen. Only fall
         // back to the default behaviour if Python does not answer in time
         // or reports that it did not handle the press.
