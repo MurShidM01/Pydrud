@@ -8,7 +8,6 @@ Uses ``watchdog`` if available (recommended), with a fallback to polling
 
 from __future__ import annotations
 import os
-import sys
 import time
 import threading
 from typing import Callable, Optional
@@ -16,7 +15,7 @@ from typing import Callable, Optional
 _HAS_WATCHDOG = False
 try:
     from watchdog.observers import Observer
-    from watchdog.events import FileSystemEventHandler, FileModifiedEvent
+    from watchdog.events import FileSystemEventHandler
     _HAS_WATCHDOG = True
 except ImportError:
     Observer = None

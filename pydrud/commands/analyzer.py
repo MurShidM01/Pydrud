@@ -15,8 +15,6 @@ Usage::
 from __future__ import annotations
 import ast
 import os
-import sys
-from typing import Any
 
 # ── Issue types ──────────────────────────────────────────────────────────────
 

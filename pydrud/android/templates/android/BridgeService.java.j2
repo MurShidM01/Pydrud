@@ -360,7 +360,8 @@ public class BridgeService {
                     // asynchronously with a `result` event.
                     if (platform != null && platform.handle(cmd, json)) break;
                     if (services == null || !services.handle(cmd, json)) {
-                        Log.d(TAG, "Unknown cmd: " + cmd);
+                        Log.w(TAG, "Unknown cmd: " + cmd);
+                        replyUnsupported(cmd, json);
                     }
             }
         } catch (JSONException e) {
@@ -368,6 +369,26 @@ public class BridgeService {
         } catch (Exception e) {
             Log.e(TAG, "Command failed", e);
         }
+    }
+
+    /**
+     * Answer a command no native handler claimed.
+     *
+     * <p>Without this a waiting {@code Result} on the Python side would
+     * never settle — {@code .then()} would never fire and {@code .wait()}
+     * would block forever.  Failing loudly turns "nothing happens" into a
+     * readable error the developer can act on.
+     */
+    private void replyUnsupported(String cmd, JSONObject json) {
+        String requestId = json.optString("request_id", "");
+        if (requestId.isEmpty()) return;
+        JSONObject data = new JSONObject();
+        try {
+            data.put("request_id", requestId);
+            data.put("ok", false);
+            data.put("error", "unsupported native command: " + cmd);
+        } catch (Exception ignored) { }
+        sendEvent("result", "", data);
     }
 
     /** Acknowledge a fire-and-forget command that still carries a request id. */

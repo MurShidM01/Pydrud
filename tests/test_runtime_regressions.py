@@ -1,9 +1,7 @@
-import json
 import pytest
 
 from pydrud import Column, Text, State
 from pydrud.core.diff import TreeDiff
-from pydrud.core.results import ResultError
 from pydrud.core.protocol import RenderTransaction, decode_envelope, encode_envelope
 
 

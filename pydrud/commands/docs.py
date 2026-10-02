@@ -12,8 +12,7 @@ from __future__ import annotations
 import html
 import inspect
 import os
-import pkgutil
-from typing import Any, Optional
+from typing import Any
 
 _CSS = """
 :root { --bg:#0b1020; --panel:#121a33; --ink:#e6e9f5; --muted:#99a2c0;

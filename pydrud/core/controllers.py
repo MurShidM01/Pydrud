@@ -22,7 +22,7 @@ from __future__ import annotations
 import math
 import threading
 import time
-from typing import Any, Callable, Optional, Sequence
+from typing import Any, Callable, Optional
 
 #: Easing functions, matching the names used by the Android renderer.
 CURVES: dict[str, Callable[[float], float]] = {

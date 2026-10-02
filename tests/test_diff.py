@@ -3,7 +3,7 @@ Unit tests for the virtual-tree diff engine.
 """
 
 import unittest
-from pydrud.widgets import Text, Container, Column, Row, Button
+from pydrud.widgets import Text, Container, Column, Button
 from pydrud.core.diff import TreeDiff, Patch
 
 

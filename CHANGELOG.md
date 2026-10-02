@@ -2,6 +2,52 @@
 
 All notable changes to Pydrud are documented here.
 
+## [1.5.2] — Build-time correctness
+
+A full audit of the generated Android layer and the Python↔Java contract.
+The theme is *fail fast and loudly*: every failure mode below used to be a
+silent hang, a no-op, or a two-minute Gradle error.
+
+### Fixed
+* **`pydrud run` no longer fails to compile.** `ViewFactory` called
+  `AdvancedViews.setEventDispatcher()` and `ViewFactory.isReusableType()`,
+  neither of which existed. Added the late-binding setter (matching
+  `MaterialViews`/`GestureBinder`) and the view-reuse predicate (`Canvas`,
+  `MapView`, `CameraPreview`, `ReorderableList`, `InfiniteList`).
+* **Unknown native commands no longer hang the app.** `BridgeService` now
+  answers any command no handler claimed with a failed `result`, so a
+  pending `Result` settles with `unsupported native command: …` instead of
+  never resolving.
+* **Three native events had no Python handler.** `push_token`,
+  `audio_complete` and `protocol_error` were emitted by the Java layer and
+  dropped. Added `App.on_push_token()`, `App.on_audio_complete()`, and
+  protocol errors are now routed to the app's error handler.
+* Unused imports, empty f-strings, exception chaining (`raise … from`) and
+  other lint findings across `pydrud/` and `tools/`.
+
+### Added
+* **`pydrud.android.javacheck`** — cross-class symbol resolution for the
+  generated Java: unqualified calls, calls on fields/locals of Pydrud types,
+  static calls and constructor arities, with no false positives on framework
+  types or chained calls.
+* **Build pre-flight.** `pydrud run`/`pydrud build` resolve the project's own
+  `*.java` before invoking Gradle and abort in under a second with the exact
+  missing symbol, suggesting `pydrud sync`.
+* **Staleness warning.** Projects now record `pydrud_version:` in
+  `pydrud.yaml`; building with a different installed version warns and points
+  at `pydrud sync`, which re-stamps it.
+* **`UNIMPLEMENTED_COMMANDS`** documents the 24 Python service calls (BLE,
+  NFC, camera extras, speech, colour picker, location watch, notification
+  channels) the Android runtime does not implement yet; their docstrings say
+  so, and a test keeps the list in sync with the Java sources.
+* New test suites: `test_java_symbols`, `test_native_coverage`,
+  `test_native_events`, `test_build_preflight` — covering symbol resolution,
+  command/event/widget parity between Python and Java, and the build guards.
+
+### Changed
+* `tools/check_java.py` now runs the symbol check after parsing, so CI fails
+  on an unresolved cross-class call.
+
 ## [Unreleased] — Runtime architecture and Android hardening
 
 This development line focuses on making the Python-to-Android runtime more

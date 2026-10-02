@@ -23,7 +23,7 @@ from pydrud.core.tasks import TaskRunner
 from pydrud.core.diff import TreeDiff
 from pydrud.core.events import EventDispatcher
 from pydrud.core.bridge import BridgeProtocol
-from pydrud.core.protocol import RenderTransaction, PROTOCOL_VERSION
+from pydrud.core.protocol import RenderTransaction
 from pydrud.core.elements import ElementTree
 from pydrud.widgets import Widget, assign_stable_keys, validate_tree_keys
 
@@ -96,6 +96,9 @@ class App:
         #: Deep links / shortcuts / push messages / sensor streams.
         self._deep_link_handlers: list[Callable] = []
         self._push_handlers: list[Callable] = []
+        #: FCM registration-token refreshes and audio playback completions.
+        self._push_token_handlers: list[Callable] = []
+        self._audio_complete_handlers: list[Callable] = []
         self._pending_deep_link: Optional[str] = None
         #: Bound reactive objects — also used to carry values across reloads.
         self._bound_states: list = []
@@ -305,6 +308,32 @@ class App:
         """Handle an incoming FCM message (foreground or notification tap)."""
         self._push_handlers.append(callback)
         return self
+
+    def on_push_token(self, callback: Callable[[str], None]) -> "App":
+        """Handle an FCM registration token (issued or refreshed).
+
+        Firebase rotates the token silently; without this hook the native
+        ``push_token`` event had nowhere to go and the server kept a stale
+        token.  The callback receives the token string.
+        """
+        self._push_token_handlers.append(callback)
+        return self
+
+    def on_audio_complete(self, callback: Callable[[dict], None]) -> "App":
+        """Fire when ``page.audio.play()`` reaches the end of a clip.
+
+        The callback receives the event payload (``{"source": ...}``).
+        """
+        self._audio_complete_handlers.append(callback)
+        return self
+
+    def _dispatch(self, handlers: list, payload) -> None:
+        """Call every handler, isolating failures from the event loop."""
+        for cb in list(handlers):
+            try:
+                cb(payload)
+            except Exception as exc:
+                self._report_error(exc)
 
     def _handle_deep_link(self, data: dict) -> None:
         url = data.get("url") or data.get("route") or ""
@@ -817,11 +846,27 @@ class App:
             return
 
         if etype == "push":
-            for cb in list(self._push_handlers):
-                try:
-                    cb(dict(data))
-                except Exception as exc:
-                    self._report_error(exc)
+            self._dispatch(self._push_handlers, dict(data))
+            return
+
+        if etype == "push_token":
+            self._dispatch(self._push_token_handlers,
+                           str(data.get("token", "")))
+            return
+
+        if etype == "audio_complete":
+            self._dispatch(self._audio_complete_handlers, dict(data))
+            return
+
+        if etype == "protocol_error":
+            # The native renderer rejected a message: a malformed patch, an
+            # unknown op, a version mismatch.  Silence here meant the UI
+            # quietly stopped updating, so surface it like any other error.
+            message = str(data.get("message", "")) or "native protocol error"
+            code = data.get("code")
+            self._report_error(RuntimeError(
+                f"native protocol error [{code}]: {message}"
+                if code is not None else f"native protocol error: {message}"))
             return
 
         if etype == "sensor":
@@ -1401,7 +1446,7 @@ class _Page:
     # ── build ─────────────────────────────────────────────────────────────
 
     def build(self) -> Widget:
-        from pydrud.widgets.layout import Column, Container, Stack
+        from pydrud.widgets.layout import Column, Stack
         from pydrud.widgets.styling import EdgeInsets
 
         style: dict = {"width": "match", "height": "match"}

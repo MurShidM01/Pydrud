@@ -403,6 +403,7 @@ def create_project(
     ctx = {
         "project_name": name,
         "app_name": android_app_name,
+        "pydrud_version": _version(),
         "seed_color": seed_color,
         "pydrud_app_name": pydrud_app_name,
         "package": package,
@@ -512,9 +513,9 @@ def create_project(
 
     print(ok(f"Project '{name}' created!"))
     print()
-    print(f"  Next steps:")
+    print("  Next steps:")
     print(f"    $ cd {_slugify(name)}")
-    print(f"    $ pydrud run")
+    print("    $ pydrud run")
     print()
 
 
@@ -580,8 +581,39 @@ def sync_project(project_dir: str, *, update_runtime: bool = True) -> bool:
     if update_runtime:
         _bundle_pydrud_source(project_dir)
 
+    _stamp_version(project_dir)
     print(ok("Project synced — run `pydrud run` to rebuild."))
     return True
+
+
+def _stamp_version(project_dir: str) -> None:
+    """Record which Pydrud generated the native layer, in ``pydrud.yaml``.
+
+    ``pydrud run`` compares this with the installed version and tells the
+    user to ``pydrud sync`` when they drift apart — the generated Java and
+    the Python runtime are two halves of one protocol.
+    """
+    path = os.path.join(project_dir, "pydrud.yaml")
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return
+    stamp = f'pydrud_version: "{_version()}"'
+    for index, line in enumerate(lines):
+        if line.strip().startswith("pydrud_version:"):
+            lines[index] = stamp
+            break
+    else:
+        insert_at = 1 if lines and lines[0].startswith("#") else 0
+        lines.insert(insert_at, stamp)
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+    except OSError:
+        pass
 
 
 def _version() -> str:

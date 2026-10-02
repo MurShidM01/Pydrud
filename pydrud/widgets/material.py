@@ -13,7 +13,7 @@ return it from your page builder.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Optional, Union
+from typing import Callable, Optional, Union
 
 from pydrud.widgets.base import Widget
 from pydrud.widgets.theme import Colors
