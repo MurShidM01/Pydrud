@@ -56,8 +56,9 @@ yet.
 * **CI protocol parity.** The in-process `FakeDevice` now understands v2
   render transactions and sends render acknowledgements, so AppTester exercises
   the same transaction boundary as the native bridge.
-* **Backward-compatible protocol errors.** Invalid JSON protocol frames remain
-  `ValueError`-compatible while carrying the new structured protocol error type.
+* **Backward-compatible protocol errors.** The low-level decoder now exposes
+  structured `ProtocolError` failures, while `BridgeProtocol.decode_message()`
+  preserves the legacy invalid-JSON -> `None` behavior.
 * **Backward-compatible subscriptions.** Subscription handles are callable,
   preserving existing `off()` / `unsubscribe()` usage while supporting explicit
   `.cancel()` / `.dispose()`.
