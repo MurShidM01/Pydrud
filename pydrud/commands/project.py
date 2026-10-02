@@ -260,6 +260,24 @@ def _python_version_of(exe: str, args: list[str] | None = None) -> str:
     return lines[0] if lines else ""
 
 
+def _build_python_candidates(
+        target: str = APP_PYTHON_VERSION) -> list[tuple[str, list[str]]]:
+    """Interpreter commands to probe, most desirable first.
+
+    Each entry is ``(command, extra_args)``. The app's own Python
+    (``target``) always comes first so Chaquopy can pre-compile; on
+    Windows the ``py`` launcher (``py -3.11``) is preferred because
+    versioned ``python3.11.exe`` names rarely exist there.
+    """
+    preferred = [target] if target else []
+    supported = preferred + [v for v in BUILD_PYTHON_VERSIONS
+                             if v not in preferred]
+    candidates = [(f"python{v}", []) for v in supported]
+    if os.name == "nt":
+        candidates = [("py", [f"-{v}"]) for v in supported] + candidates
+    return candidates
+
+
 def _detect_build_python(target: str = APP_PYTHON_VERSION) -> str:
     """Pick an interpreter Chaquopy can actually use for ``buildPython``.
 
@@ -278,9 +296,7 @@ def _detect_build_python(target: str = APP_PYTHON_VERSION) -> str:
     preferred = [target] if target else []
     supported = preferred + [v for v in BUILD_PYTHON_VERSIONS
                              if v not in preferred]
-    candidates = [(f"python{v}", []) for v in supported]
-    if os.name == "nt":
-        candidates = [("py", [f"-{v}"]) for v in supported] + candidates
+    candidates = _build_python_candidates(target)
 
     for command, args in candidates:
         exe = shutil.which(command)

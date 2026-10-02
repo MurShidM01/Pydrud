@@ -8,6 +8,12 @@ import unittest
 from pydrud.core.watcher import FileWatcher, _ReloadHandler
 
 
+def _abs(path):
+    """The handler reports absolute paths; on Windows ``/p/app.py``
+    becomes ``C:\\p\\app.py``."""
+    return os.path.abspath(path)
+
+
 class _Event:
     def __init__(self, src, dest="", is_dir=False):
         self.src_path = src
@@ -22,16 +28,16 @@ class TestReloadHandler(unittest.TestCase):
 
     def test_modified(self):
         self.handler.on_modified(_Event("/p/app.py"))
-        self.assertEqual(self.seen, ["/p/app.py"])
+        self.assertEqual(self.seen, [_abs("/p/app.py")])
 
     def test_created(self):
         self.handler.on_created(_Event("/p/new.py"))
-        self.assertEqual(self.seen, ["/p/new.py"])
+        self.assertEqual(self.seen, [_abs("/p/new.py")])
 
     def test_atomic_save_uses_the_destination(self):
         """Editors rename a temp file over the real one."""
         self.handler.on_moved(_Event("/p/.app.py.swp", "/p/app.py"))
-        self.assertEqual(self.seen, ["/p/app.py"])
+        self.assertEqual(self.seen, [_abs("/p/app.py")])
 
     def test_non_python_and_directories_are_ignored(self):
         self.handler.on_modified(_Event("/p/notes.txt"))
