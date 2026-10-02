@@ -230,6 +230,7 @@ _JAVA_TEMPLATES = (
     "ViewCreator", "MaterialViews", "PydrudTheme", "PydrudIcons",
     "PydrudNavigation", "GestureBinder", "NativeServices", "PlatformServices", "AdvancedViews",
     "PydrudWorker", "PydrudForegroundService",
+    "CaptureServices", "ConnectivityServices",
 )
 
 

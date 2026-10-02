@@ -43,6 +43,8 @@ public class BridgeService {
     private final EventDispatcher eventDispatcher;
     private final NativeServices services;
     private final PlatformServices platform;
+    private final CaptureServices capture;
+    private final ConnectivityServices connectivity;
 
     /** The live bridge, so background services (FCM) can reach Python. */
     private static volatile BridgeService instance;
@@ -69,6 +71,8 @@ public class BridgeService {
         this.eventDispatcher = eventDispatcher;
         this.services = new NativeServices(activity, this);
         this.platform = new PlatformServices(activity, this);
+        this.capture = new CaptureServices(activity, this);
+        this.connectivity = new ConnectivityServices(activity, this);
         instance = this;
     }
 
@@ -77,6 +81,12 @@ public class BridgeService {
 
     /** v1.3 platform services (secure storage, work, sensors, audio, …). */
     public PlatformServices platform() { return platform; }
+
+    /** Camera extras, speech, colour picking, location watch, channels. */
+    public CaptureServices capture() { return capture; }
+
+    /** Bluetooth Low Energy and NFC. */
+    public ConnectivityServices connectivity() { return connectivity; }
 
     public void start() {
         if (running) return;
@@ -359,6 +369,8 @@ public class BridgeService {
                     // Native services (dialogs, storage, pickers, …) answer
                     // asynchronously with a `result` event.
                     if (platform != null && platform.handle(cmd, json)) break;
+                    if (capture != null && capture.handle(cmd, json)) break;
+                    if (connectivity != null && connectivity.handle(cmd, json)) break;
                     if (services == null || !services.handle(cmd, json)) {
                         Log.w(TAG, "Unknown cmd: " + cmd);
                         replyUnsupported(cmd, json);

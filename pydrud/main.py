@@ -99,6 +99,10 @@ class App:
         #: FCM registration-token refreshes and audio playback completions.
         self._push_token_handlers: list[Callable] = []
         self._audio_complete_handlers: list[Callable] = []
+        #: Streaming native events: GPS fixes, BLE notifications, recordings.
+        self._location_handlers: list[Callable] = []
+        self._bluetooth_handlers: list[Callable] = []
+        self._recording_handlers: list[Callable] = []
         self._pending_deep_link: Optional[str] = None
         #: Bound reactive objects — also used to carry values across reloads.
         self._bound_states: list = []
@@ -325,6 +329,34 @@ class App:
         The callback receives the event payload (``{"source": ...}``).
         """
         self._audio_complete_handlers.append(callback)
+        return self
+
+    def on_location(self, callback: Callable[[dict], None]) -> "App":
+        """Receive GPS fixes started with ``page.location.watch()``.
+
+        The callback gets ``{"latitude", "longitude", "accuracy", "altitude",
+        "speed", "bearing", "time"}`` for every update until
+        ``page.location.stop_watch()``.
+        """
+        self._location_handlers.append(callback)
+        return self
+
+    def on_bluetooth(self, callback: Callable[[dict], None]) -> "App":
+        """Receive Bluetooth events: ``found``, ``notify``, ``disconnected``.
+
+        Scanning reports each peripheral as it appears, and a characteristic
+        subscribed with ``page.bluetooth.notify()`` delivers its payload here
+        as a list of byte values.
+        """
+        self._bluetooth_handlers.append(callback)
+        return self
+
+    def on_recording(self, callback: Callable[[dict], None]) -> "App":
+        """Fire when a video started with ``page.camera.record()`` finalises.
+
+        The callback receives ``{"path", "ok"}``.
+        """
+        self._recording_handlers.append(callback)
         return self
 
     def _dispatch(self, handlers: list, payload) -> None:
@@ -866,6 +898,18 @@ class App:
 
         if etype == "audio_complete":
             self._dispatch(self._audio_complete_handlers, dict(data))
+            return
+
+        if etype == "location":
+            self._dispatch(self._location_handlers, dict(data))
+            return
+
+        if etype == "bluetooth":
+            self._dispatch(self._bluetooth_handlers, dict(data))
+            return
+
+        if etype == "recording":
+            self._dispatch(self._recording_handlers, dict(data))
             return
 
         if etype == "protocol_error":

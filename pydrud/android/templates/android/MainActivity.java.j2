@@ -41,6 +41,16 @@ public class {{ app_name }}Activity extends AppCompatActivity {
     private androidx.camera.core.ImageCapture imageCapture;
     private androidx.camera.lifecycle.ProcessCameraProvider cameraProvider;
     private String cameraFacing = "back";
+    /** The bound camera, used for torch and zoom control. */
+    private androidx.camera.core.Camera camera;
+    private androidx.camera.video.VideoCapture<androidx.camera.video.Recorder>
+        videoCapture;
+    private androidx.camera.video.Recording activeRecording;
+    private androidx.camera.core.ImageAnalysis imageAnalysis;
+    private volatile boolean scanning = false;
+    private String scanKey = "";
+    private final java.util.concurrent.ExecutorService cameraExecutor =
+        java.util.concurrent.Executors.newSingleThreadExecutor();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -210,6 +220,14 @@ public class {{ app_name }}Activity extends AppCompatActivity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (bridge != null && bridge.services().onActivityResult(
+                requestCode, resultCode, data)) {
+            return;
+        }
+        if (bridge != null && bridge.capture().onActivityResult(
+                requestCode, resultCode, data)) {
+            return;
+        }
+        if (bridge != null && bridge.connectivity().onActivityResult(
                 requestCode, resultCode, data)) {
             return;
         }
@@ -527,14 +545,27 @@ public class {{ app_name }}Activity extends AppCompatActivity {
                     previewUseCase.setSurfaceProvider(preview.getSurfaceProvider());
                     imageCapture = new androidx.camera.core.ImageCapture.Builder()
                         .build();
+                    androidx.camera.video.Recorder recorder =
+                        new androidx.camera.video.Recorder.Builder()
+                            .setQualitySelector(
+                                androidx.camera.video.QualitySelector.from(
+                                    androidx.camera.video.Quality.HD))
+                            .build();
+                    videoCapture =
+                        androidx.camera.video.VideoCapture.withOutput(recorder);
+                    imageAnalysis = new androidx.camera.core.ImageAnalysis.Builder()
+                        .setBackpressureStrategy(androidx.camera.core.ImageAnalysis
+                            .STRATEGY_KEEP_ONLY_LATEST)
+                        .build();
+                    imageAnalysis.setAnalyzer(cameraExecutor, new BarcodeAnalyzer());
                     androidx.camera.core.CameraSelector selector =
                         "front".equals(cameraFacing)
                         ? androidx.camera.core.CameraSelector.DEFAULT_FRONT_CAMERA
                         : androidx.camera.core.CameraSelector.DEFAULT_BACK_CAMERA;
                     cameraProvider.unbindAll();
-                    cameraProvider.bindToLifecycle(
+                    camera = cameraProvider.bindToLifecycle(
                         {{ app_name }}Activity.this, selector,
-                        previewUseCase, imageCapture);
+                        previewUseCase, imageCapture, videoCapture, imageAnalysis);
                     org.json.JSONObject data = new org.json.JSONObject();
                     data.put("facing", cameraFacing);
                     eventDispatcher.dispatch("ready", key, data);
@@ -550,7 +581,151 @@ public class {{ app_name }}Activity extends AppCompatActivity {
     }
 
     public void stopCamera() {
+        stopRecording();
+        scanning = false;
         if (cameraProvider != null) cameraProvider.unbindAll();
+        camera = null;
+    }
+
+    // ── camera extras (torch, zoom, video, barcode scanning) ─────────────
+
+    /** Turn the torch on/off. Returns false when the camera has no flash. */
+    public boolean setTorch(final boolean on) {
+        if (camera == null) return false;
+        if (!camera.getCameraInfo().hasFlashUnit()) return false;
+        camera.getCameraControl().enableTorch(on);
+        return true;
+    }
+
+    /**
+     * Set the zoom as a ratio (1.0 = no zoom). The value is clamped to what
+     * the lens actually supports, and the applied ratio is returned.
+     */
+    public float setZoom(final float ratio) {
+        if (camera == null) return 1.0f;
+        androidx.camera.core.ZoomState state =
+            camera.getCameraInfo().getZoomState().getValue();
+        float wanted = ratio;
+        if (state != null) {
+            wanted = Math.max(state.getMinZoomRatio(),
+                              Math.min(state.getMaxZoomRatio(), ratio));
+        }
+        camera.getCameraControl().setZoomRatio(wanted);
+        return wanted;
+    }
+
+    /** True while a video recording is in progress. */
+    public boolean isRecording() { return activeRecording != null; }
+
+    /**
+     * Start recording to *path* (mp4). The callback is invoked with the file
+     * path when recording finishes, or null when it failed.
+     */
+    @SuppressWarnings("MissingPermission")
+    public String startRecording(final String path, final boolean withAudio,
+                                 final androidx.core.util.Consumer<String> onDone) {
+        if (videoCapture == null) return "";
+        if (activeRecording != null) return "";
+        final java.io.File file = new java.io.File(
+            path == null || path.isEmpty()
+                ? new java.io.File(getCacheDir(),
+                    "video_" + System.currentTimeMillis() + ".mp4")
+                        .getAbsolutePath()
+                : path);
+        androidx.camera.video.FileOutputOptions options =
+            new androidx.camera.video.FileOutputOptions.Builder(file).build();
+        androidx.camera.video.PendingRecording pending =
+            videoCapture.getOutput().prepareRecording(this, options);
+        if (withAudio && androidx.core.content.ContextCompat.checkSelfPermission(
+                this, android.Manifest.permission.RECORD_AUDIO)
+                == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            pending = pending.withAudioEnabled();
+        }
+        activeRecording = pending.start(
+            androidx.core.content.ContextCompat.getMainExecutor(this),
+            new androidx.core.util.Consumer<androidx.camera.video.VideoRecordEvent>() {
+                @Override
+                public void accept(androidx.camera.video.VideoRecordEvent event) {
+                    if (event instanceof androidx.camera.video.VideoRecordEvent.Finalize) {
+                        androidx.camera.video.VideoRecordEvent.Finalize done =
+                            (androidx.camera.video.VideoRecordEvent.Finalize) event;
+                        activeRecording = null;
+                        if (onDone != null) {
+                            onDone.accept(done.hasError() ? null
+                                          : file.getAbsolutePath());
+                        }
+                    }
+                }
+            });
+        return file.getAbsolutePath();
+    }
+
+    /** Stop the current recording (the start callback reports the file). */
+    public boolean stopRecording() {
+        if (activeRecording == null) return false;
+        activeRecording.stop();
+        activeRecording = null;
+        return true;
+    }
+
+    /** Enable/disable continuous barcode + QR scanning on the preview. */
+    public void setScanning(final String key, final boolean enabled) {
+        scanKey = key == null ? "" : key;
+        scanning = enabled;
+    }
+
+    /** ML Kit analyzer that reports barcodes as `scan` events. */
+    private class BarcodeAnalyzer
+            implements androidx.camera.core.ImageAnalysis.Analyzer {
+        private final com.google.mlkit.vision.barcode.BarcodeScanner scanner =
+            com.google.mlkit.vision.barcode.BarcodeScanning.getClient();
+
+        @Override
+        @androidx.camera.core.ExperimentalGetImage
+        public void analyze(androidx.camera.core.ImageProxy proxy) {
+            if (!scanning || proxy.getImage() == null) {
+                proxy.close();
+                return;
+            }
+            com.google.mlkit.vision.common.InputImage image =
+                com.google.mlkit.vision.common.InputImage.fromMediaImage(
+                    proxy.getImage(),
+                    proxy.getImageInfo().getRotationDegrees());
+            scanner.process(image)
+                .addOnSuccessListener(
+                    new com.google.android.gms.tasks.OnSuccessListener<
+                            java.util.List<com.google.mlkit.vision.barcode.common.Barcode>>() {
+                        @Override
+                        public void onSuccess(
+                                java.util.List<com.google.mlkit.vision.barcode.common.Barcode> codes) {
+                            for (com.google.mlkit.vision.barcode.common.Barcode code : codes) {
+                                emitScan(code);
+                            }
+                        }
+                    })
+                .addOnCompleteListener(
+                    new com.google.android.gms.tasks.OnCompleteListener<
+                            java.util.List<com.google.mlkit.vision.barcode.common.Barcode>>() {
+                        @Override
+                        public void onComplete(
+                                com.google.android.gms.tasks.Task<
+                                    java.util.List<com.google.mlkit.vision.barcode.common.Barcode>> task) {
+                            proxy.close();
+                        }
+                    });
+        }
+    }
+
+    /** Send one decoded barcode to Python as a `scan` event. */
+    private void emitScan(com.google.mlkit.vision.barcode.common.Barcode code) {
+        if (eventDispatcher == null) return;
+        org.json.JSONObject data = new org.json.JSONObject();
+        try {
+            data.put("value", code.getRawValue() == null ? "" : code.getRawValue());
+            data.put("format", code.getFormat());
+            data.put("type", code.getValueType());
+        } catch (Exception ignored) { }
+        eventDispatcher.dispatch("scan", scanKey, data);
     }
 
     /** Take a photo; the callback receives the saved path or null. */
@@ -626,6 +801,10 @@ public class {{ app_name }}Activity extends AppCompatActivity {
         if (bridge != null && bridge.platform() != null) {
             bridge.platform().dispose();
         }
+        if (bridge != null && bridge.connectivity() != null) {
+            bridge.connectivity().dispose();
+        }
+        cameraExecutor.shutdown();
         super.onDestroy();
     }
 }

@@ -16,27 +16,18 @@ from pydrud.core.results import Result
 
 Invoke = Callable[..., Result]
 
-#: Commands this Python API exposes that the Android layer does not implement
-#: yet.  They are kept so the surface stays stable (and so a future runtime
-#: can light them up without an API change), but calling one must *fail*
-#: rather than leave a :class:`~pydrud.core.results.Result` pending forever.
-#: ``BridgeService`` answers the same way on-device; this mirror makes the
-#: behaviour identical in tests, the previewer and the analyzer.
+#: Commands this Python API exposes that the Android layer does not
+#: implement. As of 1.6.0 this is **empty**: Bluetooth LE, NFC, the camera
+#: extras, speech recognition, the colour picker, continuous location and
+#: notification channels all have native handlers.
+#:
+#: Anything listed here must *fail* rather than leave a
+#: :class:`~pydrud.core.results.Result` pending forever; ``BridgeService``
+#: answers the same way on-device, so tests, the previewer and the analyzer
+#: behave identically.
 #:
 #: Keep in sync with ``tests/test_native_coverage.py``.
-UNIMPLEMENTED_COMMANDS = frozenset({
-    # Bluetooth Low Energy
-    "bt_bonded", "bt_connect", "bt_disconnect", "bt_enable", "bt_enabled",
-    "bt_notify", "bt_read", "bt_scan", "bt_scan_stop", "bt_services",
-    "bt_write",
-    # Camera extras beyond start/stop/switch/capture
-    "camera_flash", "camera_record", "camera_record_stop", "camera_scan",
-    "camera_zoom",
-    # NFC
-    "nfc_available", "nfc_cancel", "nfc_read", "nfc_write",
-    # Misc
-    "color_picker", "location_watch", "notify_channel", "speech_listen",
-})
+UNIMPLEMENTED_COMMANDS: frozenset = frozenset()
 
 
 class _Service:
@@ -103,9 +94,6 @@ class Dialogs(_Service):
 
     def color(self, *, initial: str = "#FF6366F1") -> Result:
         """Colour picker. Resolves with an ARGB string or None.
-
-        Not implemented by the Android runtime yet: the Result fails with
-        ``unsupported native command``.
         """
         return self._invoke("color_picker", initial=initial)
 
@@ -248,6 +236,10 @@ class Permissions(_Service):
         "notifications": "android.permission.POST_NOTIFICATIONS",
         "calendar": "android.permission.READ_CALENDAR",
         "bluetooth": "android.permission.BLUETOOTH_CONNECT",
+        "bluetooth_scan": "android.permission.BLUETOOTH_SCAN",
+        "bluetooth_advertise": "android.permission.BLUETOOTH_ADVERTISE",
+        "background_location": "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "activity": "android.permission.ACTIVITY_RECOGNITION",
         "phone": "android.permission.CALL_PHONE",
         "sms": "android.permission.SEND_SMS",
     }
@@ -299,9 +291,6 @@ class Notifications(_Service):
     def create_channel(self, id: str, name: str, *,
                        importance: str = "default") -> Result:
         """Create a notification channel (Android 8+ grouping).
-
-        Not implemented by the Android runtime yet: the Result fails with
-        ``unsupported native command``.
         """
         if importance not in ("min", "low", "default", "high"):
             raise ValueError("importance must be min/low/default/high")
@@ -320,9 +309,6 @@ class Location(_Service):
 
     def watch(self, *, interval: int = 5000, min_distance: float = 10) -> Result:
         """Start location updates delivered as ``location`` events.
-
-        Not implemented by the Android runtime yet: the Result fails with
-        ``unsupported native command``.
         """
         return self._invoke("location_watch", start=True,
                             interval=int(interval),
@@ -330,9 +316,6 @@ class Location(_Service):
 
     def stop(self) -> Result:
         """Stop location updates started by :meth:`watch`.
-
-        Not implemented by the Android runtime yet: the Result fails with
-        ``unsupported native command``.
         """
         return self._invoke("location_watch", start=False)
 
@@ -619,9 +602,6 @@ class Camera(_Service):
 
     def flash(self, mode: str = "auto", *, key: str = "") -> Result:
         """Set the camera flash mode (``auto``/``on``/``off``/``torch``).
-
-        Not implemented by the Android runtime yet: the Result fails with
-        ``unsupported native command``.
         """
         if mode not in ("on", "off", "auto", "torch"):
             raise ValueError("mode must be on/off/auto/torch")
@@ -629,35 +609,23 @@ class Camera(_Service):
 
     def zoom(self, ratio: float, *, key: str = "") -> Result:
         """Set the camera zoom ratio (``1.0`` is wide).
-
-        Not implemented by the Android runtime yet: the Result fails with
-        ``unsupported native command``.
         """
         return self._invoke("camera_zoom", key=key, ratio=float(ratio))
 
     def record(self, *, key: str = "", path: str = "",
                max_seconds: int = 0) -> Result:
         """Start recording video from the preview at ``key``.
-
-        Not implemented by the Android runtime yet: the Result fails with
-        ``unsupported native command``.
         """
         return self._invoke("camera_record", key=key, path=path,
                             max_seconds=int(max_seconds))
 
     def stop_recording(self, *, key: str = "") -> Result:
         """Stop video recording; resolves with the file path.
-
-        Not implemented by the Android runtime yet: the Result fails with
-        ``unsupported native command``.
         """
         return self._invoke("camera_record_stop", key=key)
 
     def scan_codes(self, *, key: str = "", enabled: bool = True) -> Result:
         """Turn on barcode/QR scanning — matches arrive as ``scan`` events.
-
-        Not implemented by the Android runtime yet: the Result fails with
-        ``unsupported native command``.
         """
         return self._invoke("camera_scan", key=key, enabled=bool(enabled))
 
@@ -724,67 +692,43 @@ class Bluetooth(_Service):
 
     def enabled(self) -> Result:
         """Whether the Bluetooth adapter is currently on.
-
-        Not implemented by the Android runtime yet: the Result fails with
-        ``unsupported native command``.
         """
         return self._invoke("bt_enabled")
 
     def enable(self) -> Result:
         """Ask the user to turn Bluetooth on.
-
-        Not implemented by the Android runtime yet: the Result fails with
-        ``unsupported native command``.
         """
         return self._invoke("bt_enable")
 
     def scan(self, *, seconds: float = 8.0,
              services: Optional[Sequence[str]] = None) -> Result:
         """Scan for peripherals. Resolves with a list of devices.
-
-        Not implemented by the Android runtime yet: the Result fails with
-        ``unsupported native command``.
         """
         return self._invoke("bt_scan", seconds=float(seconds),
                             services=[str(s) for s in (services or [])])
 
     def stop_scan(self) -> Result:
         """Stop a scan started by :meth:`scan`.
-
-        Not implemented by the Android runtime yet: the Result fails with
-        ``unsupported native command``.
         """
         return self._invoke("bt_scan_stop")
 
     def connect(self, address: str) -> Result:
         """Connect to a peripheral by MAC address.
-
-        Not implemented by the Android runtime yet: the Result fails with
-        ``unsupported native command``.
         """
         return self._invoke("bt_connect", address=str(address))
 
     def disconnect(self, address: str) -> Result:
         """Drop the connection to a peripheral.
-
-        Not implemented by the Android runtime yet: the Result fails with
-        ``unsupported native command``.
         """
         return self._invoke("bt_disconnect", address=str(address))
 
     def services(self, address: str) -> Result:
         """List the GATT services a connected peripheral exposes.
-
-        Not implemented by the Android runtime yet: the Result fails with
-        ``unsupported native command``.
         """
         return self._invoke("bt_services", address=str(address))
 
     def read(self, address: str, service: str, characteristic: str) -> Result:
         """Read a GATT characteristic.
-
-        Not implemented by the Android runtime yet: the Result fails with
-        ``unsupported native command``.
         """
         return self._invoke("bt_read", address=str(address),
                             service=str(service),
@@ -793,9 +737,6 @@ class Bluetooth(_Service):
     def write(self, address: str, service: str, characteristic: str,
               value: Any, *, response: bool = True) -> Result:
         """Write bytes to a GATT characteristic.
-
-        Not implemented by the Android runtime yet: the Result fails with
-        ``unsupported native command``.
         """
         if isinstance(value, (bytes, bytearray)):
             value = list(value)
@@ -807,9 +748,6 @@ class Bluetooth(_Service):
     def notify(self, address: str, service: str, characteristic: str, *,
                enabled: bool = True) -> Result:
         """Subscribe to notifications — they arrive as ``bluetooth`` events.
-
-        Not implemented by the Android runtime yet: the Result fails with
-        ``unsupported native command``.
         """
         return self._invoke("bt_notify", address=str(address),
                             service=str(service),
@@ -818,9 +756,6 @@ class Bluetooth(_Service):
 
     def bonded(self) -> Result:
         """Already-paired devices.
-
-        Not implemented by the Android runtime yet: the Result fails with
-        ``unsupported native command``.
         """
         return self._invoke("bt_bonded")
 
@@ -830,26 +765,17 @@ class Nfc(_Service):
 
     def available(self) -> Result:
         """Whether this device has NFC hardware, enabled.
-
-        Not implemented by the Android runtime yet: the Result fails with
-        ``unsupported native command``.
         """
         return self._invoke("nfc_available")
 
     def read(self, *, timeout: float = 30.0) -> Result:
         """Wait for a tag. Resolves with ``{"id", "techs", "records"}``.
-
-        Not implemented by the Android runtime yet: the Result fails with
-        ``unsupported native command``.
         """
         return self._invoke("nfc_read", timeout=float(timeout))
 
     def write(self, records: Sequence[dict], *,
               timeout: float = 30.0) -> Result:
         """Write NDEF records, e.g. ``[{"type": "text", "value": "hi"}]``.
-
-        Not implemented by the Android runtime yet: the Result fails with
-        ``unsupported native command``.
         """
         items = []
         for record in records:
@@ -864,9 +790,6 @@ class Nfc(_Service):
 
     def cancel(self) -> Result:
         """Cancel a pending NFC read/write.
-
-        Not implemented by the Android runtime yet: the Result fails with
-        ``unsupported native command``.
         """
         return self._invoke("nfc_cancel")
 
@@ -939,9 +862,6 @@ class Audio(_Service):
 
     def listen(self, *, locale: str = "", prompt: str = "") -> Result:
         """Speech-to-text. Resolves with the recognised string.
-
-        Not implemented by the Android runtime yet: the Result fails with
-        ``unsupported native command``.
         """
         return self._invoke("speech_listen", locale=locale, prompt=prompt)
 

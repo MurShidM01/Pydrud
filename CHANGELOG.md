@@ -2,6 +2,47 @@
 
 All notable changes to Pydrud are documented here.
 
+## [1.6.0] — Every native command implemented
+
+The Python API always exposed Bluetooth, NFC, camera extras, speech and
+friends, but 24 of those commands had no handler on the Android side and
+answered `unsupported native command`. **`UNIMPLEMENTED_COMMANDS` is now
+empty.**
+
+### Added
+* **Bluetooth Low Energy** (`page.bluetooth`) — adapter state, enabling,
+  scanning with service filters, GATT connect/disconnect, service discovery,
+  characteristic read/write and notifications. Discovered peripherals and
+  notification payloads arrive as `bluetooth` events (`App.on_bluetooth`).
+  Android 12 `BLUETOOTH_SCAN`/`BLUETOOTH_CONNECT` and the older
+  location-based permission model are both handled, and every failure path
+  answers the request instead of leaving it pending.
+* **NFC** (`page.nfc`) — availability, NDEF read and write (text, URI and
+  MIME records) through reader mode, with a timeout and `cancel()`.
+  Read-only, too-small and non-NDEF tags each report a clear error.
+* **Camera extras** (`page.camera`) — `flash()` (torch), `zoom()` clamped to
+  what the lens supports, `record()`/`stop_record()` to MP4 via CameraX
+  video, and continuous barcode/QR `scan()` powered by ML Kit, which emits
+  `scan` events per code. Recordings finalise with a `recording` event
+  (`App.on_recording`).
+* **Speech recognition** (`page.speech.listen()`) — the system recogniser,
+  with locale and prompt, resolving with the best transcript.
+* **Colour picker** (`page.dialog.color()`) — an RGB dialog with a live
+  swatch, returning `#AARRGGBB`.
+* **Continuous location** (`page.location.watch()`) — GPS/network updates at
+  an interval and distance filter, delivered as `location` events
+  (`App.on_location`), stopped with `stop_watch()`.
+* **Notification channels** (`page.notifications.channel()`) — importance,
+  description, vibration, lights and badge, a no-op below Android 8.
+* New generated classes `CaptureServices.java` and
+  `ConnectivityServices.java`, dispatched from `BridgeService` and disposed
+  with the Activity. New Gradle dependencies: `androidx.camera:camera-video`
+  and `com.google.mlkit:barcode-scanning`.
+* New permission aliases: `bluetooth_scan`, `bluetooth_advertise`,
+  `bluetooth_legacy`, `bluetooth_admin`, `background_location`, `activity`.
+
+Existing apps pick all of this up with `pydrud sync`.
+
 ## [1.5.2] — Build-time correctness
 
 A full audit of the generated Android layer and the Python↔Java contract.
