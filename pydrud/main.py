@@ -151,6 +151,9 @@ class App:
         self._desired_tree = new
         if not (self._connected and self._transport):
             return
+        if self._inflight:
+            self._render_pending = True
+            return
 
         base_revision = self._confirmed_revision
         self._desired_revision = max(self._desired_revision, base_revision) + 1
@@ -888,6 +891,9 @@ class App:
             self._confirmed_revision = revision
             if self._desired_tree is not None:
                 self._snapshot = self._desired_tree.clone()
+            if self._render_pending:
+                self._render_pending = False
+                self.update()
             return
 
         self._confirmed_revision = int(data.get("native_revision", 0) or 0)
