@@ -59,7 +59,7 @@ def main():
 @click.argument("name", default="my_app")
 @click.option("--org", default="com.example", help="Android package / organisation prefix.")
 @click.option("--min-sdk", default=24, help="Minimum Android API level.")
-@click.option("--target-sdk", default=35, help="Target Android API level.", show_default=True)
+@click.option("--target-sdk", default=36, help="Target Android API level.", show_default=True)
 @click.option("--accent", default=None, metavar="COLOR",
               help="Brand colour the whole UI is generated from, "
                    "e.g. --accent '#FF0EA5E9'.")
