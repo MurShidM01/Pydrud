@@ -129,5 +129,37 @@ class TestWidgetCoverage(unittest.TestCase):
                          "widgets with no native renderer: " + ", ".join(missing))
 
 
+class TestPreviewParity(unittest.TestCase):
+    """`tools/preview_ui.py` must agree with the renderer about layout.
+
+    The previewer exists to show what the device will draw; when its
+    fill-width list drifts from ``ViewFactory.fillsWidthByDefault`` it
+    quietly lies about every screen.
+    """
+
+    #: Types the renderer stretches through a dedicated branch rather than
+    #: the switch (they fill both axes).
+    SPECIAL = {"Stack", "Center"}
+
+    def test_fill_width_lists_match(self):
+        java = read(os.path.join(
+            "pydrud", "android", "templates", "android", "ViewFactory.java.j2"))
+        body = re.search(
+            r"fillsWidthByDefault\(String type\) \{(.*?)\n    \}",
+            java, re.S)
+        self.assertIsNotNone(body, "fillsWidthByDefault() not found")
+        native = set(re.findall(r'case "(\w+)"', body.group(1)))
+
+        preview = read(os.path.join("tools", "preview_ui.py"))
+        listing = re.search(r"FILL_BY_DEFAULT = \{(.*?)\}", preview, re.S)
+        self.assertIsNotNone(listing, "FILL_BY_DEFAULT not found")
+        previewed = set(re.findall(r'"(\w+)"', listing.group(1)))
+
+        self.assertEqual(set(), native - previewed,
+                         "renderer stretches types the previewer does not")
+        self.assertEqual(set(), previewed - native - self.SPECIAL,
+                         "previewer stretches types the renderer does not")
+
+
 if __name__ == "__main__":
     unittest.main()

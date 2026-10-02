@@ -293,6 +293,10 @@ kept in sync with the Java sources by `tests/test_native_coverage.py`:
 * **Misc** — `page.audio.listen()` (speech-to-text), `page.dialogs.color()`,
   `page.location.watch()`/`stop()`, `page.notifications.create_channel()`
 
+A few widget properties are also inert for now (the widget renders, the
+refinement is ignored) — see `pydrud.compatibility.NATIVE_IGNORED_PROPS`,
+e.g. `Chart(labels=…)`, `CircularProgress(stroke=…)`, `Rating(half=True)`.
+
 ### Data layer
 
 ```python

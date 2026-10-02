@@ -44,9 +44,28 @@ silent hang, a no-op, or a two-minute Gradle error.
   `test_native_events`, `test_build_preflight` — covering symbol resolution,
   command/event/widget parity between Python and Java, and the build guards.
 
+* **Awkward project names generated invalid Java.** `pydrud init 2cool`
+  wrote `public class 2coolActivity`; names are now normalised to real Java
+  and Python identifiers (`App2cool`, `app_2cool`), including non-ASCII and
+  punctuation-only names.
+* **The recorded Gradle version was wrong.** `pydrud.yaml` said 8.13 while
+  the wrapper downloaded 8.14.4; the wrapper, the properties file and the
+  compatibility matrix now share one value.
+* **Unbounded bridge buffering.** A stream with no line break could grow the
+  reader's buffer without limit; it is now dropped with a reported error
+  (mirroring the native 2 MiB frame cap).
+* **SQL identifiers are validated.** Table and column names cannot be bound
+  as parameters, so `Database`/`Model`/`Query` now reject anything that is
+  not a plain identifier instead of splicing it into the statement.
+
 ### Changed
 * `tools/check_java.py` now runs the symbol check after parsing, so CI fails
   on an unresolved cross-class call.
+* `buildPython` selection explains a version mismatch ("the app ships Python
+  3.11, you have 3.12 — Chaquopy will skip .pyc") instead of leaving the raw
+  Gradle warning unexplained.
+* `NATIVE_IGNORED_PROPS` records the widget properties the renderer does not
+  read yet, pinned in both directions by `tests/test_widget_props.py`.
 
 ## [Unreleased] — Runtime architecture and Android hardening
 

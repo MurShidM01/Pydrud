@@ -39,3 +39,23 @@ COMPATIBILITY = Compatibility(
     jdk_version=17,
     ndk_version="28.2.13676358",
 )
+
+
+#: Widget properties the Python API accepts but the native renderer does not
+#: read yet. They are inert — not errors — so they are listed here rather
+#: than removed: an app that sets them still renders, it just does not get
+#: that refinement. ``tests/test_widget_props.py`` asserts this ledger
+#: matches the generated Java exactly, in both directions, so the list can
+#: only shrink deliberately.
+NATIVE_IGNORED_PROPS: dict[str, tuple[str, ...]] = {
+    "Banner": ("severity",),
+    "Chart": ("labels", "showValues"),
+    "CircularProgress": ("stroke",),
+    "Form": ("fields", "submitted", "valid"),
+    "InfiniteList": ("total", "virtualized", "window"),
+    "MapView": ("interactive", "mapType", "provider"),
+    "Markdown": ("linkColor",),
+    "Rating": ("half",),
+    "ReorderableList": ("handle", "longPress"),
+    "VideoPlayer": ("aspectRatio",),
+}
