@@ -36,9 +36,9 @@ yet.
 * **State scheduling is explicit.** Watchers can marshal callbacks through the
   app scheduler, and `distinct=True` enables equal-value suppression without
   changing the default behavior.
-* **Task failures propagate.** Worker exceptions remain visible through the
-  returned future instead of being silently converted to a successful
-  `None` result.
+* **Task failures stay observable.** Worker exceptions remain attached to the
+  returned future via `exception()`, while legacy `.result()` stays non-raising
+  by default; callers can opt into raising with `propagate_exceptions=True`.
 * **Android project defaults are modernized.** Generated projects move to SDK
   36, AGP 8.13.2, Gradle 8.13 and Chaquopy 17.0.0, with Python 3.11/JDK 17
   defaults.
