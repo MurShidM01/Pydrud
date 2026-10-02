@@ -45,23 +45,82 @@ public final class PydrudTheme {
     private static float fontScale = 1.0f;
     private static int widthDp = 360;
     private static int heightDp = 640;
+    private static int widthPx = 720;
+    private static int heightPx = 1280;
+    private static float xdpi = 320f;
+    private static float ydpi = 320f;
+    /** Visible IME height in px, 0 when the keyboard is hidden. */
+    public static int keyboardPx = 0;
     /** Clamped width factor used to breathe on tablets without wrecking phones. */
     private static float adaptiveScale = 1.0f;
 
     public static void init(Context context) {
         if (context == null) return;
+        refreshMetrics(context);
+        Configuration cfg = context.getResources().getConfiguration();
+        boolean night = (cfg.uiMode & Configuration.UI_MODE_NIGHT_MASK)
+            == Configuration.UI_MODE_NIGHT_YES;
+        if (night && !explicitMode) useDark();
+    }
+
+    /**
+     * Re-read the window size, density and font scale.
+     *
+     * <p>Called on every configuration change (rotation, split screen,
+     * foldable unfold, font-size change) so dp maths and the adaptive
+     * scale always describe the window the user is actually looking at.
+     * Unlike {@link #init(Context)} this never touches the palette.
+     *
+     * @return true when something actually changed.
+     */
+    public static boolean refreshMetrics(Context context) {
+        if (context == null) return false;
+        float oldDensity = density;
+        int oldW = widthDp, oldH = heightDp;
+        float oldFont = fontScale;
+
         DisplayMetrics dm = context.getResources().getDisplayMetrics();
         density = dm.density <= 0 ? 2.0f : dm.density;
         Configuration cfg = context.getResources().getConfiguration();
         fontScale = cfg.fontScale <= 0 ? 1.0f : cfg.fontScale;
-        widthDp = (int) (dm.widthPixels / density);
-        heightDp = (int) (dm.heightPixels / density);
+        widthPx = dm.widthPixels;
+        heightPx = dm.heightPixels;
+        xdpi = dm.xdpi <= 0 ? density * 160f : dm.xdpi;
+        ydpi = dm.ydpi <= 0 ? density * 160f : dm.ydpi;
+
+        // The window (not the physical display) is what layouts must follow:
+        // in split screen or on a freeform desktop these differ a lot.
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            try {
+                android.view.WindowManager wm =
+                    (android.view.WindowManager) context.getSystemService(
+                        Context.WINDOW_SERVICE);
+                if (wm != null) {
+                    android.graphics.Rect bounds =
+                        wm.getCurrentWindowMetrics().getBounds();
+                    if (bounds.width() > 0 && bounds.height() > 0) {
+                        widthPx = bounds.width();
+                        heightPx = bounds.height();
+                    }
+                }
+            } catch (Throwable ignored) { }
+        }
+
+        // Configuration dp values already exclude system decorations, so
+        // prefer them and fall back to the pixel maths.
+        widthDp = cfg.screenWidthDp > 0 ? cfg.screenWidthDp
+                                        : (int) (widthPx / density);
+        heightDp = cfg.screenHeightDp > 0 ? cfg.screenHeightDp
+                                          : (int) (heightPx / density);
+        if (widthDp <= 0) widthDp = 360;
+        if (heightDp <= 0) heightDp = 640;
+
         int shortest = Math.min(widthDp, heightDp);
         float factor = shortest / 360f;
         adaptiveScale = Math.max(0.92f, Math.min(1.22f, factor));
-        boolean night = (cfg.uiMode & Configuration.UI_MODE_NIGHT_MASK)
-            == Configuration.UI_MODE_NIGHT_YES;
-        if (night && !explicitMode) useDark();
+
+        return oldW != widthDp || oldH != heightDp
+            || oldDensity != density || oldFont != fontScale;
     }
 
     /** dp → px. */
@@ -93,6 +152,35 @@ public final class PydrudTheme {
     public static float adaptiveScale() { return adaptiveScale; }
     public static boolean isTablet() { return Math.min(widthDp, heightDp) >= 600; }
     public static boolean isCompact() { return Math.min(widthDp, heightDp) < 360; }
+    public static int screenWidthPx()  { return widthPx; }
+    public static int screenHeightPx() { return heightPx; }
+    public static float xdpi() { return xdpi; }
+    public static float ydpi() { return ydpi; }
+    public static boolean isLandscape() { return widthDp > heightDp; }
+
+    /** The Material 3 window size class of the current window. */
+    public static String breakpoint() {
+        if (widthDp >= 1600) return "xlarge";
+        if (widthDp >= 1200) return "large";
+        if (widthDp >= 840) return "expanded";
+        if (widthDp >= 600) return "medium";
+        return "compact";
+    }
+
+    /** {@code percent}% of the window width, in px. */
+    public static int percentWidth(float percent) {
+        return Math.round(widthDp * density * percent / 100f);
+    }
+
+    /** {@code percent}% of the window height, in px. */
+    public static int percentHeight(float percent) {
+        return Math.round(heightDp * density * percent / 100f);
+    }
+
+    /** {@code percent}% of the shortest window side, in px. */
+    public static int percentShortest(float percent) {
+        return Math.round(Math.min(widthDp, heightDp) * density * percent / 100f);
+    }
 
     // ── colour roles ─────────────────────────────────────────────────────
 
@@ -142,6 +230,17 @@ public final class PydrudTheme {
             primaryContainer = color(scheme, "primary_container", primaryContainer);
         }
         applyTokens(scheme.optJSONObject("tokens"));
+    }
+
+    /**
+     * Follow the system dark-mode switch.
+     *
+     * <p>Ignored once Python has pushed an explicit {@code dark} flag, so an
+     * app that forces a palette keeps it across configuration changes.
+     */
+    public static void setNight(boolean night) {
+        if (explicitMode || night == dark) return;
+        if (night) useDark(); else useLight();
     }
 
     public static void useLight() {

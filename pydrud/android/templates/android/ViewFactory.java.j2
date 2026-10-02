@@ -209,6 +209,13 @@ public class ViewFactory {
         for (Map.Entry<View, int[]> entry : safeAreaViews.entrySet()) {
             applySafeAreaPadding(entry.getKey(), entry.getValue());
         }
+        // Navigation bars size themselves from the gesture inset and the
+        // window metrics, so they have to recompute after a rotation.
+        for (View view : viewMap.values()) {
+            if (view instanceof PydrudNavigation.PydrudNavBar) {
+                ((PydrudNavigation.PydrudNavBar) view).refreshMetrics();
+            }
+        }
     }
 
     /** spec = {wantTop, wantBottom, basePaddingTop, basePaddingBottom}. */
@@ -1245,6 +1252,14 @@ public class ViewFactory {
             if (orientation == LinearLayout.VERTICAL) lp.width = LinearLayout.LayoutParams.MATCH_PARENT;
             else lp.height = LinearLayout.LayoutParams.MATCH_PARENT;
         }
+        // A width-capped child centres itself in the leftover space instead
+        // of hugging the start edge — the "readable column" layout.
+        JSONObject cs = json != null ? json.optJSONObject("style") : null;
+        if (cs != null && cs.has("maxWidth") && !cs.has("alignment")
+                && orientation == LinearLayout.VERTICAL
+                && lp.width != LinearLayout.LayoutParams.MATCH_PARENT) {
+            lp.gravity = Gravity.CENTER_HORIZONTAL;
+        }
         return lp;
     }
 
@@ -1302,6 +1317,20 @@ public class ViewFactory {
         if (s != null) {
             if (s.has("width"))  w = dimension(s, "width", w);
             if (s.has("height")) h = dimension(s, "height", h);
+            // maxWidth / maxHeight cap a stretched child on big screens, so
+            // a form on a tablet stays readable instead of spanning 1200dp.
+            if (s.has("maxWidth")) {
+                int max = dimension(s, "maxWidth", -1);
+                int current = (w == ViewGroup.LayoutParams.MATCH_PARENT)
+                    ? PydrudTheme.screenWidthPx() : w;
+                if (max > 0 && current > max) w = max;
+            }
+            if (s.has("maxHeight")) {
+                int max = dimension(s, "maxHeight", -1);
+                int current = (h == ViewGroup.LayoutParams.MATCH_PARENT)
+                    ? PydrudTheme.screenHeightPx() : h;
+                if (max > 0 && current > max) h = max;
+            }
         }
         return new ViewGroup.LayoutParams(w, h);
     }
@@ -1334,23 +1363,71 @@ public class ViewFactory {
         view.setLayoutParams(lp);
     }
 
-    /** Parse "match" / "wrap" / a dp number from a style field. */
+    /**
+     * Parse a size from a style field.
+     *
+     * <p>Accepted forms — all resolved against the *current* window, so
+     * they stay correct after a rotation or a split-screen resize:
+     *
+     * <ul>
+     *   <li>{@code 120} or {@code "120"} — dp</li>
+     *   <li>{@code "match"} / {@code "fill"} — MATCH_PARENT</li>
+     *   <li>{@code "wrap"} / {@code "auto"} — WRAP_CONTENT</li>
+     *   <li>{@code "50%"} — percent of the window on this axis</li>
+     *   <li>{@code "50%w"} / {@code "50%h"} — percent of width / height</li>
+     *   <li>{@code "50%s"} — percent of the shortest side (square-ish art)</li>
+     *   <li>{@code "40vw"} / {@code "40vh"} — CSS-style viewport units</li>
+     *   <li>{@code "100px"} — raw pixels, no density scaling</li>
+     * </ul>
+     */
     private int dimension(JSONObject s, String name, int fallback) {
         Object raw = s.opt(name);
         if (raw == null) return fallback;
-        if (raw instanceof String) {
-            String str = (String) raw;
-            if ("match".equals(str) || "match_parent".equals(str) || "fill".equals(str)) {
-                return ViewGroup.LayoutParams.MATCH_PARENT;
-            }
-            if ("wrap".equals(str) || "wrap_content".equals(str) || "auto".equals(str)) {
-                return ViewGroup.LayoutParams.WRAP_CONTENT;
-            }
-            try { return dp((int) Double.parseDouble(str)); }
-            catch (NumberFormatException e) { return fallback; }
-        }
         if (raw instanceof Number) return dp((int) Math.round(((Number) raw).doubleValue()));
-        return fallback;
+        if (!(raw instanceof String)) return fallback;
+
+        String str = ((String) raw).trim().toLowerCase(java.util.Locale.US);
+        if (str.isEmpty()) return fallback;
+        if (str.equals("match") || str.equals("match_parent") || str.equals("fill")
+            || str.equals("100%") || str.equals("expand")) {
+            return ViewGroup.LayoutParams.MATCH_PARENT;
+        }
+        if (str.equals("wrap") || str.equals("wrap_content") || str.equals("auto")) {
+            return ViewGroup.LayoutParams.WRAP_CONTENT;
+        }
+
+        boolean vertical = "height".equals(name) || "minHeight".equals(name);
+        try {
+            if (str.endsWith("%w") || str.endsWith("%h") || str.endsWith("%s")) {
+                char axis = str.charAt(str.length() - 1);
+                float pct = Float.parseFloat(str.substring(0, str.length() - 2));
+                if (axis == 'w') return PydrudTheme.percentWidth(pct);
+                if (axis == 'h') return PydrudTheme.percentHeight(pct);
+                return PydrudTheme.percentShortest(pct);
+            }
+            if (str.endsWith("vw")) {
+                return PydrudTheme.percentWidth(
+                    Float.parseFloat(str.substring(0, str.length() - 2)));
+            }
+            if (str.endsWith("vh")) {
+                return PydrudTheme.percentHeight(
+                    Float.parseFloat(str.substring(0, str.length() - 2)));
+            }
+            if (str.endsWith("%")) {
+                float pct = Float.parseFloat(str.substring(0, str.length() - 1));
+                return vertical ? PydrudTheme.percentHeight(pct)
+                                : PydrudTheme.percentWidth(pct);
+            }
+            if (str.endsWith("px")) {
+                return Math.round(Float.parseFloat(str.substring(0, str.length() - 2)));
+            }
+            if (str.endsWith("dp")) {
+                return dp(Float.parseFloat(str.substring(0, str.length() - 2)));
+            }
+            return dp((float) Double.parseDouble(str));
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
     }
 
     /** Attach a freshly created view to a parent with correct layout params. */
@@ -1591,6 +1668,25 @@ public class ViewFactory {
             try { node.put("events", p.getJSONArray("_events")); }
             catch (JSONException ignored) {}
             bindEvents(view, node);
+        }
+
+        // Pydrud-drawn navigation surfaces patch themselves, so changing the
+        // selected destination is one small update instead of a rebuild.
+        if (view instanceof PydrudNavigation.PydrudNavBar) {
+            ((PydrudNavigation.PydrudNavBar) view).applyProps(p);
+            return;
+        }
+        if (view instanceof PydrudNavigation.PydrudTabBar) {
+            ((PydrudNavigation.PydrudTabBar) view).applyProps(p);
+            return;
+        }
+        if (view instanceof LinearLayout && ((LinearLayout) view).getChildCount() > 0
+                && ((LinearLayout) view).getChildAt(0)
+                    instanceof PydrudNavigation.PydrudTabBar) {
+            // Tabs = a tab strip plus the selected tab's content below it.
+            ((PydrudNavigation.PydrudTabBar) ((LinearLayout) view).getChildAt(0))
+                .applyProps(p);
+            return;
         }
 
         if (view instanceof Spinner) {

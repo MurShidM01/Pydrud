@@ -2,6 +2,70 @@
 
 All notable changes to Pydrud are documented here.
 
+## [1.5.0] — The responsive release
+
+Layouts now follow the device instead of guessing. Pydrud reads the real
+window metrics, re-reads them on every change, and ships navigation
+surfaces you can style down to the pixel.
+
+### Added — responsiveness that actually detects the device
+* **Live metrics.** Android sends a `metrics` event on every window
+  change — rotation, split screen, foldable unfold, font-scale change,
+  new insets, keyboard show/hide — and Python refreshes `MediaQuery`,
+  notifies listeners and re-renders. Previously the screen size was read
+  once at startup, so a rotated phone kept its portrait layout.
+* **`MediaQuery` rebuilt.** Resolution in dp *and* pixels, density, dpi,
+  orientation, device type (phone/tablet/desktop/tv/watch), window size
+  class, shortest/longest side, aspect ratio, diagonal, refresh rate,
+  dark mode, safe-area insets and keyboard height. Read them as
+  attributes (`MediaQuery.width`), as a dict (`MediaQuery.of()`) or as an
+  immutable `ScreenInfo` snapshot (`MediaQuery.info()`).
+* `MediaQuery.matches(min_width=…, orientation=…, device=…)` — CSS-style
+  media queries, plus `at_least()`, `at_most()`, `viewport()` and
+  `safe_area()`.
+* `MediaQuery.listen(callback)` and `App.on_metrics_change(callback)` for
+  code that needs to react to a resize.
+* **`Breakpoints`** — the size-class table (compact / medium / expanded /
+  large / xlarge) is now customisable: `Breakpoints.configure(medium=620)`.
+* **`Responsive`** gained percent units (`wp` `hp` `vw` `vh` `sw`), pixel
+  conversion (`px` `to_px`), accessibility-capped `sp()`, `grid()`,
+  `gutter()`, `at_least()`/`at_most()`, and `configure()` to tune the
+  scaling clamp and basis (width / shortest side / diagonal). Scaling is
+  based on the shortest side by default, so a rotated phone no longer
+  inflates every font.
+* **New widgets**: `ResponsiveBuilder`, `AdaptiveLayout`, `ResponsiveGrid`,
+  `ShowWhen` and `SafeArea` — all resolved against live metrics.
+* **Responsive sizes in styles.** The renderer now understands `"50%"`,
+  `"50%w"`, `"50%h"`, `"50%s"`, `"40vw"`, `"40vh"`, `"120px"` and `"16dp"`
+  anywhere a width/height is accepted, plus `maxWidth`/`maxHeight` caps
+  that centre a readable column on big screens.
+* Android: `PydrudTheme.refreshMetrics()` re-reads the *window* metrics
+  (not the display) via `WindowMetrics` on API 30+, the activity handles
+  `density`, `fontScale`, `smallestScreenSize` and `layoutDirection`
+  changes without being recreated, and display cutouts are included in
+  the safe area.
+
+### Added — bottom navigation and tabs you can really customise
+* **Pydrud draws the bottom bar itself** (`PydrudNavBar`), so every
+  property changes the pixels: height, background, corner radius,
+  elevation, floating margin, border, top divider, indicator shape
+  (`pill` / `circle` / `line` / `dot` / `none`) with its own size, colour
+  and radius, per-item colours, active icons, badges with custom colours,
+  label behaviour (`always` / `selected` / `never`), icon and label sizes,
+  ripple, motion duration, haptics and `fixed`/`shifting` behaviour.
+  `native=True` falls back to Android's `BottomNavigationView`.
+* The bar draws its own gesture inset and floating margin, so it looks
+  identical on gesture-navigation and button-navigation devices.
+* **`Tabs` / `TabBar`** gained the full Flutter-style knob set: fixed or
+  scrollable, indicator style/size/colour/height/radius, label and icon
+  colours per state, per-tab overrides and badges, icon position, tab
+  height and min width, alignment, divider, ripple and motion.
+* `NavigationBar` and `TabBar` aliases, `NavItem(active_icon=…,
+  badge_color=…, tooltip=…)`, `Tab(color=…, badge_color=…)`, plus
+  `select()`, `select_route()` and `badge()` helpers.
+* Selecting a destination is now a small patch: both surfaces implement
+  `applyProps()` instead of being rebuilt.
+
 ## [1.4.0] — The design release
 
 Everything you see on screen was rebuilt. Pydrud now ships a real design

@@ -73,6 +73,7 @@ class App:
         self._lock = threading.Lock()
         # ── Router support ─────────────────────────────────────────
         self._router: Optional[Any] = None
+        self._metrics_handlers: list = []
         # ── Hot Reload ─────────────────────────────────────────────
         self._watcher: Optional[Any] = None
         self._watch_dirs: list[str] = ["src"]
@@ -743,6 +744,12 @@ class App:
             self._handle_ready(data)
             return
 
+        if etype == "metrics":
+            # The window changed: rotation, split screen, foldable unfold,
+            # font-scale change, keyboard, new insets.
+            self._handle_metrics(data)
+            return
+
         if etype == "back":
             handled = False
             if self._router is not None:
@@ -804,24 +811,59 @@ class App:
             self._report_error(exc)
 
     def _handle_ready(self, d: dict) -> None:
-        from pydrud.core.responsive import MediaQuery as _MQ
-        from pydrud.core.responsive import Responsive as _R
-
-        width = d.get("width", 360)
-        height = d.get("height", 640)
-        density = d.get("density", 2.0)
-        _R.init(width_dp=width, height_dp=height, density=density,
-                text_scale=d.get("text_scale", 1.0))
-        _MQ.init(
-            width_dp=width,
-            height_dp=height,
-            density=density,
-            status_bar_height=d.get("status_bar_height", 24),
-            text_scale=d.get("text_scale", 1.0),
-            navigation_bar_height=d.get("navigation_bar_height", 0),
-        )
+        """First contact: store the device metrics and render for real."""
+        self._apply_metrics(d)
         # Device metrics may change the layout — re-render with real sizes.
         self.render()
+
+    def _handle_metrics(self, d: dict) -> None:
+        """The window changed (rotation, resize, insets, font scale).
+
+        Only re-render when something actually moved, so a stream of
+        identical inset callbacks does not thrash the view tree.
+        """
+        if not self._apply_metrics(d):
+            return
+        for cb in list(self._metrics_handlers):
+            try:
+                cb(_MQ_INFO())
+            except Exception as exc:
+                self._report_error(exc)
+        self.render()
+
+    def _apply_metrics(self, d: dict) -> bool:
+        """Feed a ``ready``/``metrics`` payload into MediaQuery + Responsive."""
+        from pydrud.core.responsive import MediaQuery as _MQ
+
+        payload = {k: v for k, v in dict(d or {}).items() if v is not None}
+        payload.setdefault("width", 360)
+        payload.setdefault("height", 640)
+        payload.setdefault("density", 2.0)
+        try:
+            return _MQ.update(**payload)
+        except Exception as exc:
+            self._report_error(exc)
+            return False
+
+    def on_metrics_change(self, callback):
+        """Run *callback(ScreenInfo)* whenever the window size changes.
+
+        ::
+
+            @app.on_metrics_change
+            def _(info):
+                print(info.width, info.orientation, info.breakpoint)
+        """
+        if not callable(callback):
+            raise TypeError("on_metrics_change() expects a callable")
+        self._metrics_handlers.append(callback)
+        return callback
+
+
+def _MQ_INFO():
+    from pydrud.core.responsive import MediaQuery as _MQ
+
+    return _MQ.info()
 
 
 class _Page:

@@ -111,8 +111,15 @@ def shell(page, *, title, body, key, actions=None, fab=None):
         key=key,
         app_bar=AppBar(title=title, key=f"{key}_bar", actions=actions or []),
         body=body,
+        # Every visual property of the bar is yours: height, radius,
+        # indicator shape, label behaviour, colours, motion.
         bottom_navigation=None if Responsive.is_tablet() else BottomNavigationBar(
-            DESTINATIONS, key=f"{key}_nav", selected=index, on_change=_navigate),
+            DESTINATIONS, key=f"{key}_nav", selected=index, on_change=_navigate,
+            height=Responsive.value(compact=64, medium=72),
+            indicator="pill", indicator_width=Responsive.w(64),
+            indicator_height=Responsive.h(32),
+            label_behavior="always", label_size=11, selected_label_size=11,
+            top_divider=True, animate=True, haptic=True),
         navigation_rail=NavigationRail(
             DESTINATIONS, key=f"{key}_rail", selected=index,
             on_change=_navigate) if Responsive.is_tablet() else None,

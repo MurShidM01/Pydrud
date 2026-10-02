@@ -53,6 +53,8 @@ public class BridgeService {
     private volatile OutputStreamWriter writer;
     private volatile boolean running = false;
     private final CountDownLatch listeningLatch = new CountDownLatch(1);
+    /** Last metrics payload we sent, so identical updates are dropped. */
+    private volatile String lastMetrics = "";
     private final ExecutorService writeExecutor = Executors.newSingleThreadExecutor();
 
     public BridgeService({{ app_name }}Activity activity,
@@ -162,35 +164,116 @@ public class BridgeService {
 
     private void sendReady() {
         try {
-            DisplayMetrics dm = activity.getResources().getDisplayMetrics();
-            int widthDp = (int) (dm.widthPixels / dm.density);
-            int heightDp = (int) (dm.heightPixels / dm.density);
-
-            int statusBarPx = 0;
-            int statusId = activity.getResources()
-                .getIdentifier("status_bar_height", "dimen", "android");
-            if (statusId > 0) {
-                statusBarPx = activity.getResources().getDimensionPixelSize(statusId);
-            }
-            int navBarPx = 0;
-            int navId = activity.getResources()
-                .getIdentifier("navigation_bar_height", "dimen", "android");
-            if (navId > 0) {
-                navBarPx = activity.getResources().getDimensionPixelSize(navId);
-            }
-
-            JSONObject data = new JSONObject();
-            data.put("width", widthDp);
-            data.put("height", heightDp);
-            data.put("density", dm.density);
-            data.put("status_bar_height", (int) (statusBarPx / dm.density));
-            data.put("navigation_bar_height", (int) (navBarPx / dm.density));
-            data.put("text_scale", activity.getResources().getConfiguration().fontScale);
-            data.put("sdk", android.os.Build.VERSION.SDK_INT);
-            sendEvent("ready", "", data);
+            sendEvent("ready", "", collectMetrics());
         } catch (Exception e) {
             Log.e(TAG, "Failed to send ready event", e);
         }
+    }
+
+    /**
+     * Tell Python the window changed.
+     *
+     * <p>Fired on rotation, split-screen resize, foldable unfold, font-scale
+     * changes, new insets and keyboard show/hide. Python refreshes
+     * MediaQuery/Responsive and re-renders, so layouts follow the real
+     * device resolution instead of the one we saw at startup. Duplicate
+     * payloads are dropped, so a storm of inset callbacks costs nothing.
+     */
+    public void sendMetrics(String reason) {
+        if (!isConnected()) return;
+        try {
+            PydrudTheme.refreshMetrics(activity);
+            JSONObject data = collectMetrics();
+            data.put("reason", reason == null ? "configuration" : reason);
+            String fingerprint = fingerprintOf(data);
+            if (fingerprint.equals(lastMetrics)) return;
+            lastMetrics = fingerprint;
+            if (viewFactory != null) viewFactory.refreshInsets();
+            sendEvent("metrics", "", data);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to send metrics event", e);
+        }
+    }
+
+    public void sendMetrics() { sendMetrics("configuration"); }
+
+    /** Everything Python's MediaQuery knows about this device. */
+    private JSONObject collectMetrics() throws JSONException {
+        PydrudTheme.refreshMetrics(activity);
+
+        DisplayMetrics dm = activity.getResources().getDisplayMetrics();
+        float density = PydrudTheme.density();
+        int widthDp = PydrudTheme.screenWidthDp();
+        int heightDp = PydrudTheme.screenHeightDp();
+
+        int statusBarPx = PydrudTheme.insetTop;
+        int navBarPx = PydrudTheme.insetBottom;
+        if (statusBarPx <= 0) statusBarPx = systemDimen("status_bar_height");
+        if (navBarPx <= 0) navBarPx = systemDimen("navigation_bar_height");
+
+        android.content.res.Configuration cfg =
+            activity.getResources().getConfiguration();
+        boolean night = (cfg.uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+            == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+        int uiType = cfg.uiMode & android.content.res.Configuration.UI_MODE_TYPE_MASK;
+
+        float refresh = 60f;
+        try {
+            android.view.Display display = activity.getWindowManager().getDefaultDisplay();
+            if (display != null && display.getRefreshRate() > 0) {
+                refresh = display.getRefreshRate();
+            }
+        } catch (Throwable ignored) { }
+
+        JSONObject data = new JSONObject();
+        data.put("width", widthDp);
+        data.put("height", heightDp);
+        data.put("width_px", PydrudTheme.screenWidthPx());
+        data.put("height_px", PydrudTheme.screenHeightPx());
+        data.put("density", density);
+        data.put("dpi", dm.densityDpi);
+        data.put("xdpi", PydrudTheme.xdpi());
+        data.put("ydpi", PydrudTheme.ydpi());
+        data.put("status_bar_height", Math.round(statusBarPx / density));
+        data.put("navigation_bar_height", Math.round(navBarPx / density));
+        data.put("padding_top", Math.round(PydrudTheme.insetTop / density));
+        data.put("padding_bottom", Math.round(PydrudTheme.insetBottom / density));
+        data.put("padding_left", Math.round(PydrudTheme.insetLeft / density));
+        data.put("padding_right", Math.round(PydrudTheme.insetRight / density));
+        data.put("keyboard_height", Math.round(PydrudTheme.keyboardPx / density));
+        data.put("text_scale", cfg.fontScale);
+        data.put("orientation",
+            cfg.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+                ? "landscape" : "portrait");
+        data.put("smallest_width", cfg.smallestScreenWidthDp);
+        data.put("breakpoint", PydrudTheme.breakpoint());
+        data.put("dark", night);
+        data.put("refresh_rate", refresh);
+        data.put("ui_mode",
+            uiType == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION ? "television"
+            : uiType == android.content.res.Configuration.UI_MODE_TYPE_WATCH ? "watch"
+            : uiType == android.content.res.Configuration.UI_MODE_TYPE_DESK ? "desk"
+            : uiType == android.content.res.Configuration.UI_MODE_TYPE_CAR ? "car"
+            : "normal");
+        data.put("sdk", android.os.Build.VERSION.SDK_INT);
+        data.put("model", android.os.Build.MODEL);
+        return data;
+    }
+
+    private int systemDimen(String name) {
+        try {
+            int id = activity.getResources().getIdentifier(name, "dimen", "android");
+            if (id > 0) return activity.getResources().getDimensionPixelSize(id);
+        } catch (Throwable ignored) { }
+        return 0;
+    }
+
+    private String fingerprintOf(JSONObject d) {
+        return d.optInt("width") + "x" + d.optInt("height")
+            + "@" + d.optDouble("density") + "/" + d.optDouble("text_scale")
+            + "|" + d.optInt("padding_top") + "," + d.optInt("padding_bottom")
+            + "," + d.optInt("padding_left") + "," + d.optInt("padding_right")
+            + "|" + d.optInt("keyboard_height") + "|" + d.optBoolean("dark");
     }
 
     // ── Message handling ──────────────────────────────────────────────────
