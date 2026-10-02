@@ -33,6 +33,10 @@ class Subscription:
 
     dispose = cancel
 
+    def __call__(self) -> None:
+        """Backward-compatible alias for legacy ``unsubscribe = subscribe(...)`` patterns."""
+        self.cancel()
+
     def __enter__(self) -> "Subscription":
         return self
 
