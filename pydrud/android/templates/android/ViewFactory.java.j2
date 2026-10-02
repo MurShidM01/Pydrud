@@ -289,6 +289,18 @@ public class ViewFactory {
             String key = json.optString("key", "");
             View view;
 
+            ViewElement reusable = key.isEmpty() ? null : elementMap.get(key);
+            if (reusable != null && reusable.type.equals(type) && isReusableType(type)) {
+                view = reusable.view;
+                if (view.getParent() instanceof ViewGroup) ((ViewGroup) view.getParent()).removeView(view);
+                nodeMap.put(key, json);
+                updateProps(view, props(json), json);
+                applyStyle(view, json.optJSONObject("style"));
+                applySafeArea(view, json.optJSONObject("style"));
+                applySize(view, json.optJSONObject("style"));
+                return view;
+            }
+
             switch (type) {
                 case "Container":
                 case "Center":
