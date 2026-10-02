@@ -214,7 +214,7 @@ def _detect_build_python(target: str = APP_PYTHON_VERSION) -> str:
     """
     import subprocess
 
-    preferred = [target] if target in BUILD_PYTHON_VERSIONS else []
+    preferred = [target] if target else []
     supported = preferred + [v for v in BUILD_PYTHON_VERSIONS
                              if v not in preferred]
     candidates = [f"python{v}" for v in supported]
