@@ -25,6 +25,40 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, Callable, Optional
 
 
+class PydrudFuture:
+    """Future facade that preserves failures while supporting legacy result semantics."""
+
+    def __init__(self, future: Future, *, propagate_exceptions: bool = False):
+        self._future = future
+        self._propagate_exceptions = bool(propagate_exceptions)
+
+    def result(self, timeout: float | None = None):
+        try:
+            return self._future.result(timeout=timeout)
+        except BaseException:
+            if self._propagate_exceptions:
+                raise
+            return None
+
+    def exception(self, timeout: float | None = None):
+        return self._future.exception(timeout=timeout)
+
+    def done(self) -> bool:
+        return self._future.done()
+
+    def cancelled(self) -> bool:
+        return self._future.cancelled()
+
+    def cancel(self) -> bool:
+        return self._future.cancel()
+
+    def add_done_callback(self, fn):
+        return self._future.add_done_callback(fn)
+
+    def __getattr__(self, name):
+        return getattr(self._future, name)
+
+
 class TaskRunner:
     """Runs callables (and coroutines) off the UI thread."""
 
@@ -40,14 +74,15 @@ class TaskRunner:
 
     # ── tasks ────────────────────────────────────────────────────────────
 
-    def run(self, fn: Callable, *args, **kwargs) -> Future:
+    def run(self, fn: Callable, *args, **kwargs) -> PydrudFuture:
         """Run *fn* on a worker thread and return a :class:`Future`.
 
         Coroutine functions are executed in a private event loop, so
         ``async def`` handlers work without the user managing asyncio.
         """
         pool = self._ensure_pool()
-        return pool.submit(self._invoke, fn, args, kwargs)
+        future = pool.submit(self._invoke, fn, args, kwargs)
+        return PydrudFuture(future, propagate_exceptions=self._propagate_exceptions)
 
     def _invoke(self, fn: Callable, args: tuple, kwargs: dict) -> Any:
         try:
@@ -63,9 +98,7 @@ class TaskRunner:
             return value
         except BaseException as exc:  # noqa: BLE001 - report, then preserve Future failure
             self._report(exc)
-            if self._propagate_exceptions:
-                raise
-            return None
+            raise
 
     # ── timers ───────────────────────────────────────────────────────────
 
