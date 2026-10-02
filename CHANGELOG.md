@@ -61,9 +61,10 @@ yet.
 * **Backward-compatible subscriptions.** Subscription handles are callable,
   preserving existing `off()` / `unsubscribe()` usage while supporting explicit
   `.cancel()` / `.dispose()`.
-* **Task error compatibility.** Legacy `TaskRunner` behavior still reports
-  worker errors without raising from `.result()`; strict propagation is available
-  with `propagate_exceptions=True`.
+* **Task error compatibility.** Worker failures remain available from the
+  underlying future via `exception()`, while legacy `.result()` behavior stays
+  non-raising by default; strict propagation is available with
+  `propagate_exceptions=True`.
 * Reduced the chance of Python state racing ahead of the last native render
   acknowledgement during rapid successive updates.
 * Prevented duplicate widget identity from silently collapsing keyed diff
