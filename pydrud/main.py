@@ -159,7 +159,11 @@ class App:
             return
         if self._inflight:
             self._render_pending = True
+            if force_snapshot:
+                self._render_pending_force_snapshot = True
             return
+        force_snapshot = force_snapshot or getattr(self, "_render_pending_force_snapshot", False)
+        self._render_pending_force_snapshot = False
         desired = self._desired_tree
         if desired is None:
             return
@@ -882,7 +886,7 @@ class App:
                 self._snapshot = sent_tree.clone()
             if self._render_pending:
                 self._render_pending = False
-                self.update()
+                self._send_desired_tree()
             return
 
         self._confirmed_revision = int(data.get("native_revision", 0) or 0)
