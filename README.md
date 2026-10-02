@@ -546,8 +546,8 @@ pydrud build    # proxy forwarded to Gradle automatically
 | Widget | Description | Key Props |
 |--------|-------------|-----------|
 | `Container` | Box with padding, margin, bg, border-radius | `child`, `padding`, `margin`, `bg`, `border_radius`, `width`, `height`, `alignment`, `expand` |
-| `Column` | Vertical flex layout | `children`, `spacing`, `horizontal_alignment`, `scroll`, `expand` |
-| `Row` | Horizontal flex layout | `children`, `spacing`, `vertical_alignment`, `expand` |
+| `Column` | Vertical flex layout | `children`, `spacing`, `horizontal_alignment`, `vertical_alignment` (main axis: `top`/`center`/`bottom`), `scroll`, `expand` |
+| `Row` | Horizontal flex layout | `children`, `spacing`, `vertical_alignment`, `horizontal_alignment` (main axis: `start`/`center`/`end`), `expand` |
 | `Center` | Centres its child | `child`, `expand` |
 | `Spacer` | Flexible empty space | `expand` (default 1) |
 | `Divider` | Horizontal / vertical line | `color`, `thickness` |

@@ -150,7 +150,7 @@ class AppBar(Widget):
         return Container(
             key=f"{self.key}.{suffix}",
             padding=EdgeInsets.all(12),
-            style={"radius": 24, "feedback": True},
+            style={"borderRadius": 24, "feedback": True},
             child=child,
         )
 
