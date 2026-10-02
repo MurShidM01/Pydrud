@@ -37,16 +37,36 @@ class _ReloadHandler(FileSystemEventHandler if _HAS_WATCHDOG else object):
         self._debounce: dict[str, float] = {}
         self._debounce_sec = debounce
 
+    def _fire(self, path: str) -> None:
+        if not path or not str(path).endswith(_EXTENSIONS):
+            return
+        if any(part in _IGNORED_DIRS for part in str(path).split(os.sep)):
+            return
+        now = time.time()
+        if now - self._debounce.get(path, 0) <= self._debounce_sec:
+            return
+        self._debounce[path] = now
+        try:
+            self.callback(path)
+        except Exception as exc:
+            print(f"[Pydrud] Watcher callback error: {exc}")
+
     def on_modified(self, event):
-        if not event.is_directory and event.src_path.endswith(_EXTENSIONS):
-            now = time.time()
-            last = self._debounce.get(event.src_path, 0)
-            if now - last > self._debounce_sec:
-                self._debounce[event.src_path] = now
-                try:
-                    self.callback(event.src_path)
-                except Exception as exc:
-                    print(f"[Pydrud] Watcher callback error: {exc}")
+        if not event.is_directory:
+            self._fire(event.src_path)
+
+    def on_created(self, event):
+        """A brand-new module must trigger a reload too."""
+        if not event.is_directory:
+            self._fire(event.src_path)
+
+    def on_moved(self, event):
+        """Most editors save atomically: write a temp file, then rename it.
+
+        Without this hook, saving from vim/PyCharm never reloaded.
+        """
+        if not event.is_directory:
+            self._fire(getattr(event, "dest_path", "") or event.src_path)
 
 
 class FileWatcher:
@@ -73,6 +93,7 @@ class FileWatcher:
         self._thread: Optional[threading.Thread] = None
         self._running = False
         self._mtimes: dict[str, float] = {}
+        self._scanned = False
         self._last_fired: dict[str, float] = {}
         self.debounce = debounce
 
@@ -107,6 +128,7 @@ class FileWatcher:
         while self._running:
             for path in self.paths:
                 self._walk_and_check(path)
+            self._scanned = True
             time.sleep(self.poll_interval)
 
     def _walk_and_check(self, directory: str) -> None:
@@ -123,7 +145,9 @@ class FileWatcher:
                     except OSError:
                         continue
                     last = self._mtimes.get(fpath, 0)
-                    if last > 0 and mtime > last:
+                    # After the first scan, an unseen file is a *new* module
+                    # and must trigger a reload just like an edited one.
+                    if (mtime > last) if self._scanned else (last > 0 and mtime > last):
                         now = time.time()
                         if now - self._last_fired.get(fpath, 0) > self.debounce:
                             self._last_fired[fpath] = now
@@ -132,7 +156,7 @@ class FileWatcher:
                             except Exception as exc:
                                 print(f"[Pydrud] Watcher callback error: {exc}")
                     self._mtimes[fpath] = mtime
-        except Exception:
+        except OSError:
             pass
 
     def stop(self) -> None:

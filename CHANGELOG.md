@@ -32,6 +32,11 @@ silent hang, a no-op, or a two-minute Gradle error.
   immediately even with no subscribers.
 * **Selector leak.** `Store.select()` kept every selector forever;
   `Selector.dispose()` (and `Store.unselect()`) detach one.
+* **Hot reload missed most saves.** The watchdog handler only listened for
+  `on_modified`, but vim/PyCharm (and most editors) save atomically by
+  renaming a temp file — those arrived as `on_moved` and were dropped, as were
+  newly created modules. The polling fallback ignored new files too.
+* **`Responsive.configure()` no longer half-applies a rejected call.**
 * **`pydrud run` no longer fails to compile.** `ViewFactory` called
   `AdvancedViews.setEventDispatcher()` and `ViewFactory.isReusableType()`,
   neither of which existed. Added the late-binding setter (matching

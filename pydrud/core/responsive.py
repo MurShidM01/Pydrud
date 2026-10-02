@@ -626,15 +626,16 @@ class Responsive:
         ``"shortest"`` with the shortest side (stable across rotation,
         the default) and ``"diagonal"`` with the screen diagonal.
         """
-        if min_factor is not None:
-            cls._MIN_FACTOR = float(min_factor)
-        if max_factor is not None:
-            cls._MAX_FACTOR = float(max_factor)
-        if cls._MIN_FACTOR > cls._MAX_FACTOR:
+        # Validate everything *before* mutating, so a rejected call leaves
+        # the configuration exactly as it was.
+        new_min = cls._MIN_FACTOR if min_factor is None else float(min_factor)
+        new_max = cls._MAX_FACTOR if max_factor is None else float(max_factor)
+        if new_min > new_max:
             raise ValueError("min_factor must be <= max_factor")
+        if basis is not None and basis not in ("width", "shortest", "diagonal"):
+            raise ValueError("basis must be width, shortest or diagonal")
+        cls._MIN_FACTOR, cls._MAX_FACTOR = new_min, new_max
         if basis is not None:
-            if basis not in ("width", "shortest", "diagonal"):
-                raise ValueError("basis must be width, shortest or diagonal")
             cls._BASIS = basis
         if baseline_width is not None:
             cls._BASELINE_WIDTH = float(baseline_width)
