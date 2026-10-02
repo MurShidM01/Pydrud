@@ -206,6 +206,8 @@ class Router:
         self._children: dict[str, "Router"] = {}
         self._parent: Optional["Router"] = None
         self._scheme: str = ""
+        self._initial_route: Optional[str] = None
+        self._initial_params: dict = {}
 
     # ── Route management ─────────────────────────────────────────────────
 
@@ -468,6 +470,8 @@ class Router:
     def initial(self, name: str, **params) -> "Router":
         """Set the initial route (called before ``App.run()``)."""
         self._require(name)
+        self._initial_route = name
+        self._initial_params = dict(params)
         self._stack.reset_to(name, params)
         return self
 

@@ -130,6 +130,10 @@ class App:
         self._tasks = TaskRunner(on_error=self._report_error)
         # ── UI-thread marshalling ──────────────────────────────────
         self._ui_queue: queue.Queue = queue.Queue(maxsize=1024)
+        # ── DevServer (Hot reload & diagnostics) ───────────────────
+        self._dev_port = kwargs.get("dev_port", 8596)
+        self._dev_server_enabled = kwargs.get("dev_server", True)
+        self._dev_server: Optional[Any] = None
 
     # ── public API ────────────────────────────────────────────────────────
 
@@ -155,7 +159,19 @@ class App:
         if self._hot_reload_requested:
             self.enable_hot_reload()
 
+        if self._dev_server_enabled and self._dev_server is None:
+            self._start_dev_server()
+
         self._start_bridge(retry=retry, retry_delay=retry_delay, max_retries=max_retries)
+
+    def _start_dev_server(self) -> None:
+        """Start on-device DevServer for hot reload."""
+        try:
+            from pydrud.core.devserver import DevServer
+            self._dev_server = DevServer(self, host=self.host, port=self._dev_port)
+            self._dev_server.start()
+        except Exception:
+            pass
 
     def build(self) -> Widget:
         """Run the target and return the widget tree without connecting.
@@ -301,6 +317,12 @@ class App:
                 self._transport.close()
             except Exception:
                 pass
+        if self._dev_server is not None:
+            try:
+                self._dev_server.stop()
+            except Exception:
+                pass
+            self._dev_server = None
         self._connected = False
 
     # ── lifecycle & errors ────────────────────────────────────────────────
@@ -405,6 +427,12 @@ class App:
         return self
 
     def _report_error(self, exc: BaseException) -> None:
+        tb_str = traceback.format_exc()
+        if self._dev_server is not None:
+            try:
+                self._dev_server.broadcast_error(exc, tb=tb_str)
+            except Exception:
+                pass
         if self._error_handler is not None:
             try:
                 self._error_handler(exc)
@@ -412,7 +440,9 @@ class App:
             except Exception:
                 pass
         print(f"[Pydrud] Error: {exc}")
-        traceback.print_exc()
+        if tb_str.strip() and tb_str.strip() != "NoneType: None":
+            sys.stderr.write(tb_str + "\n")
+            sys.stderr.flush()
 
     # ── tree building ─────────────────────────────────────────────────────
 
@@ -555,6 +585,215 @@ class App:
         """Keep State/Store values across hot reloads (default: on)."""
         self._preserve_state = bool(enabled)
         return self
+
+    def apply_hot_reload(self, files: list[dict]) -> dict:
+        """Apply updated Python files, reload modules, preserve state, and re-render.
+
+        Args:
+            files: List of dicts with {"path": str, "content": str}.
+        """
+        import types
+        t0 = time.perf_counter()
+        reloaded_modules = []
+
+        # 1. Sync directory on device
+        sync_dir = self._get_sync_dir()
+        if sync_dir and sync_dir not in sys.path:
+            sys.path.insert(0, sync_dir)
+
+        # 2. Syntax validation pass
+        compiled_files = []
+        for f in files:
+            rel_path = f.get("path", "")
+            content = f.get("content", "")
+            clean_path = rel_path.replace("\\", "/")
+            if clean_path.startswith("src/"):
+                clean_path = clean_path[4:]
+
+            try:
+                code_obj = compile(content, clean_path, "exec")
+                compiled_files.append((clean_path, content, code_obj))
+            except SyntaxError as err:
+                tb = traceback.format_exc()
+                if self._dev_server:
+                    self._dev_server.broadcast_error(
+                        err, tb=tb, title="Hot Reload Syntax Error",
+                        filename=clean_path, lineno=err.lineno
+                    )
+                return {
+                    "status": "error",
+                    "error_type": "SyntaxError",
+                    "message": getattr(err, "msg", str(err)),
+                    "filename": clean_path,
+                    "lineno": err.lineno or 1,
+                    "offset": err.offset or 1,
+                    "text": (err.text or "").strip(),
+                    "traceback": tb,
+                }
+            except Exception as err:
+                tb = traceback.format_exc()
+                if self._dev_server:
+                    self._dev_server.broadcast_error(err, tb=tb, title="Hot Reload Compilation Error")
+                return {
+                    "status": "error",
+                    "error_type": err.__class__.__name__,
+                    "message": str(err),
+                    "filename": clean_path,
+                    "traceback": tb,
+                }
+
+        # 3. Snapshot state before modifying modules
+        snapshot = self.capture_state() if self._preserve_state else None
+
+        # 4. Write files and execute into modules
+        for clean_path, content, code_obj in compiled_files:
+            if sync_dir:
+                full_dest = os.path.join(sync_dir, clean_path)
+                try:
+                    os.makedirs(os.path.dirname(full_dest), exist_ok=True)
+                    with open(full_dest, "w", encoding="utf-8") as fp:
+                        fp.write(content)
+                except Exception:
+                    pass
+
+            mod_name = _module_name_from_path(clean_path)
+            if not mod_name:
+                continue
+
+            try:
+                if mod_name in sys.modules:
+                    mod = sys.modules[mod_name]
+                    mod.__file__ = os.path.join(sync_dir, clean_path) if sync_dir else clean_path
+                    exec(code_obj, mod.__dict__)
+                else:
+                    mod = types.ModuleType(mod_name)
+                    mod.__file__ = os.path.join(sync_dir, clean_path) if sync_dir else clean_path
+                    mod.__name__ = mod_name
+                    sys.modules[mod_name] = mod
+                    exec(code_obj, mod.__dict__)
+                reloaded_modules.append(mod_name)
+            except Exception as exc:
+                tb = traceback.format_exc()
+                self._report_error(exc)
+                return {
+                    "status": "error",
+                    "error_type": exc.__class__.__name__,
+                    "message": str(exc),
+                    "filename": clean_path,
+                    "traceback": tb,
+                }
+
+        # 5. Re-bind router / target if main module or screens were reloaded
+        if "app.main" in sys.modules:
+            try:
+                main_mod = sys.modules["app.main"]
+                if hasattr(main_mod, "main") and callable(main_mod.main):
+                    self.target = main_mod.main
+            except Exception:
+                pass
+        elif "main" in sys.modules:
+            try:
+                main_mod = sys.modules["main"]
+                if hasattr(main_mod, "main") and callable(main_mod.main):
+                    self.target = main_mod.main
+            except Exception:
+                pass
+
+        # 6. Restore state
+        if snapshot is not None:
+            self.restore_state(snapshot)
+
+        # 7. Update UI
+        self.update()
+
+        duration_ms = (time.perf_counter() - t0) * 1000
+        kept = len(snapshot["states"]) + len(snapshot["stores"]) if snapshot else 0
+
+        return {
+            "status": "ok",
+            "duration_ms": round(duration_ms, 1),
+            "reloaded": reloaded_modules,
+            "states_preserved": kept,
+        }
+
+    def apply_hot_restart(self, files: list[dict] | None = None) -> dict:
+        """Reset all app state, reload all user modules from scratch, and re-render."""
+        t0 = time.perf_counter()
+
+        # Sync files if provided
+        if files:
+            sync_dir = self._get_sync_dir()
+            if sync_dir and sync_dir not in sys.path:
+                sys.path.insert(0, sync_dir)
+            for f in files:
+                rel_path = f.get("path", "")
+                content = f.get("content", "")
+                clean_path = rel_path.replace("\\", "/")
+                if clean_path.startswith("src/"):
+                    clean_path = clean_path[4:]
+                if sync_dir:
+                    dest = os.path.join(sync_dir, clean_path)
+                    try:
+                        os.makedirs(os.path.dirname(dest), exist_ok=True)
+                        with open(dest, "w", encoding="utf-8") as fp:
+                            fp.write(content)
+                    except Exception:
+                        pass
+
+        # Reset router
+        if self._router is not None:
+            self._router.reset()
+
+        # Clear event dispatcher and cached tree
+        self._event_dispatcher.unregister_all()
+        self._current_tree = None
+        self._desired_tree = None
+        self._snapshot = None
+        self._confirmed_revision = 0
+        self._desired_revision = 0
+        self._inflight.clear()
+        self._inflight_trees.clear()
+
+        # Re-import user modules (parents before children)
+        user_modules = [m for m in list(sys.modules.keys()) if m.startswith("app.") or m == "app" or m == "main"]
+        user_modules.sort(key=lambda x: (x.count("."), len(x)))
+        for mod_name in user_modules:
+            if mod_name in sys.modules and sys.modules[mod_name] is not None:
+                try:
+                    importlib.reload(sys.modules[mod_name])
+                except Exception:
+                    pass
+
+        if "app.main" in sys.modules:
+            main_mod = sys.modules["app.main"]
+            if hasattr(main_mod, "main"):
+                self.target = main_mod.main
+
+        # Render fresh
+        self.render()
+
+        duration_ms = (time.perf_counter() - t0) * 1000
+        return {
+            "status": "ok",
+            "duration_ms": round(duration_ms, 1),
+            "restarted": True,
+        }
+
+    def _get_sync_dir(self) -> str:
+        """Get or create the local hot reload synchronization directory."""
+        import tempfile
+        candidates = [
+            os.path.join(os.path.expanduser("~"), ".pydrud_sync"),
+            os.path.join(tempfile.gettempdir(), ".pydrud_sync"),
+            os.path.join(os.getcwd(), ".pydrud_sync"),
+        ]
+        for c in candidates:
+            try:
+                os.makedirs(c, exist_ok=True)
+                return c
+            except Exception:
+                continue
+        return tempfile.gettempdir()
 
     def _on_hot_reload(self, filepath: str) -> None:
         """Called by the file watcher when a source file changes."""
@@ -1577,6 +1816,19 @@ class _Page:
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+def _module_name_from_path(filepath: str) -> str:
+    """Convert relative filepath like 'app/screens/home.py' to 'app.screens.home'."""
+    clean = filepath.replace("\\", "/")
+    if clean.startswith("src/"):
+        clean = clean[4:]
+    if clean.endswith(".py"):
+        clean = clean[:-3]
+    parts = [p for p in clean.split("/") if p]
+    if parts and parts[-1] == "__init__":
+        parts.pop()
+    return ".".join(parts)
 
 
 def _module_name_for(filepath: str, project_root: str) -> str:

@@ -86,126 +86,17 @@ class Builder:
         return None
 
     def run(self, device: str | None = None, release: bool = False,
-            watch: bool = False):
-        """Build, install, launch the app and tail debug logs (like ``flutter run``)."""
-        import signal
+            watch: bool = False, interactive: bool = True):
+        """Build, install, launch the app and start interactive Hot Reload (like ``flutter run``)."""
+        from pydrud.commands.devrunner import DevRunner
 
-        apk = self.build(release=release)
-        if not apk:
-            sys.exit(1)
-
-        if not self._check_adb():
-            sys.exit(1)
-
-        if watch:
-            self._install_and_launch(apk, device)
-            self.watch(device=device, release=release)
-            return
-
-        device_arg = ["-s", device] if device else []
-
-        # 1. Install.
-        print_step("Installing APK on device")
-        install_cmd = ["adb"] + device_arg + ["install", "-r", "-d", apk]
-        result = subprocess.run(install_cmd, capture_output=True, text=True)
-
-        if result.returncode != 0:
-            print(fail(f"Install failed: {result.stderr.strip()}"))
-            sys.exit(1)
-        print(ok("Install succeeded."))
-
-        # 2. Clear old logs for this package.
-        package_name = self._get_package_name()
-        activity_class = self._get_activity_class()
-        log_tag = "Pydrud"
-
-        subprocess.run(
-            ["adb"] + device_arg + ["logcat", "-c"],
-            capture_output=True,
+        runner = DevRunner(
+            project_root=self.root,
+            device=device,
+            release=release,
+            interactive=interactive,
         )
-
-        # 3. Launch the app.
-        if package_name and activity_class:
-            print_step("Launching app")
-            launch_cmd = [
-                "adb"] + device_arg + [
-                "shell", "am", "start", "-n",
-                f"{package_name}/{activity_class}",
-            ]
-            subprocess.run(launch_cmd, capture_output=True)
-            print(ok("App launched!"))
-
-        # 4. Tail logcat — show Pydrud + Python + crash logs in real-time.
-        print()
-        print(header("═══════════════════ Live Debug Log ═══════════════════"))
-        print(info("Press Ctrl+C to stop."))
-        print()
-
-        try:
-            logcat_args = ["adb"] + device_arg + [
-                "logcat",
-                "-v", "time",
-                "-s",
-                f"{log_tag}:V",            # Pydrud
-                "PydrudActivity:V",        # MainActivity
-                "PydrudBridge:V",          # BridgeService
-                "PydrudViewFactory:V",     # ViewFactory
-                "PydrudMaterial:V",        # MaterialViews (Tabs, chips, …)
-                "PydrudEvents:V",          # EventDispatcher
-                "PydrudGestures:V",        # GestureBinder
-                "PydrudNavigation:V",      # Navigation / tab bar
-                "PydrudPlatform:V",        # PlatformServices
-                "PydrudServices:V",        # NativeServices
-                "PydrudRegistry:V",        # WidgetRegistry
-                "PydrudPush:V",            # Messaging service
-                "PydrudWorker:V",          # Background jobs
-                "Python:V",                # Chaquopy stdout
-                "PythonUtil:V",            # Chaquopy utility
-                "Python.android:V",        # Chaquopy internals
-                "AndroidRuntime:E",        # Java crashes
-                "chaquopy:V",
-                "ActivityManager:I",       # Activity lifecycle
-                "dalvikvm:W",
-                "art:W",
-                "DEBUG:W",
-            ]
-            proc = subprocess.Popen(
-                logcat_args,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                bufsize=1,
-                text=True,
-            )
-
-            # Handle Ctrl+C gracefully.
-            def _on_sigint(s, f):
-                raise KeyboardInterrupt()
-            signal.signal(signal.SIGINT, _on_sigint)
-
-            for line in proc.stdout:
-                line = line.rstrip()
-                # Colour by severity keyword.
-                if "Error" in line or "FATAL" in line or "null" in line.lower():
-                    print(fail(line))
-                elif "Warning" in line or "incompatible" in line.lower():
-                    print(warn(line))
-                elif "Started" in line or "connected" in line.lower() or "render" in line.lower():
-                    print(ok(line))
-                else:
-                    print(f"  {line}")
-
-        except KeyboardInterrupt:
-            print()
-            print(info("Stopped."))
-            proc.terminate()
-            try:
-                proc.wait(timeout=3)
-            except Exception:
-                proc.kill()
-        except Exception as e:
-            print(fail(f"Logcat error: {e}"))
-
-        print()
+        return runner.run()
 
     # ── install / launch / watch ──────────────────────────────────────────
 
@@ -240,55 +131,15 @@ class Builder:
 
     def watch(self, device: str | None = None, release: bool = False,
               paths: list[str] | None = None) -> None:
-        """Rebuild, reinstall and relaunch whenever a source file changes.
+        """Run interactive Hot Reload development runner."""
+        from pydrud.commands.devrunner import DevRunner
 
-        Python runs *on the device* (Chaquopy), so a host-side file change has
-        to be shipped there. Gradle's incremental build plus
-        ``adb install -r`` makes this loop take a couple of seconds.
-        """
-        from pydrud.core.watcher import FileWatcher
-        import threading
-
-        watch_dirs = [
-            os.path.join(self.root, p) for p in (paths or ["src", "assets"])
-        ]
-        watch_dirs = [p for p in watch_dirs if os.path.isdir(p)]
-        if not watch_dirs:
-            watch_dirs = [self.root]
-
-        print()
-        print(header("═════════════════ Watch mode ═════════════════"))
-        print(info(f"Watching: {', '.join(os.path.relpath(p, self.root) for p in watch_dirs)}"))
-        print(info("Edit a file to rebuild & reinstall automatically. Ctrl+C to stop."))
-        print()
-
-        pending = threading.Event()
-
-        def _on_change(filepath: str) -> None:
-            rel = os.path.relpath(filepath, self.root)
-            print(info(f"Changed: {rel}"))
-            pending.set()
-
-        watcher = FileWatcher(watch_dirs, _on_change)
-        watcher.start()
-        try:
-            while True:
-                if pending.wait(timeout=1.0):
-                    pending.clear()
-                    time.sleep(0.3)  # debounce bursts of saves
-                    pending.clear()
-                    print_step("Rebuilding and updating app...")
-                    apk = self.build(release=release)
-                    if apk:
-                        self._install_and_launch(apk, device)
-                        print(ok("App updated and reloaded!"))
-                    else:
-                        print(fail("Rebuild failed — fix the error and save again."))
-        except KeyboardInterrupt:
-            print()
-            print(info("Watch stopped."))
-        finally:
-            watcher.stop()
+        runner = DevRunner(
+            project_root=self.root,
+            device=device,
+            release=release,
+        )
+        runner.run()
 
     def clean(self):
         """Clean Gradle build artifacts."""
