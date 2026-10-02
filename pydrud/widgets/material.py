@@ -1276,8 +1276,9 @@ class WebView(Widget):
         url: Optional[str] = None,
         *,
         html: Optional[str] = None,
-        javascript: bool = True,
+        javascript: bool = False,
         zoom: bool = False,
+        allowed_origins: Optional[list[str]] = None,
         on_load: Optional[Callable] = None,
         on_message: Optional[Callable] = None,
         key: Optional[str] = None,
@@ -1288,8 +1289,9 @@ class WebView(Widget):
             raise ValueError("WebView needs either url= or html=")
         self.url = url
         self.html = html
-        self.javascript = javascript
+        self.javascript = bool(javascript)
         self.zoom = zoom
+        self.allowed_origins = [str(origin).strip() for origin in (allowed_origins or []) if str(origin).strip()]
         if on_load is not None:
             self.event_handlers["load"] = on_load
         if on_message is not None:
@@ -1301,6 +1303,7 @@ class WebView(Widget):
             "url": self.url,
             "html": self.html,
             "javascript": self.javascript,
+            "allowedOrigins": self.allowed_origins or None,
             "zoom": self.zoom or None,
         }))
         return props
