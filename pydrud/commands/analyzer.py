@@ -66,6 +66,9 @@ _VALID_STYLE_KEYS = {
     "safeArea", "resizeForKeyboard", "shadow", "aspectRatio", "zIndex",
     # v1.5 — responsive
     "safeAreaTop", "safeAreaBottom", "breakpoint",
+    # read by the native renderer (ViewFactory / MaterialViews)
+    "gradient", "feedback", "role", "pill", "accent", "size",
+    "minItemWidth", "tabletColumns",
 }
 
 

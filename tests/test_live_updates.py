@@ -171,12 +171,52 @@ class TestViewFactoryTemplate(unittest.TestCase):
     def test_child_host_tag_is_honoured_by_patches(self):
         self.assertIn("static ViewGroup childHost(View view)", self.factory)
         self.assertIn("return childHost(parent);", self.factory)
-        self.assertIn("android.R.id.content", self.factory)
+        self.assertIn("R.id.pydrud_tag_children", self.factory)
 
     def test_tabs_and_expansion_tile_declare_a_content_host(self):
         self.assertEqual(
-            self.material.count("setTag(android.R.id.content"), 2,
+            self.material.count("setTag(R.id.pydrud_tag_children"), 2,
             "Tabs and ExpansionTile must both tag their content container")
+
+    def test_tag_keys_are_application_specific(self):
+        # View.setTag(key, …) throws "The key must be an
+        # application-specific resource id" for framework ids such as
+        # android.R.id.text1 — which used to kill every slider, switch
+        # and checkbox mid-render. Only app ids are allowed from now on.
+        for source in (self.factory, self.material):
+            self.assertNotIn(
+                "setTag(android.R.id.", source,
+                "two-arg setTag with a framework id crashes at runtime")
+            self.assertNotIn(
+                "getTag(android.R.id.", source,
+                "getTag with a framework id never matches an app tag")
+
+    def test_preview_fill_list_matches_the_native_renderer(self):
+        # tools/preview_ui.py promises to lay widgets out "with the same
+        # rules ViewFactory uses". Its FILL_BY_DEFAULT set must therefore
+        # agree with ViewFactory's fillsWidthByDefault() switch (the
+        # preview additionally knows Stack/Center, which the Java side
+        # handles in a separate branch).
+        import re
+        java = re.search(
+            r"fillsWidthByDefault\(String type\) \{\s*switch \(type\) \{(.*?)\}",
+            self.factory, re.S).group(1)
+        java_types = set(re.findall(r'case "([^"]+)"', java))
+        preview_src = (TEMPLATES.parent.parent.parent.parent
+                       / "tools" / "preview_ui.py").read_text()
+        python = re.search(
+            r"FILL_BY_DEFAULT = \{(.*?)\}", preview_src, re.S).group(1)
+        python_types = set(re.findall(r'"([^"]+)"', python))
+        self.assertLessEqual(
+            java_types, python_types,
+            "preview is missing full-width types the device stretches")
+        self.assertLessEqual(
+            python_types - {"Stack"}, java_types,
+            "preview stretches types the device leaves at wrap_content")
+        # …and a Container must hug its child on both sides (it used to
+        # swallow the whole row, hiding app-bar titles).
+        self.assertNotIn("Container", java_types)
+        self.assertNotIn("Container", python_types)
 
     def test_spacing_uses_margins_not_space_views(self):
         # Interleaved Space views shifted every native child index, so

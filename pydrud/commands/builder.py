@@ -146,7 +146,15 @@ class Builder:
                 "PydrudActivity:V",        # MainActivity
                 "PydrudBridge:V",          # BridgeService
                 "PydrudViewFactory:V",     # ViewFactory
+                "PydrudMaterial:V",        # MaterialViews (Tabs, chips, …)
                 "PydrudEvents:V",          # EventDispatcher
+                "PydrudGestures:V",        # GestureBinder
+                "PydrudNavigation:V",      # Navigation / tab bar
+                "PydrudPlatform:V",        # PlatformServices
+                "PydrudServices:V",        # NativeServices
+                "PydrudRegistry:V",        # WidgetRegistry
+                "PydrudPush:V",            # Messaging service
+                "PydrudWorker:V",          # Background jobs
                 "Python:V",                # Chaquopy stdout
                 "PythonUtil:V",            # Chaquopy utility
                 "Python.android:V",        # Chaquopy internals

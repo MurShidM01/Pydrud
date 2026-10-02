@@ -59,7 +59,14 @@ class Container(Widget):
 
 
 class Column(Widget):
-    """Vertical layout — children are stacked top-to-bottom."""
+    """Vertical layout — children are stacked top-to-bottom.
+
+    ``horizontal_alignment`` positions children on the cross axis
+    ("start" | "center" | "end") and ``vertical_alignment`` packs them
+    along the main axis ("top" | "center" | "bottom")::
+
+        Column(children=[card], vertical_alignment="center", expand=1)
+    """
 
     _widget_type = "Column"
 
@@ -69,6 +76,7 @@ class Column(Widget):
         children: Optional[list[Widget]] = None,
         spacing: float = 0,
         horizontal_alignment: Optional[str] = None,
+        vertical_alignment: Optional[str] = None,
         key: Optional[str] = None,
         style: Optional[dict] = None,
         expand: Optional[int] = None,
@@ -82,6 +90,8 @@ class Column(Widget):
         self.style["mainAxis"] = "vertical"
         if horizontal_alignment:
             self.style["crossAxisAlignment"] = horizontal_alignment
+        if vertical_alignment:
+            self.style["mainAxisAlignment"] = vertical_alignment
         if scroll:
             self.style["scroll"] = True
 
@@ -91,7 +101,14 @@ class Column(Widget):
 
 
 class Row(Widget):
-    """Horizontal layout — children are stacked left-to-right."""
+    """Horizontal layout — children are stacked left-to-right.
+
+    ``vertical_alignment`` positions children on the cross axis
+    ("top" | "center" | "bottom") and ``horizontal_alignment`` packs them
+    along the main axis ("start" | "center" | "end")::
+
+        Row(children=[reset, tap], horizontal_alignment="center")
+    """
 
     _widget_type = "Row"
 
@@ -101,6 +118,7 @@ class Row(Widget):
         children: Optional[list[Widget]] = None,
         spacing: float = 0,
         vertical_alignment: Optional[str] = None,
+        horizontal_alignment: Optional[str] = None,
         key: Optional[str] = None,
         style: Optional[dict] = None,
         expand: Optional[int] = None,
@@ -114,6 +132,8 @@ class Row(Widget):
         self.style["mainAxis"] = "horizontal"
         if vertical_alignment:
             self.style["crossAxisAlignment"] = vertical_alignment
+        if horizontal_alignment:
+            self.style["mainAxisAlignment"] = horizontal_alignment
         if scroll:
             self.style["scroll"] = True
 

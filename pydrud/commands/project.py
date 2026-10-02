@@ -346,6 +346,13 @@ def _render_native_layer(project_dir: str, java_package_path: str, ctx: dict):
                     f"{project_dir}/android/app/src/main/res/values-night/themes.xml",
                     {**ctx, "night": True, "colors": colors["dark"]})
 
+    # App-specific tag IDs. ViewFactory/MaterialViews use keyed view tags
+    # (slider ranges, change listeners, composite child hosts), and Android
+    # rejects framework IDs there — these must come from the app's own
+    # resources or every Slider/Switch/Tabs render fails at runtime.
+    _write_template("android/ids.xml.j2",
+                    f"{project_dir}/android/app/src/main/res/values/ids.xml", ctx)
+
 
 def create_project(
     name: str,
