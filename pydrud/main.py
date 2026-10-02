@@ -70,6 +70,8 @@ class App:
         self._desired_revision = 0
         self._confirmed_revision = 0
         self._inflight: dict[str, RenderTransaction] = {}
+        self._inflight_trees: dict[str, Widget] = {}
+        self._render_pending = False
         self._native_capabilities: dict = {}
         self._ui_thread_id: Optional[int] = None
         self._bridge = BridgeProtocol()
@@ -144,56 +146,51 @@ class App:
     def update(self):
         """Rebuild and transact the desired tree.
 
-        Python keeps desired, confirmed and in-flight UI state separate.  A
+        Python keeps desired, confirmed and in-flight UI state separate. A
         native ACK is the only operation which advances the confirmed snapshot.
         """
         new = self._build_tree()
         self._desired_tree = new
+        self._send_desired_tree()
+
+    def _send_desired_tree(self, *, force_snapshot: bool = False) -> None:
+        """Send the current desired tree when no render transaction is active."""
         if not (self._connected and self._transport):
             return
         if self._inflight:
             self._render_pending = True
             return
+        desired = self._desired_tree
+        if desired is None:
+            return
 
         base_revision = self._confirmed_revision
         self._desired_revision = max(self._desired_revision, base_revision) + 1
-
         old = self._snapshot
-        if old is None:
-            tx = RenderTransaction.create(
-                revision=self._desired_revision,
-                base_revision=base_revision,
-                kind="snapshot",
-                payload={"tree": new.to_dict()},
-            )
-        else:
+        kind = "snapshot"
+        payload = {"tree": desired.to_dict()}
+        if not force_snapshot and old is not None:
             try:
-                patches = TreeDiff.diff(old, new)
+                patches = TreeDiff.diff(old, desired)
             except Exception as exc:
                 self._report_error(exc)
-                tx = RenderTransaction.create(
-                    revision=self._desired_revision,
-                    base_revision=base_revision,
-                    kind="snapshot",
-                    payload={"tree": new.to_dict()},
-                )
             else:
                 if not patches:
                     return
                 kind = "patch" if len(patches) <= MAX_PATCHES else "snapshot"
                 payload = (
                     {"patches": [p.to_dict() for p in patches]}
-                    if kind == "patch"
-                    else {"tree": new.to_dict()}
-                )
-                tx = RenderTransaction.create(
-                    revision=self._desired_revision,
-                    base_revision=base_revision,
-                    kind=kind,
-                    payload=payload,
+                    if kind == "patch" else {"tree": desired.to_dict()}
                 )
 
+        tx = RenderTransaction.create(
+            revision=self._desired_revision,
+            base_revision=base_revision,
+            kind=kind,
+            payload=payload,
+        )
         self._inflight[tx.tx_id] = tx
+        self._inflight_trees[tx.tx_id] = desired.clone()
         self._send(self._bridge.encode_transaction(tx))
 
     def update_widget(self, *widgets: Widget) -> None:
@@ -206,9 +203,7 @@ class App:
             if not self._replace_widget_reference(self._current_tree, widget.key, widget):
                 return self.update()
         self._desired_tree = self._current_tree
-        self._render_pending = True if self._inflight else False
-        if self._connected and self._transport and not self._inflight:
-            self._send_desired_tree()
+        self._send_desired_tree()
         return None
 
     def _replace_widget_reference(self, root: Widget, key: str, replacement: Widget) -> bool:
@@ -224,16 +219,7 @@ class App:
         """Force a full desired-state snapshot reconciliation."""
         tree = self._build_tree()
         self._desired_tree = tree
-        if self._connected and self._transport:
-            self._desired_revision = max(self._desired_revision, self._confirmed_revision) + 1
-            tx = RenderTransaction.create(
-                revision=self._desired_revision,
-                base_revision=self._confirmed_revision,
-                kind="snapshot",
-                payload={"tree": tree.to_dict()},
-            )
-            self._inflight[tx.tx_id] = tx
-            self._send(self._bridge.encode_transaction(tx))
+        self._send_desired_tree(force_snapshot=True)
 
     def update_state(self, state: State):
         """Rebuild after a State change."""
@@ -769,6 +755,8 @@ class App:
             self._connected = False
             self._cancel_pending()
             self._inflight.clear()
+            self._inflight_trees.clear()
+            self._render_pending = False
             if self._transport:
                 try:
                     self._transport.close()
@@ -889,8 +877,9 @@ class App:
             return
         if event_type == "render_ack":
             self._confirmed_revision = revision
-            if self._desired_tree is not None:
-                self._snapshot = self._desired_tree.clone()
+            sent_tree = self._inflight_trees.pop(tx_id, None)
+            if sent_tree is not None:
+                self._snapshot = sent_tree.clone()
             if self._render_pending:
                 self._render_pending = False
                 self.update()
