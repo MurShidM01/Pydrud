@@ -194,46 +194,28 @@ class App:
         self._send(self._bridge.encode_transaction(tx))
 
     def update_widget(self, *widgets: Widget) -> None:
-        """Push changes for mutated widgets without re-running the builder.
-
-        This is the imperative counterpart of :meth:`update`::
-
-            label.value = "Saved"
-            page.update(label)
-
-        Only the affected subtree is diffed, so updating one row of a long
-        list costs one patch instead of a whole rebuild.
-        """
+        """Compatibility API: merge explicit widget mutations into the desired tree."""
         if not widgets:
             return self.update()
-        if self._current_tree is None or self._snapshot is None:
+        if self._current_tree is None:
             return self.update()
-        if not (self._connected and self._transport):
-            # Keep the snapshot honest even while disconnected (tests).
-            self._snapshot = self._current_tree.clone()
-            return None
-
-        patches: list = []
         for widget in widgets:
-            previous = self._snapshot.find_by_key(widget.key)
-            if previous is None:
+            if not self._replace_widget_reference(self._current_tree, widget.key, widget):
                 return self.update()
-            try:
-                patches.extend(TreeDiff.diff(previous, widget))
-            except Exception as exc:  # pragma: no cover - defensive
-                self._report_error(exc)
-                return self.update()
-
-        if patches:
-            if len(patches) <= MAX_PATCHES:
-                self._send(self._bridge.encode_render(
-                    [p.to_dict() for p in patches]))
-            else:
-                self._send(self._bridge.encode_full_render(
-                    self._current_tree.to_dict()))
-        self._snapshot = self._current_tree.clone()
-        self._event_dispatcher.register_tree(self._current_tree)
+        self._desired_tree = self._current_tree
+        self._render_pending = True if self._inflight else False
+        if self._connected and self._transport and not self._inflight:
+            self._send_desired_tree()
         return None
+
+    def _replace_widget_reference(self, root: Widget, key: str, replacement: Widget) -> bool:
+        for index, child in enumerate(root.children):
+            if child.key == key:
+                root.children[index] = replacement
+                return True
+            if self._replace_widget_reference(child, key, replacement):
+                return True
+        return False
 
     def render(self):
         """Force a full desired-state snapshot reconciliation."""
