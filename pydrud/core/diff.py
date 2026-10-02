@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from typing import Any, Optional
 
-from pydrud.widgets.base import Widget
+from pydrud.widgets.base import Widget, validate_tree_keys
 
 
 # ── Diff result types ────────────────────────────────────────────────────────
@@ -75,6 +75,10 @@ class TreeDiff:
     def diff(old: Optional[Widget], new: Optional[Widget]) -> list[Patch]:
         """Return patches that transform *old* into *new*."""
         patches: list[Patch] = []
+        if old is not None:
+            validate_tree_keys(old)
+        if new is not None:
+            validate_tree_keys(new)
         if new is None:
             if old is not None:
                 patches.append(Patch("delete", old.unwrap().key))
@@ -150,8 +154,8 @@ def _diff_children(
     """
     old_list = [w.unwrap() for w in old_list]
     new_list = [w.unwrap() for w in new_list]
-    old_by_key = {w.key: w for w in old_list}
-    new_by_key = {w.key: w for w in new_list}
+    old_by_key = _index_unique(old_list, parent_key)
+    new_by_key = _index_unique(new_list, parent_key)
     old_index = {w.key: i for i, w in enumerate(old_list)}
 
     # 1. Deletions (old children that disappeared).
@@ -214,3 +218,17 @@ def _changed_dict(old: dict, new: dict) -> dict:
         if old.get(k) != new.get(k):
             changed[k] = new.get(k) if k in new else None
     return changed
+
+
+def _index_unique(items: list[Widget], parent_key: str) -> dict[str, Widget]:
+    """Build a keyed index while producing an actionable duplicate error."""
+    result: dict[str, Widget] = {}
+    for index, widget in enumerate(items):
+        if widget.key in result:
+            raise ValueError(
+                f"Duplicate widget key {widget.key!r} under parent "
+                f"{parent_key or '<root>'}; child indexes include "
+                f"{index} and an earlier position"
+            )
+        result[widget.key] = widget
+    return result

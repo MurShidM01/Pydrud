@@ -22,7 +22,7 @@ if (hasKeystore) {
 android {
     namespace = "{{ package }}"
     compileSdk = {{ compile_sdk }}
-    ndkVersion = System.getenv("PYDRUD_NDK_VERSION") ?: "28.2.13676358"
+    ndkVersion = System.getenv("PYDRUD_NDK_VERSION") ?: "{{ ndk | default("28.2.13676358") }}"
 
     defaultConfig {
         applicationId = "{{ package }}"
@@ -89,7 +89,7 @@ android {
 chaquopy {
     defaultConfig {
         buildPython(System.getenv("PYDRUD_PYTHON") ?: "{{ python_executable }}")
-        version = "3.11"
+        version = "{{ python_version | default("3.11") }}"
 
         // Managed by `pydrud pip add` — edit pydrud.toml, not this block.
         pip {

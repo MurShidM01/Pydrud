@@ -24,6 +24,7 @@ import threading
 from typing import Any, Callable, Generic, Iterable, Iterator, Optional, TypeVar
 
 from pydrud.core.state import State
+from pydrud.core.subscriptions import Subscription
 
 T = TypeVar("T")
 Unsubscribe = Callable[[], None]
@@ -39,8 +40,8 @@ class _Observable:
         self._dirty = False
         self.changed = State(0)
 
-    def subscribe(self, callback: Callable[..., Any]) -> Unsubscribe:
-        """Register *callback*; returns a function that removes it again."""
+    def subscribe(self, callback: Callable[..., Any]) -> Subscription:
+        """Register *callback* and return an idempotent lifetime handle."""
         with self._notify_lock:
             self._subscribers.append(callback)
 
@@ -49,7 +50,7 @@ class _Observable:
                 if callback in self._subscribers:
                     self._subscribers.remove(callback)
 
-        return _unsubscribe
+        return Subscription(_unsubscribe)
 
     def unsubscribe(self, callback: Callable[..., Any]) -> None:
         with self._notify_lock:
@@ -279,7 +280,7 @@ class Selector:
         return self._project(self._store.state)
 
     def listen(self, callback: Callable[[Any], Any], *,
-               immediate: bool = False) -> Unsubscribe:
+               immediate: bool = False) -> Subscription:
         self._listeners.append(callback)
         if immediate:
             callback(self.value)
@@ -288,7 +289,7 @@ class Selector:
             if callback in self._listeners:
                 self._listeners.remove(callback)
 
-        return _unsubscribe
+        return Subscription(_unsubscribe)
 
     def _check(self, previous: dict, current: dict) -> None:
         try:
@@ -353,14 +354,14 @@ class Computed(Generic[T]):
                 except Exception as exc:  # pragma: no cover
                     print(f"[Pydrud] computed subscriber error: {exc}")
 
-    def subscribe(self, callback: Callable[[T], Any]) -> Unsubscribe:
+    def subscribe(self, callback: Callable[[T], Any]) -> Subscription:
         self._subscribers.append(callback)
 
         def _unsubscribe() -> None:
             if callback in self._subscribers:
                 self._subscribers.remove(callback)
 
-        return _unsubscribe
+        return Subscription(_unsubscribe)
 
     def __repr__(self) -> str:
         return f"Computed({self.value!r})"

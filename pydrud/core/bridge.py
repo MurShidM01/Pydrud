@@ -74,11 +74,35 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Optional
 
+from pydrud.core.protocol import (
+    PROTOCOL_VERSION, MAX_FRAME_BYTES, ProtocolError, RenderTransaction,
+    decode_envelope, encode_envelope,
+)
+
 MessageHandler = Callable[[dict], Any]
 
 
 class BridgeProtocol:
-    """Encodes/decodes messages for the Python ↔ Android bridge."""
+    """Encodes/decodes the semantic bridge contract.
+
+    NDJSON remains the development/debug transport, but render commands carry
+    protocol versioning and revision metadata so the native side can detect
+    stale or divergent UI state.
+    """
+    protocol_version = PROTOCOL_VERSION
+    max_frame_bytes = MAX_FRAME_BYTES
+
+    @staticmethod
+    def capabilities() -> dict:
+        return {
+            "transactional_render": True,
+            "revisioned_render": True,
+            "ack_nack": True,
+            "resync": True,
+            "coalescing": True,
+            "native_animation_clock": True,
+            "protocol_version": PROTOCOL_VERSION,
+        }
 
     @staticmethod
     def encode_command(cmd: str, **data) -> str:
@@ -89,21 +113,23 @@ class BridgeProtocol:
 
     @staticmethod
     def decode_message(line: str) -> Optional[dict]:
-        """Decode a JSON message from Android."""
-        line = line.strip()
-        if not line:
-            return None
-        try:
-            return json.loads(line)
-        except json.JSONDecodeError:
-            return None
+        """Decode a JSON message from Android.
+
+        Invalid JSON is treated as a protocol error rather than silently
+        disappearing, which lets callers decide whether to close or resync.
+        """
+        return decode_envelope(line)
 
     @staticmethod
     def encode_render(patches: list[dict]) -> str:
-        """Encode a render-command with patches."""
+        """Legacy fire-and-forget render encoding kept for old runtimes."""
         return BridgeProtocol.encode_command("render", patches=patches)
 
     @staticmethod
     def encode_full_render(tree: dict) -> str:
-        """Encode a full (initial) render command."""
+        """Legacy full-render encoding kept for old runtimes."""
         return BridgeProtocol.encode_command("full_render", tree=tree)
+
+    @staticmethod
+    def encode_transaction(tx: RenderTransaction) -> str:
+        return encode_envelope(tx.envelope())
