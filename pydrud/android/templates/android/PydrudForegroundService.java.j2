@@ -44,7 +44,7 @@ public class PydrudForegroundService extends Service {
             title == null || title.isEmpty() ? "Running" : title,
             message == null ? "" : message, progress, ongoing);
         startForeground(NOTIFICATION_ID, notification);
-        return START_STICKY;
+        return START_NOT_STICKY;
     }
 
     private void createChannel() {
@@ -76,6 +76,19 @@ public class PydrudForegroundService extends Service {
             builder.setProgress(100, Math.min(100, progress), false);
         }
         return builder.build();
+    }
+
+    /** Android 15+: dataSync FGS has a rolling six-hour budget. */
+    @Override
+    public void onTimeout(int startId, int fgsType) {
+        stopForeground(STOP_FOREGROUND_REMOVE);
+        stopSelf(startId);
+    }
+
+    @Override
+    public void onDestroy() {
+        stopForeground(STOP_FOREGROUND_REMOVE);
+        super.onDestroy();
     }
 
     @Override
