@@ -71,6 +71,19 @@ class Widget:
         self.tooltip: Optional[str] = tooltip
         #: Child widgets (populated by subclasses for layout widgets).
         self.children: list["Widget"] = []
+        # ``children=`` works on every widget, not just the layouts that
+        # name it. It used to fall through to ``_extra`` and be serialised
+        # as a prop full of Widget objects — i.e. silently dropped.
+        if "children" in kwargs:
+            supplied = kwargs.pop("children") or []
+            if isinstance(supplied, Widget):
+                supplied = [supplied]
+            for child in supplied:
+                if not isinstance(child, Widget):
+                    raise TypeError(
+                        f"children= expects Widget instances, "
+                        f"got {type(child).__name__}")
+            self.children = list(supplied)
         #: Event callbacks: {"click": callable, "change": callable, ...}
         self.event_handlers: dict[str, Callable] = {}
         # Any ``on_<event>=callable`` keyword works on every widget, even
@@ -149,7 +162,11 @@ class Widget:
             "props": self._serialise_props(),
         }
         if self.children:
-            d["children"] = [c.to_dict() for c in self.children if c.visible]
+            # Hidden children are serialised too (the renderer gives them
+            # View.GONE). Dropping them here would make the native child
+            # indices disagree with the diff's indices, so a later
+            # create/move patch would land in the wrong position.
+            d["children"] = [c.to_dict() for c in self.children]
         return d
 
     def _serialise_props(self) -> dict:

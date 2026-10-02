@@ -6,7 +6,7 @@ Python widget tree into native Android Views at runtime. No XML layouts,
 no Kotlin UI code — just Python.
 """
 
-__version__ = "1.4.0"
+__version__ = "1.5.1"
 __app_name__ = "Pydrud"
 
 from pydrud.main import App
@@ -15,7 +15,8 @@ from pydrud.core.store import Store, Selector, Computed, ReactiveList
 from pydrud.core.events import Event, EventDispatcher
 from pydrud.core.results import Result, ResultError
 from pydrud.core.tasks import TaskRunner, Timer, debounce, throttle
-from pydrud.core.responsive import Responsive, MediaQuery
+from pydrud.core.responsive import (Breakpoints, MediaQuery, Responsive,
+                                    ScreenInfo)
 from pydrud.navigation import Router, NavigationStack, Route, parse_url
 from pydrud.core.controllers import AnimationController, Tween, curve
 from pydrud.data import Cache, Database, Field, Migration, Model, Query, cached, column
@@ -76,6 +77,13 @@ from pydrud.widgets import (
     Tabs,
     NavItem,
     BottomNavigationBar,
+    NavigationBar,
+    TabBar,
+    AdaptiveLayout,
+    ResponsiveBuilder,
+    ResponsiveGrid,
+    SafeArea,
+    ShowWhen,
     NavigationRail,
     Drawer,
     SegmentedButton,
@@ -125,6 +133,8 @@ __all__ = [
     "App",
     "Responsive",
     "MediaQuery",
+    "Breakpoints",
+    "ScreenInfo",
     "Router",
     "NavigationStack",
     "Route",
@@ -198,6 +208,13 @@ __all__ = [
     "Tabs",
     "NavItem",
     "BottomNavigationBar",
+    "NavigationBar",
+    "TabBar",
+    "AdaptiveLayout",
+    "ResponsiveBuilder",
+    "ResponsiveGrid",
+    "SafeArea",
+    "ShowWhen",
     "NavigationRail",
     "Drawer",
     "SegmentedButton",

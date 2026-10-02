@@ -47,7 +47,8 @@ pydrud run                            # Build, install, launch
 | PyPI on Android | 119 verified packages installable with `pydrud pip add` |
 | Background & Hardware | WorkManager jobs, foreground services, push, camera, sensors, biometrics, BLE, NFC, audio |
 | Design system | `Theme` + `Tokens` — colours, radii, sizes, depth, motion and type live in Python and drive the native renderer |
-| Responsive | Clamped scaling plus Material 3 breakpoints, so a tablet gets a tablet layout, not a zoomed-in phone |
+| Responsive | Live device metrics (rotation, split screen, insets, font scale) drive breakpoints, percent units and adaptive widgets |
+| Customisable navigation | Bottom navigation and tabs Pydrud draws itself — indicator, labels, colours, motion, shape, badges |
 | Native Services | Dialogs, storage, permissions, files, share, notifications, GPS, haptics, device info |
 | Async by Default | Thread pool + timers + a non-blocking HTTP client, so the UI never freezes |
 | Testable | `pydrud.testing.AppTester` runs your whole app in CI without a device or emulator |
@@ -817,63 +818,210 @@ Style().bg("#FFFFFF").padding(EdgeInsets.all(16)).border_radius(8).elevation(4).
 
 ---
 
-## Responsive Scaling
+## Responsive (v1.5)
 
-```python
-from pydrud import Responsive
+Pydrud reads the **real window metrics** from the device and re-reads them
+every time they change — rotation, split screen, a foldable opening, the
+user changing their font size, the keyboard appearing, new display
+cutouts. Each change refreshes `MediaQuery`, runs your listeners and
+re-renders the tree, so the layout always matches the screen in front of
+the user.
 
-Responsive.text(16)      # Font size
-Responsive.w(48)         # Width
-Responsive.h(48)         # Height
-Responsive.padding(24)   # Padding / margin
-Responsive.spacing(12)   # Gaps between widgets
-Responsive.radius(12)    # Border radius
-Responsive.icon(24)      # Icon size
-```
-
-Scaling is **clamped to 0.9–1.2x** of the 360dp baseline. Phones get
-slightly larger text on larger screens; tablets get a tablet *layout*
-rather than oversized controls. `Responsive.raw()` gives the old
-unclamped behaviour if you really want it.
-
-```python
-Responsive.breakpoint()                             # compact | medium | expanded
-Responsive.is_phone(), Responsive.is_tablet(), Responsive.is_landscape()
-Responsive.value(compact=1, medium=2, expanded=3)   # pick per size class
-Responsive.value(phone=16, tablet=32)               # phone/tablet aliases
-Responsive.columns(min_width=180, max_columns=4)    # how many cards fit
-Responsive.content_width(560)                       # cap long line lengths
-Responsive.clamp(16, 12, 20)                        # scale, then clamp to dp
-```
-
-### MediaQuery (v1.0.1)
+### MediaQuery — every metric the device reports
 
 ```python
 from pydrud import MediaQuery
 
-mq = MediaQuery.of()
-width = mq["width"]          # Screen width in dp
-height = mq["height"]        # Screen height in dp
-density = mq["density"]      # Pixel density
-scale = mq["scale_factor"]   # width / 360
+MediaQuery.width            # window width in dp
+MediaQuery.height
+MediaQuery.width_px         # physical resolution
+MediaQuery.density          # px per dp          MediaQuery.dpi
+MediaQuery.orientation      # "portrait" | "landscape"
+MediaQuery.device_type      # "phone" | "tablet" | "desktop" | "tv" | "watch"
+MediaQuery.breakpoint       # "compact" | "medium" | "expanded" | "large" | "xlarge"
+MediaQuery.shortest_side    # the sw600dp test, stable across rotation
+MediaQuery.diagonal         # inches        MediaQuery.refresh_rate
+MediaQuery.text_scale       # the user's font-size preference
+MediaQuery.dark             # system dark mode
 
-if MediaQuery.is_phone():    # width < 600
-    # Compact layout
-elif MediaQuery.is_tablet(): # width >= 600
-    # Expanded layout
+MediaQuery.safe_area()      # {"top": 48, "bottom": 24, "left": 0, "right": 0}
+MediaQuery.viewport()       # usable size after insets and the keyboard
+MediaQuery.resolution()     # (1080, 2400)
+MediaQuery.info()           # immutable snapshot (attribute access)
+MediaQuery.of()             # the same as a plain dict
 
-MediaQuery.breakpoint()      # compact | medium | expanded
-MediaQuery.is_landscape()
-MediaQuery.safe_area()       # {"top": 48, "bottom": 24, ...}
+MediaQuery.matches(min_width=600, orientation="landscape", device="tablet")
+MediaQuery.at_least("expanded")   # this size class or wider
+MediaQuery.keyboard_visible()
 ```
 
-**How it works:**
+React to changes:
 
-1. Android sends screen dimensions via the bridge `"ready"` event
-2. Python's `Responsive` and `MediaQuery` classes cache the metrics
-3. Layout values auto-scale based on the device width vs 360dp baseline
+```python
+stop = MediaQuery.listen(lambda info: print(info.width, info.breakpoint))
+stop()                                  # unsubscribe
 
-> No device info available? Defaults to factor 1.0 (no scaling).
+@app.on_metrics_change                  # the same thing, on the App
+def _(info): ...
+```
+
+### Breakpoints — customisable size classes
+
+```python
+from pydrud import Breakpoints
+
+# Defaults (dp): compact <600, medium ≥600, expanded ≥840, large ≥1200, xlarge ≥1600
+Breakpoints.configure(medium=620, expanded=900)
+Breakpoints.reset()
+```
+
+### Responsive — sizing helpers
+
+```python
+from pydrud import Responsive
+
+Responsive.text(16)      # font size      Responsive.sp(16)   # + system font scale
+Responsive.w(48)         # width          Responsive.h(48)    # height
+Responsive.padding(24)   # padding        Responsive.spacing(12)
+Responsive.radius(12)    # corners        Responsive.icon(24)
+
+Responsive.wp(50)        # 50% of the screen width, in dp
+Responsive.hp(33)        # 33% of the height
+Responsive.vw(50), Responsive.vh(50)      # viewport units (insets excluded)
+Responsive.sw(80)        # % of the shortest side
+Responsive.to_px(16), Responsive.px(48)   # dp ⇄ physical pixels
+```
+
+Scaling is **clamped to 0.9–1.2x** of the 360dp baseline and is based on
+the *shortest* side, so rotating a phone does not inflate every font.
+Tune it once at startup:
+
+```python
+Responsive.configure(min_factor=0.95, max_factor=1.4, basis="diagonal")
+Responsive.configure_reset()
+```
+
+Layout decisions come from breakpoints, not from scaling:
+
+```python
+Responsive.breakpoint()                             # current size class
+Responsive.is_phone(), Responsive.is_tablet(), Responsive.is_landscape()
+Responsive.value(compact=1, medium=2, expanded=3)   # pick per size class
+Responsive.value(phone=16, tablet=32, desktop=48)   # device aliases
+Responsive.value(compact=8, landscape=16)           # orientation override
+Responsive.columns(min_width=180, max_columns=4)    # how many cards fit
+Responsive.grid(min_width=180)                      # (columns, item_width)
+Responsive.gutter()                                 # page padding per size
+Responsive.content_width(560)                       # cap long line lengths
+```
+
+### Responsive widgets
+
+```python
+from pydrud import (AdaptiveLayout, ResponsiveBuilder, ResponsiveGrid,
+                    SafeArea, ShowWhen)
+
+ResponsiveBuilder(lambda s: Text(f"{s.width}x{s.height} · {s.breakpoint}"))
+
+AdaptiveLayout(                       # a different layout per size class
+    compact=Column(children=cards),
+    medium=Row(children=cards),
+    expanded=Row(children=[rail, body]),
+    landscape=WideLayout,             # callables are built lazily
+)
+
+ResponsiveGrid(children=cards, min_item_width=180)   # columns follow the screen
+ShowWhen(Sidebar(), min_width=600, otherwise=MenuButton())
+SafeArea(child=body, top=False)       # real cutout / gesture-bar insets
+```
+
+### Responsive units in styles
+
+Any width or height accepts responsive units, resolved natively against
+the current window:
+
+```python
+Container(style={"width": "50%"})     # half the window on this axis
+Container(style={"width": "80%w", "height": "30%h"})
+Container(style={"width": "60%s"})    # % of the shortest side
+Container(style={"height": "40vh", "width": "120px", "minWidth": "16dp"})
+Column(style={"maxWidth": 640})       # capped and centred on big screens
+```
+
+**How it works**
+
+1. Android sends `ready` on connect and a `metrics` event on every window
+   change (`onConfigurationChanged` + the insets listener, debounced).
+2. `MediaQuery.update()` re-derives orientation, size class, device type
+   and safe area, syncs `Responsive` and notifies listeners.
+3. The app re-renders, so `ResponsiveBuilder`, `AdaptiveLayout`,
+   `Responsive.value()` and percent units all produce fresh values and
+   the diff engine patches only what moved.
+
+> With no device connected (tests, CI) the metrics default to a 360x640
+> phone and nothing scales.
+
+---
+
+## Bottom navigation and tabs (v1.5)
+
+Pydrud draws both surfaces itself, so every property really changes the
+pixels — nothing is locked behind a Material theme attribute.
+
+```python
+from pydrud import BottomNavigationBar, NavItem, Icons
+
+BottomNavigationBar(
+    [NavItem("Home",   icon=Icons.HOME),
+     NavItem("Search", icon=Icons.SEARCH),
+     NavItem("Cart",   icon=Icons.CART, badge=3, badge_color="#FFEF4444"),
+     NavItem("Me",     icon=Icons.PERSON, active_icon=Icons.SETTINGS)],
+    selected=0, on_change=lambda e: go(e.value),
+
+    height=68, bg="#FFFFFFFF", elevation=12, radius=24,       # surface
+    floating=True, margin=12, border_color="#14000000",
+    top_divider=False,
+
+    indicator="pill",                                          # pill | circle
+    indicator_color="#1A6366F1",                               # line | dot | none
+    indicator_width=64, indicator_height=34,
+
+    selected_color="#FF6366F1", unselected_color="#FF9CA3AF",  # icons + labels
+    icon_size=24, selected_icon_size=26,
+    label_behavior="selected",            # always | selected | never
+    label_size=11, selected_label_size=12, bold_selected=True,
+
+    type="fixed",                         # fixed | shifting
+    ripple=True, ripple_color="#1A6366F1",
+    animate=True, duration=180, haptic=True,
+)
+```
+
+Helpers: `bar.select(2)`, `bar.select_route("/cart")`, `bar.badge(2, 7)`,
+`bar.current`. `NavigationBar` is an alias, and `native=True` falls back
+to Android's stock `BottomNavigationView`.
+
+The bar draws its own gesture inset and floating margin, so it looks the
+same on gesture-navigation and three-button devices, and selecting a
+destination is a one-property patch instead of a rebuild.
+
+```python
+from pydrud import Tabs, Tab      # TabBar is an alias
+
+Tabs(
+    [Tab("Today", icon=Icons.HOME, content=today),
+     Tab("Week",  icon=Icons.CALENDAR, content=week, badge=2)],
+    mode="scrollable",                    # fixed | scrollable
+    indicator="pill", indicator_color="#FF6366F1",
+    indicator_height=32, indicator_radius=999,
+    indicator_size="label",               # label | tab | full
+    label_color="#FF111827", unselected_label_color="#FF6B7280",
+    label_size=14, selected_label_size=14, bold_selected=True,
+    icon_position="start", icon_size=18,
+    bg="#FFFFFFFF", tab_height=52, tab_min_width=96, align="fill",
+    divider=True, ripple=True, animate=True, duration=220,
+)
+```
 
 ---
 

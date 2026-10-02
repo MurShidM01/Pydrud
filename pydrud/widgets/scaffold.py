@@ -50,6 +50,8 @@ class Scaffold(Widget):
         bg_color: Optional[str] = None,
         safe_area: bool = True,
         resize_to_avoid_keyboard: bool = True,
+        adaptive: bool = False,
+        content_max_width: Optional[float] = None,
         key: Optional[str] = None,
         expand: Optional[int] = None,
         style: Optional[dict] = None,
@@ -74,12 +76,44 @@ class Scaffold(Widget):
         self.bg_color = bg_color
         self.safe_area = safe_area
         self.resize_to_avoid_keyboard = resize_to_avoid_keyboard
+        self.adaptive = adaptive
+        self.content_max_width = content_max_width
 
         self.children = [self._build()]
 
     # ── internals ────────────────────────────────────────────────────────
 
+    def _adapt(self) -> None:
+        """On wide windows, move the bottom destinations into a side rail.
+
+        Material's own guidance: a bottom bar on a 900dp tablet wastes the
+        width and puts the targets miles from the user's thumbs. Opt in
+        with ``Scaffold(adaptive=True)``.
+        """
+        if not self.adaptive or self.navigation_rail is not None:
+            return
+        bar = self.bottom_navigation
+        if bar is None or not hasattr(bar, "items"):
+            return
+
+        from pydrud.core.responsive import MediaQuery
+
+        if not MediaQuery.at_least("medium"):
+            return
+
+        from pydrud.widgets.material import NavigationRail
+
+        self.navigation_rail = NavigationRail(
+            bar.items,
+            key=f"{bar.key}._rail",
+            selected=bar.selected,
+            extended=MediaQuery.at_least("expanded"),
+            on_change=bar.event_handlers.get("change"),
+        )
+        self.bottom_navigation = None
+
     def _build(self) -> Stack:
+        self._adapt()
         column_children: list[Widget] = []
 
         if self.app_bar is not None:
@@ -88,10 +122,16 @@ class Scaffold(Widget):
         if self.banner is not None:
             column_children.append(self.banner)
 
+        body_style: dict = {"width": "match", "height": 0}
+        if self.content_max_width:
+            # Caps and centres the content column on tablets and desktops,
+            # so text lines stay readable instead of spanning the window.
+            body_style["maxWidth"] = self.content_max_width
+            body_style["alignment"] = "topCenter"
         body_container = Container(
             key=f"{self.key}._body",
             expand=1,
-            style={"width": "match", "height": 0},
+            style=body_style,
             child=self.body,
         )
         if self.navigation_rail is not None:
@@ -134,7 +174,8 @@ class Scaffold(Widget):
                 from pydrud.widgets.tokens import Tokens
 
                 base = fab.style.get("bottom", 24)
-                fab.style["bottom"] = base + Tokens.nav_height
+                bar_height = getattr(bar, "effective_height", None)
+                fab.style["bottom"] = base + (bar_height or Tokens.nav_height)
                 fab.style["_fabLifted"] = True
                 # The bar already clears the gesture inset.
                 fab.style.setdefault("safeAreaBottom", False)
@@ -173,8 +214,10 @@ class Scaffold(Widget):
         bottom = (self.bottom_navigation or self.bottom_bar
                   or (body_container if top is not body_container else None)
                   or body_container)
-        top.style["safeAreaTop"] = True
-        bottom.style["safeAreaBottom"] = True
+        top.style.setdefault("safeAreaTop", True)
+        # A widget that already draws its own inset (bottom navigation) sets
+        # safeAreaBottom=False, so setdefault leaves that decision alone.
+        bottom.style.setdefault("safeAreaBottom", True)
 
     def rebuild(self) -> None:
         """Re-create the internal layout (after mutating body/app_bar/…)."""

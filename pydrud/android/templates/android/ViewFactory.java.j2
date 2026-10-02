@@ -40,6 +40,8 @@ public class ViewFactory {
     private final Map<String, JSONObject> nodeMap = new HashMap<>();
     /** Views that pad themselves to clear the status / navigation bars. */
     private final Map<View, int[]> safeAreaViews = new java.util.WeakHashMap<>();
+    /** Gap (px) a LinearLayout puts between its children, applied as margins. */
+    private final Map<View, Integer> linearSpacing = new java.util.WeakHashMap<>();
     private final WidgetRegistry registry = new WidgetRegistry();
     private final MaterialViews material;
     private final AdvancedViews advanced;
@@ -107,6 +109,7 @@ public class ViewFactory {
                 FrameLayout.LayoutParams.MATCH_PARENT);
             root.addView(v, lp);
             applySize(v, tree.optJSONObject("style"));
+            indexParents(tree);
         }
     }
 
@@ -124,6 +127,8 @@ public class ViewFactory {
                 if (v != null && parent != null) {
                     parentMap.put(key, parentKey);
                     addChild(parent, v, tree, index);
+                    recordChild(parentKey, tree, index);
+                    indexParents(tree);
                 } else if (v != null) {
                     Log.w(TAG, "create: parent not found for " + key);
                 }
@@ -135,8 +140,15 @@ public class ViewFactory {
                 JSONObject node = nodeMap.get(key);
                 if (patch.has("props")) {
                     JSONObject props = patch.getJSONObject("props");
-                    updateProps(v, props, node);
+                    boolean handled = updateProps(v, props, node);
                     mergeInto(node, "props", props);
+                    if (!handled) {
+                        // The widget paints itself from props at build
+                        // time; rebuild it so the change is never lost.
+                        recreateInPlace(key, node);
+                        v = viewMap.get(key);
+                        if (v == null) break;
+                    }
                 }
                 if (patch.has("style")) {
                     JSONObject style = patch.getJSONObject("style");
@@ -161,11 +173,19 @@ public class ViewFactory {
                     ViewGroup.LayoutParams lp = v.getLayoutParams();
                     if (v.getParent() == parent) parent.removeView(v);
                     parent.addView(v, Math.min(index, parent.getChildCount()), lp);
+                    applySpacing(parent);
+                    forgetChild(parentKey, key);
+                    recordChild(parentKey, nodeMap.get(key), index);
                 }
                 break;
             }
             case "delete": {
+                View old = viewMap.get(key);
+                ViewGroup parent = old != null && old.getParent() instanceof ViewGroup
+                    ? (ViewGroup) old.getParent() : null;
+                forgetChild(parentMap.get(key), key);
                 removeViewTree(key);
+                applySpacing(parent);
                 break;
             }
             case "replace": {
@@ -180,11 +200,14 @@ public class ViewFactory {
                 } else {
                     parent = containerFor(parentKey);
                 }
+                forgetChild(parentKey, key);
                 removeViewTree(key);
                 View n = createView(tree);
                 if (n != null && parent != null) {
                     parentMap.put(newKey, parentKey);
                     addChild(parent, n, tree, at);
+                    recordChild(parentKey, tree, at);
+                    indexParents(tree);
                 }
                 break;
             }
@@ -208,6 +231,13 @@ public class ViewFactory {
     public void refreshInsets() {
         for (Map.Entry<View, int[]> entry : safeAreaViews.entrySet()) {
             applySafeAreaPadding(entry.getKey(), entry.getValue());
+        }
+        // Navigation bars size themselves from the gesture inset and the
+        // window metrics, so they have to recompute after a rotation.
+        for (View view : viewMap.values()) {
+            if (view instanceof PydrudNavigation.PydrudNavBar) {
+                ((PydrudNavigation.PydrudNavBar) view).refreshMetrics();
+            }
         }
     }
 
@@ -306,6 +336,12 @@ public class ViewFactory {
                         Log.w(TAG, "Unknown widget type: " + type + " — rendering empty box");
                         view = new FrameLayout(activity);
                     }
+                    // Material components and custom widgets build themselves
+                    // from props only, so the factory attaches their Pydrud
+                    // children here. Without this a Tabs body, a Drawer, a
+                    // GestureDetector or any animation wrapper renders empty
+                    // until an unrelated patch happens to re-create it.
+                    attachChildren(view, json);
             }
 
             if (view == null) return null;
@@ -423,21 +459,28 @@ public class ViewFactory {
             ll.setGravity(gravity(s.optString("crossAxisAlignment", "")));
         }
 
+        // Spacing is applied as a margin on each child rather than as
+        // interleaved Space views: a Space would sit between the children
+        // and shift every native index, so an insert/remove patch (which
+        // addresses children by logical index) would land in the wrong
+        // place — or leave an orphaned gap behind.
+        if (spacing > 0) linearSpacing.put(ll, spacing);
+        String parentKey = json != null ? json.optString("key", "") : "";
+
         JSONArray arr = json.optJSONArray("children");
         if (arr != null) {
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject childJson = arr.optJSONObject(i);
                 View c = createView(childJson);
                 if (c == null) continue;
-                ll.addView(c, linearParams(childJson, orientation));
-                if (spacing > 0 && i < arr.length() - 1) {
-                    Space gap = new Space(activity);
-                    ll.addView(gap, orientation == LinearLayout.VERTICAL
-                        ? new LinearLayout.LayoutParams(1, spacing)
-                        : new LinearLayout.LayoutParams(spacing, 1));
+                if (childJson != null && !parentKey.isEmpty()) {
+                    String childKey = childJson.optString("key", "");
+                    if (!childKey.isEmpty()) parentMap.put(childKey, parentKey);
                 }
+                ll.addView(c, linearParams(childJson, orientation));
             }
         }
+        applySpacing(ll);
 
         PydrudTheme.animateLayout(ll);
 
@@ -1245,6 +1288,14 @@ public class ViewFactory {
             if (orientation == LinearLayout.VERTICAL) lp.width = LinearLayout.LayoutParams.MATCH_PARENT;
             else lp.height = LinearLayout.LayoutParams.MATCH_PARENT;
         }
+        // A width-capped child centres itself in the leftover space instead
+        // of hugging the start edge — the "readable column" layout.
+        JSONObject cs = json != null ? json.optJSONObject("style") : null;
+        if (cs != null && cs.has("maxWidth") && !cs.has("alignment")
+                && orientation == LinearLayout.VERTICAL
+                && lp.width != LinearLayout.LayoutParams.MATCH_PARENT) {
+            lp.gravity = Gravity.CENTER_HORIZONTAL;
+        }
         return lp;
     }
 
@@ -1302,6 +1353,20 @@ public class ViewFactory {
         if (s != null) {
             if (s.has("width"))  w = dimension(s, "width", w);
             if (s.has("height")) h = dimension(s, "height", h);
+            // maxWidth / maxHeight cap a stretched child on big screens, so
+            // a form on a tablet stays readable instead of spanning 1200dp.
+            if (s.has("maxWidth")) {
+                int max = dimension(s, "maxWidth", -1);
+                int current = (w == ViewGroup.LayoutParams.MATCH_PARENT)
+                    ? PydrudTheme.screenWidthPx() : w;
+                if (max > 0 && current > max) w = max;
+            }
+            if (s.has("maxHeight")) {
+                int max = dimension(s, "maxHeight", -1);
+                int current = (h == ViewGroup.LayoutParams.MATCH_PARENT)
+                    ? PydrudTheme.screenHeightPx() : h;
+                if (max > 0 && current > max) h = max;
+            }
         }
         return new ViewGroup.LayoutParams(w, h);
     }
@@ -1334,23 +1399,71 @@ public class ViewFactory {
         view.setLayoutParams(lp);
     }
 
-    /** Parse "match" / "wrap" / a dp number from a style field. */
+    /**
+     * Parse a size from a style field.
+     *
+     * <p>Accepted forms — all resolved against the *current* window, so
+     * they stay correct after a rotation or a split-screen resize:
+     *
+     * <ul>
+     *   <li>{@code 120} or {@code "120"} — dp</li>
+     *   <li>{@code "match"} / {@code "fill"} — MATCH_PARENT</li>
+     *   <li>{@code "wrap"} / {@code "auto"} — WRAP_CONTENT</li>
+     *   <li>{@code "50%"} — percent of the window on this axis</li>
+     *   <li>{@code "50%w"} / {@code "50%h"} — percent of width / height</li>
+     *   <li>{@code "50%s"} — percent of the shortest side (square-ish art)</li>
+     *   <li>{@code "40vw"} / {@code "40vh"} — CSS-style viewport units</li>
+     *   <li>{@code "100px"} — raw pixels, no density scaling</li>
+     * </ul>
+     */
     private int dimension(JSONObject s, String name, int fallback) {
         Object raw = s.opt(name);
         if (raw == null) return fallback;
-        if (raw instanceof String) {
-            String str = (String) raw;
-            if ("match".equals(str) || "match_parent".equals(str) || "fill".equals(str)) {
-                return ViewGroup.LayoutParams.MATCH_PARENT;
-            }
-            if ("wrap".equals(str) || "wrap_content".equals(str) || "auto".equals(str)) {
-                return ViewGroup.LayoutParams.WRAP_CONTENT;
-            }
-            try { return dp((int) Double.parseDouble(str)); }
-            catch (NumberFormatException e) { return fallback; }
-        }
         if (raw instanceof Number) return dp((int) Math.round(((Number) raw).doubleValue()));
-        return fallback;
+        if (!(raw instanceof String)) return fallback;
+
+        String str = ((String) raw).trim().toLowerCase(java.util.Locale.US);
+        if (str.isEmpty()) return fallback;
+        if (str.equals("match") || str.equals("match_parent") || str.equals("fill")
+            || str.equals("100%") || str.equals("expand")) {
+            return ViewGroup.LayoutParams.MATCH_PARENT;
+        }
+        if (str.equals("wrap") || str.equals("wrap_content") || str.equals("auto")) {
+            return ViewGroup.LayoutParams.WRAP_CONTENT;
+        }
+
+        boolean vertical = "height".equals(name) || "minHeight".equals(name);
+        try {
+            if (str.endsWith("%w") || str.endsWith("%h") || str.endsWith("%s")) {
+                char axis = str.charAt(str.length() - 1);
+                float pct = Float.parseFloat(str.substring(0, str.length() - 2));
+                if (axis == 'w') return PydrudTheme.percentWidth(pct);
+                if (axis == 'h') return PydrudTheme.percentHeight(pct);
+                return PydrudTheme.percentShortest(pct);
+            }
+            if (str.endsWith("vw")) {
+                return PydrudTheme.percentWidth(
+                    Float.parseFloat(str.substring(0, str.length() - 2)));
+            }
+            if (str.endsWith("vh")) {
+                return PydrudTheme.percentHeight(
+                    Float.parseFloat(str.substring(0, str.length() - 2)));
+            }
+            if (str.endsWith("%")) {
+                float pct = Float.parseFloat(str.substring(0, str.length() - 1));
+                return vertical ? PydrudTheme.percentHeight(pct)
+                                : PydrudTheme.percentWidth(pct);
+            }
+            if (str.endsWith("px")) {
+                return Math.round(Float.parseFloat(str.substring(0, str.length() - 2)));
+            }
+            if (str.endsWith("dp")) {
+                return dp(Float.parseFloat(str.substring(0, str.length() - 2)));
+            }
+            return dp((float) Double.parseDouble(str));
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
     }
 
     /** Attach a freshly created view to a parent with correct layout params. */
@@ -1365,6 +1478,48 @@ public class ViewFactory {
         }
         int at = (index < 0 || index > parent.getChildCount()) ? parent.getChildCount() : index;
         parent.addView(child, at, lp);
+        applySpacing(parent);
+    }
+
+    /** The child's own ``style.margin`` on the main axis, in px. */
+    private int baseMargin(View child, boolean vertical) {
+        Object tag = child.getTag();
+        if (!(tag instanceof String)) return 0;
+        JSONObject node = nodeMap.get((String) tag);
+        JSONObject style = node != null ? node.optJSONObject("style") : null;
+        JSONObject margin = style != null ? style.optJSONObject("margin") : null;
+        if (margin == null) return 0;
+        if (margin.has("all")) return dp(margin.optInt("all", 0));
+        return dp(margin.optInt(vertical ? "top" : "left", 0));
+    }
+
+    /**
+     * Re-apply a Column/Row's gap after its children changed.
+     *
+     * <p>Every child except the first gets a leading margin on the main
+     * axis, so inserting or removing a row keeps the rhythm correct and
+     * never leaves a stray gap behind.
+     */
+    private void applySpacing(ViewGroup parent) {
+        if (parent == null || !(parent instanceof LinearLayout)) return;
+        Integer gap = linearSpacing.get(parent);
+        if (gap == null || gap <= 0) return;
+        LinearLayout ll = (LinearLayout) parent;
+        boolean vertical = ll.getOrientation() == LinearLayout.VERTICAL;
+        int visibleIndex = 0;
+        for (int i = 0; i < ll.getChildCount(); i++) {
+            View child = ll.getChildAt(i);
+            ViewGroup.LayoutParams lp = child.getLayoutParams();
+            if (!(lp instanceof ViewGroup.MarginLayoutParams)) continue;
+            ViewGroup.MarginLayoutParams mlp = (ViewGroup.MarginLayoutParams) lp;
+            boolean gone = child.getVisibility() == View.GONE;
+            int lead = (visibleIndex == 0 || gone) ? 0 : gap;
+            // The child keeps its own style margin; the gap is added on top.
+            lead += baseMargin(child, vertical);
+            if (vertical) mlp.topMargin = lead; else mlp.leftMargin = lead;
+            child.setLayoutParams(mlp);
+            if (!gone) visibleIndex++;
+        }
     }
 
     /** Find the ViewGroup that children of *parentKey* should be added to. */
@@ -1376,7 +1531,40 @@ public class ViewFactory {
                 return (ViewGroup) sv.getChildAt(0);
             }
         }
-        return parent instanceof ViewGroup ? (ViewGroup) parent : null;
+        return childHost(parent);
+    }
+
+    /**
+     * Where a composite view's Pydrud children belong.
+     *
+     * <p>A widget such as Tabs or ExpansionTile builds its own chrome (a tab
+     * strip, a header) and tags the container its children must go into, so
+     * both the first render and later patches put them in the same place.
+     */
+    static ViewGroup childHost(View view) {
+        if (view == null) return null;
+        Object tag = view.getTag(android.R.id.content);
+        if (tag instanceof ViewGroup) return (ViewGroup) tag;
+        return view instanceof ViewGroup ? (ViewGroup) view : null;
+    }
+
+    /** Build and attach the children of *json* into *view*'s child host. */
+    private void attachChildren(View view, JSONObject json) {
+        JSONArray arr = json != null ? json.optJSONArray("children") : null;
+        if (arr == null || arr.length() == 0) return;
+        ViewGroup host = childHost(view);
+        if (host == null) return;
+        String parentKey = json.optString("key", "");
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject childJson = arr.optJSONObject(i);
+            View child = createView(childJson);
+            if (child == null) continue;
+            if (childJson != null) {
+                String childKey = childJson.optString("key", "");
+                if (!childKey.isEmpty()) parentMap.put(childKey, parentKey);
+            }
+            addChild(host, child, childJson, -1);
+        }
     }
 
     /** Remove a view and purge every descendant key from the lookup maps. */
@@ -1573,11 +1761,23 @@ public class ViewFactory {
 
     // ── Props update ─────────────────────────────────────────────────────────
 
-    private void updateProps(View view, JSONObject p, JSONObject node) {
-        if (p == null) return;
+    /**
+     * Apply changed props to an existing view.
+     *
+     * @return true when the view was actually refreshed. A false result
+     *         means the widget draws itself from props the factory cannot
+     *         patch, and {@link #recreateInPlace} rebuilds it instead — so
+     *         a property change is never silently dropped.
+     */
+    private boolean updateProps(View view, JSONObject p, JSONObject node) {
+        if (p == null) return true;
+        boolean handled = true;
 
         if (p.has("_visible")) {
             view.setVisibility(p.optBoolean("_visible", true) ? View.VISIBLE : View.GONE);
+            if (view.getParent() instanceof ViewGroup) {
+                applySpacing((ViewGroup) view.getParent());
+            }
         }
         if (p.has("_tooltip") && android.os.Build.VERSION.SDK_INT >= 26) {
             view.setTooltipText(p.optString("_tooltip", ""));
@@ -1591,6 +1791,28 @@ public class ViewFactory {
             try { node.put("events", p.getJSONArray("_events")); }
             catch (JSONException ignored) {}
             bindEvents(view, node);
+        }
+
+        // Only the bookkeeping keys changed — nothing else to do.
+        if (!hasRealProps(p)) return true;
+
+        if (view instanceof PydrudNavigation.PydrudNavBar) {
+            ((PydrudNavigation.PydrudNavBar) view).applyProps(p);
+            return true;
+        }
+        if (view instanceof PydrudNavigation.PydrudTabBar) {
+            ((PydrudNavigation.PydrudTabBar) view).applyProps(p);
+            return true;
+        }
+        {
+            ViewGroup host = view instanceof ViewGroup ? (ViewGroup) view : null;
+            View strip = host != null && host.getChildCount() > 0
+                ? host.getChildAt(0) : null;
+            if (strip instanceof PydrudNavigation.PydrudTabBar) {
+                // Tabs = a tab strip plus the selected tab's content below.
+                ((PydrudNavigation.PydrudTabBar) strip).applyProps(p);
+                return true;
+            }
         }
 
         if (view instanceof Spinner) {
@@ -1615,7 +1837,7 @@ public class ViewFactory {
                     sp.post(() -> sp.setOnItemSelectedListener(listener));
                 }
             }
-            return;
+            return true;
         }
 
         if (view instanceof SeekBar) {
@@ -1628,7 +1850,7 @@ public class ViewFactory {
                 double span = (max - min) == 0 ? 1 : (max - min);
                 sb.setProgress((int) Math.round((p.optDouble("value", min) - min) / span * 1000));
             }
-            return;
+            return true;
         }
 
         if (view instanceof ProgressBar) {
@@ -1638,7 +1860,7 @@ public class ViewFactory {
                 pb.setMax(100);
                 pb.setProgress((int) Math.round(p.optDouble("value", 0) * 100));
             }
-            return;
+            return true;
         }
 
         if (view instanceof CompoundButton) {
@@ -1659,7 +1881,7 @@ public class ViewFactory {
                     cb.setOnCheckedChangeListener(listener);
                 }
             }
-            return;
+            return true;
         }
 
         if (view instanceof EditText) {
@@ -1673,7 +1895,7 @@ public class ViewFactory {
                 }
             }
             if (p.has("hint")) et.setHint(p.optString("hint", ""));
-            return;
+            return true;
         }
 
         if (view instanceof ImageView && p.has("name")) {
@@ -1686,14 +1908,113 @@ public class ViewFactory {
                 : PydrudTheme.onSurfaceVariant;
             iv.setImageDrawable(PydrudIcons.drawable(
                 p.optString("name", "star"), tint, PydrudTheme.adaptive(size)));
-            return;
+            return true;
+        }
+
+        // Image: a new src must actually reload the bitmap.
+        if (view instanceof ImageView && p.has("src")) {
+            loadImage((ImageView) view, p.optString("src", ""));
+            return true;
         }
 
         if (view instanceof TextView) {
             TextView tv = (TextView) view;
-            if (p.has("value")) tv.setText(p.optString("value", ""));
-            if (p.has("text"))  tv.setText(p.optString("text", ""));
+            if (p.has("value") || p.has("text") || p.has("label")) {
+                tv.setText(p.optString("value",
+                    p.optString("text", p.optString("label", tv.getText().toString()))));
+                return true;
+            }
         }
+
+        return false;
+    }
+
+    /** True when the patch carries widget props, not just bookkeeping keys. */
+    private boolean hasRealProps(JSONObject p) {
+        java.util.Iterator<String> keys = p.keys();
+        while (keys.hasNext()) {
+            if (!keys.next().startsWith("_")) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Rebuild a view from its (already merged) node, in place.
+     *
+     * <p>The safety net for widgets whose look is computed from props at
+     * build time — a Chip's selected state, a Rating's value, a Banner's
+     * message. Re-creating the subtree is cheap and guarantees the UI
+     * never lags behind the Python state.
+     */
+    /**
+     * Record parent links for a whole subtree.
+     *
+     * <p>Deleting a key purges its descendants through {@code parentMap}, so
+     * the map has to be complete after a full render too — otherwise stale
+     * child views linger in the lookup maps and later patches address views
+     * that are no longer on screen.
+     */
+    private void indexParents(JSONObject node) {
+        if (node == null) return;
+        String key = node.optString("key", "");
+        JSONArray kids = node.optJSONArray("children");
+        if (kids == null) return;
+        for (int i = 0; i < kids.length(); i++) {
+            JSONObject child = kids.optJSONObject(i);
+            if (child == null) continue;
+            String childKey = child.optString("key", "");
+            if (!key.isEmpty() && !childKey.isEmpty()) parentMap.put(childKey, key);
+            indexParents(child);
+        }
+    }
+
+    /** Keep a parent node's children array in step with a structural patch. */
+    private void recordChild(String parentKey, JSONObject childJson, int index) {
+        JSONObject parent = parentKey == null ? null : nodeMap.get(parentKey);
+        if (parent == null || childJson == null) return;
+        JSONArray kids = parent.optJSONArray("children");
+        if (kids == null) {
+            kids = new JSONArray();
+            try { parent.put("children", kids); } catch (JSONException ignored) { return; }
+        }
+        int at = (index < 0 || index > kids.length()) ? kids.length() : index;
+        JSONArray next = new JSONArray();
+        for (int i = 0; i < kids.length() + 1; i++) {
+            if (i == at) next.put(childJson);
+            else next.put(kids.opt(i > at ? i - 1 : i));
+        }
+        try { parent.put("children", next); } catch (JSONException ignored) {}
+    }
+
+    /** Drop a child from its parent node's children array. */
+    private void forgetChild(String parentKey, String key) {
+        JSONObject parent = parentKey == null ? null : nodeMap.get(parentKey);
+        if (parent == null) return;
+        JSONArray kids = parent.optJSONArray("children");
+        if (kids == null) return;
+        JSONArray next = new JSONArray();
+        for (int i = 0; i < kids.length(); i++) {
+            JSONObject child = kids.optJSONObject(i);
+            if (child != null && key.equals(child.optString("key", ""))) continue;
+            next.put(kids.opt(i));
+        }
+        try { parent.put("children", next); } catch (JSONException ignored) {}
+    }
+
+    private void recreateInPlace(String key, JSONObject node) {
+        View old = viewMap.get(key);
+        if (old == null || node == null) return;
+        ViewGroup parent = old.getParent() instanceof ViewGroup
+            ? (ViewGroup) old.getParent() : null;
+        if (parent == null) return;
+        int at = parent.indexOfChild(old);
+        String parentKey = parentMap.get(key);
+
+        removeViewTree(key);
+        View fresh = createView(node);
+        if (fresh == null) return;
+        if (parentKey != null) parentMap.put(key, parentKey);
+        addChild(parent, fresh, node, at);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

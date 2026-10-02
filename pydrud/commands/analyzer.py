@@ -43,6 +43,9 @@ _WIDGET_CLASSES = {
     "AnimatedContainer", "AnimatedOpacity", "AnimatedScale",
     "AnimatedRotation", "AnimatedSwitcher", "FadeIn", "SlideIn", "ScaleIn",
     "Hero", "Form", "FormField",
+    # v1.5 — responsive layout
+    "ResponsiveBuilder", "AdaptiveLayout", "ResponsiveGrid", "ShowWhen",
+    "SafeArea", "NavigationBar", "TabBar",
 }
 
 # Style property keys known to be valid.
@@ -61,6 +64,8 @@ _VALID_STYLE_KEYS = {
     # v1.2
     "animation", "scale", "rotation", "drawerSide", "fabPosition",
     "safeArea", "resizeForKeyboard", "shadow", "aspectRatio", "zIndex",
+    # v1.5 — responsive
+    "safeAreaTop", "safeAreaBottom", "breakpoint",
 }
 
 
