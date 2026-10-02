@@ -1304,6 +1304,7 @@ class WebView(Widget):
             "html": self.html,
             "javascript": self.javascript,
             "allowedOrigins": self.allowed_origins or None,
+            "allowNativeBridge": bool(self.javascript and self.allowed_origins),
             "zoom": self.zoom or None,
         }))
         return props
