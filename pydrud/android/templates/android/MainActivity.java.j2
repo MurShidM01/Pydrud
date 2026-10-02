@@ -69,11 +69,16 @@ public class {{ app_name }}Activity extends AppCompatActivity {
         // leaving a grey strip. Side insets and the keyboard are handled
         // here because they affect every screen.
         ViewCompat.setOnApplyWindowInsetsListener(rootView, (v, windowInsets) -> {
-            Insets bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars());
+            Insets bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars()
+                | WindowInsetsCompat.Type.displayCutout());
             Insets ime = windowInsets.getInsets(WindowInsetsCompat.Type.ime());
             PydrudTheme.setInsets(bars.left, bars.top, bars.right, bars.bottom);
-            v.setPadding(bars.left, 0, bars.right, Math.max(0, ime.bottom - bars.bottom));
+            PydrudTheme.keyboardPx = Math.max(0, ime.bottom - bars.bottom);
+            v.setPadding(bars.left, 0, bars.right, PydrudTheme.keyboardPx);
             if (viewFactory != null) viewFactory.refreshInsets();
+            // Real safe-area values only exist once insets arrive — tell
+            // Python so MediaQuery.safe_area() is accurate from frame one.
+            scheduleMetrics("insets");
             return WindowInsetsCompat.CONSUMED;
         });
 
@@ -108,6 +113,50 @@ public class {{ app_name }}Activity extends AppCompatActivity {
                 runOnUiThread(() -> showFatal(t));
             }
         }, "pydrud-python").start();
+    }
+
+    // ── Window metrics ────────────────────────────────────────────────────
+
+    private final android.os.Handler metricsHandler =
+        new android.os.Handler(android.os.Looper.getMainLooper());
+    private Runnable pendingMetrics;
+
+    /**
+     * Push the new window metrics to Python, coalescing bursts.
+     *
+     * <p>A rotation produces a configuration change *and* several inset
+     * callbacks; debouncing means Python re-renders once, with final
+     * values, instead of three times mid-animation.
+     */
+    public void scheduleMetrics(final String reason) {
+        if (bridge == null) return;
+        if (pendingMetrics != null) metricsHandler.removeCallbacks(pendingMetrics);
+        pendingMetrics = new Runnable() {
+            @Override public void run() {
+                pendingMetrics = null;
+                if (bridge != null) bridge.sendMetrics(reason);
+            }
+        };
+        metricsHandler.postDelayed(pendingMetrics, 48L);
+    }
+
+    @Override
+    public void onConfigurationChanged(android.content.res.Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        // The activity is NOT recreated (see android:configChanges in the
+        // manifest), so this is the only moment we learn about rotation,
+        // split screen, a foldable opening or a font-size change.
+        PydrudTheme.refreshMetrics(this);
+        boolean night = (newConfig.uiMode
+            & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+            == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+        if (night != PydrudTheme.dark) {
+            PydrudTheme.setNight(night);
+            if (rootView != null) rootView.setBackgroundColor(PydrudTheme.background);
+            applySystemBarAppearance();
+        }
+        if (rootView != null) rootView.requestApplyInsets();
+        scheduleMetrics("configuration");
     }
 
     /** Render a readable error screen instead of a blank activity. */

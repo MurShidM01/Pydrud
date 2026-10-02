@@ -354,9 +354,13 @@ class TestWidgetBaseExtras(unittest.TestCase):
         self.assertEqual(original.children[0].value, "a")
         self.assertIn("click", clone.children[0].event_handlers)
 
-    def test_invisible_children_are_not_serialised(self):
+    def test_invisible_children_are_serialised_but_marked_hidden(self):
+        # They must stay in the tree: the renderer hides them, and keeping
+        # them preserves the child indices the diff patches address.
         d = Column(children=[Text("hidden", visible=False), Text("shown")]).to_dict()
-        self.assertEqual(len(d["children"]), 1)
+        self.assertEqual(len(d["children"]), 2)
+        self.assertFalse(d["children"][0]["visible"])
+        self.assertTrue(d["children"][1]["visible"])
 
     def test_with_style_chaining(self):
         w = Container().with_style(bg="#FF000000")

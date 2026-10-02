@@ -15,7 +15,8 @@ from pydrud.widgets.theme import (Colors, Icons, Theme, ColorScheme, Typography,
 from pydrud.widgets.tokens import Tokens
 from pydrud.widgets.material import (
     ListTile, ExpansionTile, Chip, Badge, Avatar, Banner, Tooltip,
-    Tab, Tabs, NavItem, BottomNavigationBar, NavigationRail, Drawer,
+    Tab, Tabs, TabBar, NavItem, BottomNavigationBar, NavigationBar,
+    NavigationRail, Drawer,
     SegmentedButton, SearchBar, Rating, CircularProgress, Skeleton,
     RefreshIndicator, Stepper, WebView, VideoPlayer, Chart,
 )
@@ -36,6 +37,9 @@ from pydrud.widgets.advanced import (
 from pydrud.widgets.app_bar import AppBar
 from pydrud.widgets.scaffold import Scaffold
 from pydrud.widgets.fab import FloatingActionButton
+from pydrud.widgets.responsive import (
+    AdaptiveLayout, ResponsiveBuilder, ResponsiveGrid, SafeArea, ShowWhen,
+)
 
 __all__ = [
     "Widget",
@@ -98,8 +102,10 @@ __all__ = [
     "Tooltip",
     "Tab",
     "Tabs",
+    "TabBar",
     "NavItem",
     "BottomNavigationBar",
+    "NavigationBar",
     "NavigationRail",
     "Drawer",
     "SegmentedButton",
@@ -156,4 +162,10 @@ __all__ = [
     "Markdown",
     "ReorderableList",
     "InfiniteList",
+    # v1.5 — responsive layout
+    "ResponsiveBuilder",
+    "AdaptiveLayout",
+    "ResponsiveGrid",
+    "ShowWhen",
+    "SafeArea",
 ]

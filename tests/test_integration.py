@@ -350,6 +350,50 @@ class TestPageCommands(IntegrationTestCase):
         self.assertEqual(info["status_bar_height"], 24)
         self.assertAlmostEqual(Responsive.factor(), 400 / 360, places=5)
 
+    def test_rotation_relayouts_the_ui(self):
+        """A metrics event must rebuild the tree with the new resolution."""
+        from pydrud import MediaQuery, ResponsiveBuilder
+
+        def main(page):
+            page.add(ResponsiveBuilder(
+                lambda s: Text(f"{s.width}x{s.height} {s.orientation}",
+                               key="probe"),
+                key="rb"))
+
+        self.launch(main)
+        self.assertTrue(self.device.wait_for(
+            lambda d: d.root is not None and d.root.find("probe") is not None))
+        self.assertEqual(self.device.root.find("probe").props["value"],
+                         "400x800 portrait")
+
+        self.device.rotate()
+        self.assertTrue(self.device.wait_for(
+            lambda d: d.root.find("probe").props["value"] == "800x400 landscape"))
+        self.assertEqual(MediaQuery.breakpoint(), "medium")
+        self.assertTrue(MediaQuery.is_landscape())
+
+    def test_keyboard_and_font_scale_updates(self):
+        from pydrud import MediaQuery
+
+        def main(page):
+            page.add(Text("hi"))
+
+        self.launch(main)
+        self.device.wait_for(lambda d: d.root is not None)
+
+        self.device.show_keyboard(320)
+        self.assertTrue(self.device.wait_for(
+            lambda d: MediaQuery.keyboard_visible()))
+        self.assertEqual(MediaQuery.viewport()[1], 800 - 24 - 16 - 320)
+
+        self.device.hide_keyboard()
+        self.assertTrue(self.device.wait_for(
+            lambda d: not MediaQuery.keyboard_visible()))
+
+        self.device.set_text_scale(1.3)
+        self.assertTrue(self.device.wait_for(
+            lambda d: MediaQuery.text_scale == 1.3))
+
 
 class TestScaffoldRendering(IntegrationTestCase):
     """Scaffold / AppBar / FAB compose into a renderable tree."""

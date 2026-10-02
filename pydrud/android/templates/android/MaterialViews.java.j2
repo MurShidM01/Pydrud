@@ -248,6 +248,17 @@ public class MaterialViews {
         column.addView(header, new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // The body goes under the header and is the tile's child host, so
+        // the children Python declared actually render (and collapse).
+        LinearLayout body = new LinearLayout(activity);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(dp(16), 0, dp(16), dp(12));
+        body.setVisibility(expanded ? View.VISIBLE : View.GONE);
+        column.addView(body, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT));
+        column.setTag(android.R.id.content, body);
         return column;
     }
 
@@ -612,56 +623,64 @@ public class MaterialViews {
         LinearLayout host = new LinearLayout(activity);
         host.setOrientation(LinearLayout.VERTICAL);
 
-        TabLayout tabs = new TabLayout(activity);
-        tabs.setTabMode(p.optBoolean("scrollable", false)
-            ? TabLayout.MODE_SCROLLABLE : TabLayout.MODE_FIXED);
-        int indicatorColor = parseColor(p.optString("indicatorColor", ""),
-                                        PydrudTheme.primary);
-        tabs.setSelectedTabIndicatorColor(indicatorColor);
-        tabs.setSelectedTabIndicatorHeight(dp(3));
-        tabs.setTabTextColors(PydrudTheme.onSurfaceVariant, indicatorColor);
-        tabs.setBackgroundColor(parseColor(p.optString("bg", ""),
-                                           PydrudTheme.surface));
-        tabs.setTabRippleColor(android.content.res.ColorStateList.valueOf(
-            PydrudTheme.alpha(indicatorColor, 0.10f)));
-        tabs.setTabIndicatorFullWidth(false);
-
-        JSONArray items = p.optJSONArray("tabs");
-        int count = items == null ? 0 : items.length();
-        for (int i = 0; i < count; i++) {
-            JSONObject item = items.optJSONObject(i);
-            TabLayout.Tab tab = tabs.newTab();
-            if (item != null) {
-                tab.setText(item.optString("label", ""));
-                String icon = item.optString("icon", "");
-                if (!icon.isEmpty()) {
-                    tab.setIcon(factory.icon(icon, PydrudTheme.onSurfaceVariant, dp(22)));
-                }
-            }
-            tabs.addTab(tab);
-        }
-        int selected = p.optInt("selected", 0);
-        if (selected >= 0 && selected < count) {
-            TabLayout.Tab tab = tabs.getTabAt(selected);
-            if (tab != null) tab.select();
-        }
-        tabs.addOnTabSelectedListener(new TabLayout.OnTabSelectedListener() {
-            @Override public void onTabSelected(TabLayout.Tab tab) {
+        final PydrudNavigation.PydrudTabBar bar =
+            new PydrudNavigation.PydrudTabBar(activity);
+        bar.setLayoutParams(new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            PydrudTheme.dp((float) p.optDouble("tabHeight", 48))));
+        bar.applyProps(p);
+        bar.setOnSelect(new PydrudNavigation.PydrudTabBar.OnSelect() {
+            @Override public void onSelect(int index) {
                 if (events == null) return;
                 JSONObject data = new JSONObject();
-                try { data.put("value", tab.getPosition()); } catch (Exception ignored) {}
+                try { data.put("value", index); } catch (Exception ignored) {}
                 events.dispatch("change", key, data);
             }
-            @Override public void onTabUnselected(TabLayout.Tab tab) {}
-            @Override public void onTabReselected(TabLayout.Tab tab) {}
         });
-        host.addView(tabs, new LinearLayout.LayoutParams(
+        host.addView(bar);
+
+        // The selected tab's body lives *below* the strip. Tagging it marks
+        // it as the child host, so both the first render and later patches
+        // put the tab content in the right place (it used to land above the
+        // tab bar — or nowhere at all on the very first frame).
+        LinearLayout content = new LinearLayout(activity);
+        content.setOrientation(LinearLayout.VERTICAL);
+        host.addView(content, new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT));
+        host.setTag(android.R.id.content, content);
         return host;
     }
 
+    /**
+     * Bottom navigation.
+     *
+     * <p>Pydrud draws the bar itself ({@link PydrudNavigation.PydrudNavBar}) so
+     * every property from Python is honoured. Pass {@code native=True} on the
+     * widget to get the stock Material {@code BottomNavigationView} instead.
+     */
     private View createBottomNav(final String key, JSONObject p) {
+        if (!p.optBoolean("native", false)) {
+            final PydrudNavigation.PydrudNavBar nav =
+                new PydrudNavigation.PydrudNavBar(activity);
+            nav.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                PydrudTheme.dp((float) p.optDouble("height", PydrudTheme.navHeight))));
+            nav.applyProps(p);
+            nav.setOnSelect(new PydrudNavigation.PydrudNavBar.OnSelect() {
+                @Override public void onSelect(int index) {
+                    if (events == null) return;
+                    JSONObject data = new JSONObject();
+                    try { data.put("value", index); } catch (Exception ignored) {}
+                    events.dispatch("change", key, data);
+                }
+            });
+            return nav;
+        }
+        return createNativeBottomNav(key, p);
+    }
+
+    private View createNativeBottomNav(final String key, JSONObject p) {
         BottomNavigationView nav = new BottomNavigationView(activity);
         JSONArray items = p.optJSONArray("items");
         int count = items == null ? 0 : items.length();
@@ -689,9 +708,14 @@ public class MaterialViews {
         }
         int selected = p.optInt("selected", 0);
         if (selected >= 0 && selected < count) nav.setSelectedItemId(selected);
-        nav.setLabelVisibilityMode(p.optBoolean("showLabels", true)
-            ? com.google.android.material.navigation.NavigationBarView.LABEL_VISIBILITY_LABELED
-            : com.google.android.material.navigation.NavigationBarView.LABEL_VISIBILITY_UNLABELED);
+        String behavior = p.optString("labelBehavior",
+            p.optBoolean("showLabels", true) ? "always" : "never");
+        nav.setLabelVisibilityMode(
+            "never".equals(behavior)
+                ? com.google.android.material.navigation.NavigationBarView.LABEL_VISIBILITY_UNLABELED
+            : "selected".equals(behavior)
+                ? com.google.android.material.navigation.NavigationBarView.LABEL_VISIBILITY_SELECTED
+                : com.google.android.material.navigation.NavigationBarView.LABEL_VISIBILITY_LABELED);
         String bg = p.optString("bg", "");
         if (!bg.isEmpty()) nav.setBackgroundColor(parseColor(bg));
 
