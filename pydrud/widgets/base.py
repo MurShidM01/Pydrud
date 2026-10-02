@@ -150,6 +150,7 @@ class Widget:
 
     def to_dict(self) -> dict:
         """Recursively serialise this widget and its children to a JSON-safe dict."""
+        validate_tree_keys(self)
         d: dict[str, Any] = {
             "type": self._widget_type,
             "key": self.key,
@@ -251,3 +252,29 @@ def _stabilise_children(widget: "Widget") -> None:
 
 def _gen_key() -> str:
     return uuid.uuid4().hex[:12]
+
+
+def validate_tree_keys(root: "Widget") -> None:
+    """Validate that every widget key is unique and non-empty.
+
+    Duplicate keys make keyed reconciliation mathematically ambiguous and can
+    otherwise collapse entries in the diff engine's dictionaries.
+    """
+    seen: dict[str, tuple[str, ...]] = {}
+
+    def visit(widget: "Widget", path: tuple[str, ...]) -> None:
+        key = str(widget.key or "")
+        if not key:
+            raise ValueError("Pydrud widget keys must be non-empty")
+        if key in seen:
+            previous = " > ".join(seen[key]) or "<root>"
+            current = " > ".join(path) or "<root>"
+            raise ValueError(
+                f"Duplicate Pydrud widget key {key!r}: "
+                f"{previous} and {current}"
+            )
+        seen[key] = path
+        for index, child in enumerate(widget.children):
+            visit(child, path + (f"{widget._widget_type}[{index}]",))
+
+    visit(root, (root._widget_type,))
