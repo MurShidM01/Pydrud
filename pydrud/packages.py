@@ -297,7 +297,9 @@ class Requirements:
             return {}
         packages: dict[str, str] = {}
         in_section = False
-        for line in open(self.path, encoding="utf-8"):
+        with open(self.path, encoding="utf-8") as handle:
+            lines = handle.readlines()
+        for line in lines:
             stripped = line.strip()
             if stripped.startswith("[") and stripped.endswith("]"):
                 in_section = stripped == "[python.packages]"
@@ -319,10 +321,11 @@ class Requirements:
                 "# Pydrud project configuration.\n"
                 "# Packages below are installed into the APK by Chaquopy at\n"
                 "# build time — manage them with 'pydrud pip add/remove'.\n\n")
-            open(self.path, "w", encoding="utf-8").write(header + section)
+            self._write(header + section)
             return
 
-        text = open(self.path, encoding="utf-8").read()
+        with open(self.path, encoding="utf-8") as handle:
+            text = handle.read()
         if "[python.packages]" in text:
             lines, out, skipping = text.splitlines(), [], False
             for line in lines:
@@ -340,7 +343,11 @@ class Requirements:
             text = "\n".join(out).rstrip("\n") + "\n"
         else:
             text = text.rstrip("\n") + "\n\n" + section
-        open(self.path, "w", encoding="utf-8").write(text)
+        self._write(text)
+
+    def _write(self, text: str) -> None:
+        with open(self.path, "w", encoding="utf-8") as handle:
+            handle.write(text)
 
     # ── mutations ────────────────────────────────────────────────────────
 
@@ -419,7 +426,8 @@ def sync_gradle(project_dir: str = ".",
         requirements = Requirements(project_dir).requirement_strings()
     requirements = list(requirements)
 
-    text = open(gradle_path, encoding="utf-8").read()
+    with open(gradle_path, encoding="utf-8") as handle:
+        text = handle.read()
     block = render_pip_block(requirements)
 
     if _BEGIN in text and _END in text:
@@ -434,7 +442,8 @@ def sync_gradle(project_dir: str = ".",
         raise PackageError(
             "The Chaquopy 'pip { }' block is missing from build.gradle.kts.")
 
-    open(gradle_path, "w", encoding="utf-8").write(text)
+    with open(gradle_path, "w", encoding="utf-8") as handle:
+        handle.write(text)
     return gradle_path
 
 

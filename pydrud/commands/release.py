@@ -129,7 +129,9 @@ def signing_status(project_dir: str) -> dict:
         return {"configured": False, "reason": "no keystore.properties",
                 "signed_with": "debug key"}
     values = {}
-    for line in open(properties, encoding="utf-8"):
+    with open(properties, encoding="utf-8") as handle:
+        property_lines = handle.readlines()
+    for line in property_lines:
         if "=" in line and not line.strip().startswith("#"):
             key, _, value = line.partition("=")
             values[key.strip()] = value.strip()

@@ -343,13 +343,21 @@ def _lerp(a: Any, b: Any, t: float) -> Any:
 
 def _lerp_color(a: str, b: str, t: float) -> str:
     def parts(color: str) -> tuple[int, int, int, int]:
-        value = color.lstrip("#")
+        value = str(color).lstrip("#").strip()
+        if len(value) in (3, 4):          # #RGB / #ARGB shorthand
+            value = "".join(c * 2 for c in value)
         if len(value) == 6:
             value = "FF" + value
+        if len(value) != 8:
+            raise ValueError(f"not a colour: {color!r}")
         return (int(value[0:2], 16), int(value[2:4], 16),
                 int(value[4:6], 16), int(value[6:8], 16))
 
-    ca, cb = parts(a), parts(b)
+    try:
+        ca, cb = parts(a), parts(b)
+    except ValueError:
+        # Not a pair of colours — fall back to a hard switch half way.
+        return b if t >= 0.5 else a
     mixed = [round(x + (y - x) * t) for x, y in zip(ca, cb)]
     return "#" + "".join(f"{c:02X}" for c in mixed)
 

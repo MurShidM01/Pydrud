@@ -65,7 +65,8 @@ class TestPreflight(unittest.TestCase):
     @unittest.skipUnless(HAS_JAVALANG, "javalang not installed")
     def test_broken_generated_java_is_caught(self):
         path = self.factory_path()
-        original = open(path, encoding="utf-8").read()
+        with open(path, encoding="utf-8") as handle:
+            original = handle.read()
         broken = original.replace("advanced.setEventDispatcher(d);",
                                   "advanced.noSuchMethod(d);")
         self.assertNotEqual(original, broken, "anchor line moved")
@@ -97,7 +98,8 @@ class TestPreflight(unittest.TestCase):
 
             with redirect_stdout(io.StringIO()):
                 sync_project(self.project, update_runtime=False)
-            refreshed = open(config_path, encoding="utf-8").read()
+            with open(config_path, encoding="utf-8") as handle:
+                refreshed = handle.read()
             self.assertIn(f'pydrud_version: "{__version__}"', refreshed)
 
             output = io.StringIO()

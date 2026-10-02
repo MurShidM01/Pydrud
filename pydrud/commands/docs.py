@@ -151,7 +151,8 @@ def build_docs(project_dir: str = ".", output: str = "docs") -> str:
         os.path.abspath(pydrud.__file__))), "README.md")
     overview = ["<h2>Overview</h2>"]
     if os.path.exists(readme):
-        text = open(readme, encoding="utf-8").read()[:6000]
+        with open(readme, encoding="utf-8") as handle:
+            text = handle.read()[:6000]
         overview.append(f'<p class="doc">{html.escape(text)}</p>')
     else:
         overview.append("<ul>" + "".join(

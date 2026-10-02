@@ -140,6 +140,13 @@ class FakeDevice:
     def __exit__(self, *exc) -> None:
         self.stop()
 
+    def __del__(self) -> None:  # pragma: no cover - interpreter shutdown
+        """Close the listening socket even if ``stop()`` was never called."""
+        try:
+            self.stop()
+        except Exception:
+            pass
+
     # ── server loop ───────────────────────────────────────────────────────
 
     def _serve(self) -> None:
