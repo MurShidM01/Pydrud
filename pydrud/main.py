@@ -23,7 +23,9 @@ from pydrud.core.tasks import TaskRunner
 from pydrud.core.diff import TreeDiff
 from pydrud.core.events import EventDispatcher
 from pydrud.core.bridge import BridgeProtocol
-from pydrud.widgets import Widget, assign_stable_keys
+from pydrud.core.protocol import RenderTransaction, PROTOCOL_VERSION
+from pydrud.core.elements import ElementTree
+from pydrud.widgets import Widget, assign_stable_keys, validate_tree_keys
 
 #: Above this many patches a full re-render is cheaper than patching.
 MAX_PATCHES = 60
@@ -60,13 +62,21 @@ class App:
         self._page = _Page(self)
         self._event_dispatcher = EventDispatcher()
         self._current_tree: Optional[Widget] = None
-        #: Clone of the tree as the device last saw it (for partial updates).
+        #: Desired Python tree. Native confirmation advances _snapshot.
+        self._desired_tree: Optional[Widget] = None
+        #: Clone of the tree the native runtime has explicitly acknowledged.
         self._snapshot: Optional[Widget] = None
+        self._elements = ElementTree()
+        self._desired_revision = 0
+        self._confirmed_revision = 0
+        self._inflight: dict[str, RenderTransaction] = {}
+        self._native_capabilities: dict = {}
+        self._ui_thread_id: Optional[int] = None
         self._bridge = BridgeProtocol()
         self._connected = False
         self._transport: Optional[socket.socket] = None
         # ── Thread-safe event queue ─────────────────────────────────
-        self._event_queue: queue.Queue = queue.Queue()
+        self._event_queue: queue.Queue = queue.Queue(maxsize=1024)
         self._shutdown_event = threading.Event()
         self._reader_thread: Optional[threading.Thread] = None
         self._running = False
@@ -95,7 +105,7 @@ class App:
         self._request_seq = 0
         self._tasks = TaskRunner(on_error=self._report_error)
         # ── UI-thread marshalling ──────────────────────────────────
-        self._ui_queue: queue.Queue = queue.Queue()
+        self._ui_queue: queue.Queue = queue.Queue(maxsize=1024)
 
     # ── public API ────────────────────────────────────────────────────────
 
@@ -237,7 +247,7 @@ class App:
         for state in states:
             if isinstance(state, State):
                 self._bound_states.append(state)
-                state.watch(lambda _old, _new: self.update())
+                state.watch(lambda _old, _new: self.update(), scheduler=self.run_on_ui)
             elif hasattr(state, "subscribe"):
                 self._bound_stores.append(state)
                 state.subscribe(lambda *_args, **_kw: self.update())
@@ -343,7 +353,10 @@ class App:
                 self._report_error(exc)
         tree = self._page.build()
         assign_stable_keys(tree, prefix="_page")
+        validate_tree_keys(tree)
+        self._materialize_elements(tree)
         self._current_tree = tree
+        self._desired_tree = tree
         self._event_dispatcher.unregister_all()
         self._event_dispatcher.register_tree(tree)
         return tree
