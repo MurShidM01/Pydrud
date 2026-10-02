@@ -157,6 +157,7 @@ def section(title, key, *, action=None):
         children.extend([Container(key=f"{key}_spacer", expand=1), action])
     return Container(
         key=key,
+        width="match",
         padding=EdgeInsets(left=Spacing.XS, top=Spacing.SM, bottom=Spacing.XXS),
         child=Row(key=f"{key}_row", vertical_alignment="center",
                   children=children),
@@ -191,6 +192,7 @@ def empty_state(title, subtitle, icon, key):
     """What the user sees before they have any data — never a blank box."""
     return Container(
         key=key,
+        width="match",
         padding=EdgeInsets(top=Spacing.XL, bottom=Spacing.XL),
         child=Column(key=f"{key}_body", spacing=Spacing.XS,
                      horizontal_alignment="center", children=[
@@ -249,7 +251,9 @@ def home_screen(page):
                          Text(str(counter.value), key="counter_value", size=56,
                               weight=700, color=Colors.WHITE),
                          SizedBox(height=Spacing.SM),
-                         Row(key="hero_actions", spacing=Spacing.SM, children=[
+                         Row(key="hero_actions", spacing=Spacing.SM,
+                             horizontal_alignment="center",
+                             vertical_alignment="center", children=[
                              Button("Reset", key="reset_btn", variant="outlined",
                                     bg_color=Colors.WHITE, size="sm",
                                     color=Colors.WHITE).on_click(reset),
@@ -608,6 +612,7 @@ def showcase_screen(page):
         GestureDetector(
             key="gesture_box",
             child=Container(key="gesture_card", bg=Theme.surface_variant,
+                            width="match",
                             padding=Spacing.XL, border_radius=Radius.LG,
                             alignment="center",
                             child=Text("Double-tap or swipe me",

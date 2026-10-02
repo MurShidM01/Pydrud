@@ -130,6 +130,7 @@ class TestGeneratedProject(unittest.TestCase):
             "android/gradle/wrapper/gradle-wrapper.properties",
             "android/app/src/main/AndroidManifest.xml",
             "android/app/src/main/res/values/themes.xml",
+            "android/app/src/main/res/values/ids.xml",
             "android/app/src/main/java/com/example/demo_app/DemoAppActivity.java",
             "android/app/src/main/java/com/example/demo_app/BridgeService.java",
             "android/app/src/main/java/com/example/demo_app/ViewFactory.java",
@@ -207,6 +208,20 @@ class TestGeneratedProject(unittest.TestCase):
     def test_package_name_includes_app_name(self):
         gradle = open(self.path("android/app/build.gradle.kts"), encoding="utf-8").read()
         self.assertIn('applicationId = "com.example.demo_app"', gradle)
+
+    def test_tag_ids_are_declared_and_used(self):
+        # View.setTag(key, …) crashes with framework ids, so the renderer
+        # must only use ids declared in the app's own resources.
+        ids = open(self.path("android/app/src/main/res/values/ids.xml"),
+                   encoding="utf-8").read()
+        factory = open(
+            self.path("android/app/src/main/java/com/example/demo_app/ViewFactory.java"),
+            encoding="utf-8").read()
+        for name in ("pydrud_tag_range", "pydrud_tag_listener",
+                     "pydrud_tag_children"):
+            self.assertIn(f'name="{name}"', ids, f"{name} missing from ids.xml")
+            self.assertIn(f"R.id.{name}", factory,
+                          f"ViewFactory does not use R.id.{name}")
 
     def test_manifest_references_generated_activity(self):
         manifest = open(

@@ -258,7 +258,9 @@ public class MaterialViews {
         column.addView(body, new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT));
-        column.setTag(android.R.id.content, body);
+        // Application-specific tag id — framework ids (android.R.id.content)
+        // are rejected by View.setTag and used to fail the whole tile.
+        column.setTag(R.id.pydrud_tag_children, body);
         return column;
     }
 
@@ -642,13 +644,16 @@ public class MaterialViews {
         // The selected tab's body lives *below* the strip. Tagging it marks
         // it as the child host, so both the first render and later patches
         // put the tab content in the right place (it used to land above the
-        // tab bar — or nowhere at all on the very first frame).
+        // tab bar — or nowhere at all on the very first frame). The tag key
+        // must be an application-specific id — android.R.id.content throws
+        // "The key must be an application-specific resource id" and used to
+        // replace every Tabs with an empty box.
         LinearLayout content = new LinearLayout(activity);
         content.setOrientation(LinearLayout.VERTICAL);
         host.addView(content, new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT));
-        host.setTag(android.R.id.content, content);
+        host.setTag(R.id.pydrud_tag_children, content);
         return host;
     }
 

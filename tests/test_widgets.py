@@ -89,6 +89,28 @@ class TestLayoutWidgets(unittest.TestCase):
         self.assertEqual(len(row.children), 2)
         self.assertEqual(row.style["spacing"], 12)
 
+    def test_row_main_axis_alignment(self):
+        # horizontal_alignment packs children along the main axis;
+        # vertical_alignment stays the cross axis.
+        row = Row(children=[Text("A")], horizontal_alignment="center",
+                  vertical_alignment="center")
+        self.assertEqual(row.style["mainAxisAlignment"], "center")
+        self.assertEqual(row.style["crossAxisAlignment"], "center")
+
+    def test_column_main_axis_alignment(self):
+        col = Column(children=[Text("A")], vertical_alignment="center",
+                     horizontal_alignment="end")
+        self.assertEqual(col.style["mainAxisAlignment"], "center")
+        self.assertEqual(col.style["crossAxisAlignment"], "end")
+
+    def test_layouts_without_alignment_emit_no_axis_keys(self):
+        # The native renderer keeps its legacy both-axis gravity mapping
+        # when mainAxisAlignment is absent, so it must stay absent unless
+        # the app asks for it.
+        for widget in (Row(children=[]), Column(children=[])):
+            self.assertNotIn("mainAxisAlignment", widget.style)
+            self.assertNotIn("crossAxisAlignment", widget.style)
+
     def test_container_with_child(self):
         c = Container(
             child=Text("Hello"),

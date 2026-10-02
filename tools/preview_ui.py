@@ -38,9 +38,32 @@ sys.path.insert(0, str(REPO / "tools"))
 
 SCALE = 2                       # render at 2x for crisp text
 FONT_DIR = Path("/usr/share/fonts/truetype/dejavu")
-MDI_FONT = (Path(sys.prefix) / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}"
-            / "site-packages" / "qtawesome" / "fonts"
-            / "materialdesignicons6-webfont-6.9.96.ttf")
+
+
+def _mdi_dir() -> Path:
+    """Locate qtawesome's icon font across pip layouts.
+
+    ``pip`` installs into ``site-packages`` on most platforms, but
+    Debian/Ubuntu system Pythons use ``dist-packages`` — check both so the
+    tool works everywhere.
+    """
+    candidates = []
+    for base in (Path(sys.prefix), Path("/usr/local"), Path("/usr")):
+        candidates.append(base / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}"
+                          / "site-packages" / "qtawesome" / "fonts")
+        candidates.append(base / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}"
+                          / "dist-packages" / "qtawesome" / "fonts")
+    # ``pip install --user`` puts it in ~/.local/lib/pythonX.Y/….
+    candidates.append(Path.home() / ".local" / "lib"
+                      / f"python{sys.version_info.major}.{sys.version_info.minor}"
+                      / "site-packages" / "qtawesome" / "fonts")
+    for cand in candidates:
+        if (cand / "materialdesignicons6-webfont-6.9.96.ttf").is_file():
+            return cand
+    return candidates[0]
+
+
+MDI_FONT = _mdi_dir() / "materialdesignicons6-webfont-6.9.96.ttf"
 MDI_MAP = MDI_FONT.with_name("materialdesignicons6-webfont-charmap-6.9.96.json")
 
 
@@ -371,7 +394,8 @@ class Renderer:
     def _draw_column(self, node, x, y, w, h, style, props):
         cx, cy, cw, ch = self._children_box(style, x, y, w, h)
         spacing = style.get("spacing", 0)
-        align = style.get("crossAxisAlignment")
+        cross = style.get("crossAxisAlignment")
+        main = style.get("mainAxisAlignment")
         children = [c for c in (node.get("children") or [])
                     if c.get("visible", True)]
 
@@ -387,9 +411,20 @@ class Renderer:
             heights = [h_ if not weight else free * weight / total
                        for h_, weight in zip(heights, weights)]
 
+        # Main-axis packing (a Column's vertical_alignment).
+        used_v = sum(heights) + spacing * max(0, len(children) - 1)
+        if main == "center":
+            cy += max(0, (ch - used_v) / 2)
+        elif main in ("bottom", "end"):
+            cy += max(0, ch - used_v)
+
         for child, child_h, weight in zip(children, heights, weights):
-            child_w = self._intrinsic_width(child, cw)
-            offset = (cw - child_w) / 2 if align == "center" else 0
+            # Block widgets (rows, cards, inputs…) stretch to the column's
+            # width on device; everything else hugs and is placed by the
+            # cross-axis alignment.
+            child_w = cw if self._fills_by_default(child) \
+                else self._intrinsic_width(child, cw)
+            offset = (cw - child_w) / 2 if cross == "center" else 0
             drawn = self.draw(child, cx + offset, cy, child_w,
                               child_h if weight else None)
             cy += (child_h if weight else drawn) + spacing
@@ -399,16 +434,29 @@ class Renderer:
     def _draw_row(self, node, x, y, w, h, style, props):
         cx, cy, cw, ch = self._children_box(style, x, y, w, h)
         spacing = style.get("spacing", 0)
+        main = style.get("mainAxisAlignment")
         children = [c for c in (node.get("children") or []) if c.get("visible", True)]
         fixed, weights = [], []
         for child in children:
             expand = child.get("expand") or 0
             weights.append(expand)
+            # Inside a horizontal layout a block widget hugs its content on
+            # device unless it declares a width or expands — matching
+            # ViewFactory's linearParams().
             fixed.append(0 if expand else self._intrinsic_width(child, cw))
         free = cw - sum(fixed) - spacing * max(0, len(children) - 1)
         total_weight = sum(weights) or 1
-        for child, base, weight in zip(children, fixed, weights):
-            child_w = base if not weight else max(0, free * weight / total_weight)
+        widths = [base if not weight else max(0, free * weight / total_weight)
+                  for base, weight in zip(fixed, weights)]
+
+        # Main-axis packing (a Row's horizontal_alignment).
+        used = sum(widths) + spacing * max(0, len(children) - 1)
+        if main == "center":
+            cx += max(0, (cw - used) / 2)
+        elif main in ("end", "right"):
+            cx += max(0, cw - used)
+
+        for child, child_w in zip(children, widths):
             fills = (child.get("style") or {}).get("height") in ("match", 0) \
                 or child.get("type") in ("NavigationRail", "Column", "ListView")
             if fills:
@@ -418,17 +466,27 @@ class Renderer:
                 self.draw(child, cx, cy + max(0, (ch - child_h) / 2), child_w)
             cx += child_w + spacing
 
-    #: Widgets the native layer lays out full-width by default.
+    #: Widgets the native layer lays out full-width by default — the same
+    #: list ViewFactory's fillsWidthByDefault() uses. A Container hugs its
+    #: content like Flutter's.
     FILL_BY_DEFAULT = {
         "Divider", "TextField", "SearchBar", "ListTile", "ListView", "Tabs",
         "BottomNavigationBar", "ProgressBar", "SegmentedButton", "Chart",
-        "Stack", "RefreshIndicator", "Form", "Slider",
+        "Stack", "RefreshIndicator", "Form", "Slider", "Column", "Row",
+        "Card", "GridView", "Padding", "ExpansionTile",
     }
 
     #: Fixed-width widgets the native layer sizes for us.
     INTRINSIC = {"NavigationRail": 80}
 
-    def _intrinsic_width(self, child, available):
+    def _fills_by_default(self, child) -> bool:
+        style = child.get("style") or {}
+        width = style.get("width")
+        if width == "match" or child.get("expand"):
+            return True
+        return child.get("type") in self.FILL_BY_DEFAULT
+
+    def _intrinsic_width(self, child, available, fill_blocks=False):
         """Width the child would take on device (wrap_content by default)."""
         style = child.get("style") or {}
         props = child.get("props") or {}
@@ -440,7 +498,7 @@ class Renderer:
             return available
         if kind in self.INTRINSIC:
             return self.INTRINSIC[kind]
-        if kind in self.FILL_BY_DEFAULT:
+        if fill_blocks and kind in self.FILL_BY_DEFAULT:
             return available
 
         if kind == "Text":

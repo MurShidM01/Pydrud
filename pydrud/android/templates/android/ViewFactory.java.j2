@@ -455,9 +455,7 @@ public class ViewFactory {
             orientation = LinearLayout.HORIZONTAL;
         }
         int spacing = (s != null) ? dp(s.optInt("spacing", 0)) : 0;
-        if (s != null && s.has("crossAxisAlignment")) {
-            ll.setGravity(gravity(s.optString("crossAxisAlignment", "")));
-        }
+        applyLinearGravity(ll, s, orientation);
 
         // Spacing is applied as a margin on each child rather than as
         // interleaved Space views: a Space would sit between the children
@@ -506,6 +504,44 @@ public class ViewFactory {
             FrameLayout.LayoutParams.WRAP_CONTENT,
             FrameLayout.LayoutParams.MATCH_PARENT));
         return hsv;
+    }
+
+    /**
+     * Combine cross- and main-axis alignment into a LinearLayout's own
+     * gravity.
+     *
+     * <p>{@code crossAxisAlignment} places children on the cross axis (a
+     * Column's {@code horizontal_alignment}, a Row's {@code
+     * vertical_alignment}) and {@code mainAxisAlignment} packs them along
+     * the main axis — a Row's {@code horizontal_alignment} / a Column's
+     * {@code vertical_alignment} — with {@code start | center | end} (plus
+     * {@code top}/{@code bottom} on vertical axes). Without main-axis
+     * alignment there was no way to centre a pair of buttons inside a
+     * full-width row, so they hugged the leading edge.
+     *
+     * <p>When only the cross axis is set, the historic both-axis mapping is
+     * kept so existing layouts render exactly as before.
+     */
+    private void applyLinearGravity(LinearLayout ll, JSONObject s, int orientation) {
+        if (s == null) return;
+        String cross = s.optString("crossAxisAlignment", "");
+        String main = s.optString("mainAxisAlignment", "");
+        if (cross.isEmpty() && main.isEmpty()) return;
+        if (main.isEmpty()) {
+            ll.setGravity(gravity(cross));      // legacy both-axis behaviour
+            return;
+        }
+        boolean vertical = orientation == LinearLayout.VERTICAL;
+        int g = cross.isEmpty() ? 0 : axisBits(gravity(cross), !vertical);
+        g |= axisBits(gravity(main), vertical);
+        if (g != 0) ll.setGravity(g);
+    }
+
+    /** Keep only the horizontal (or vertical) component of a gravity value. */
+    private static int axisBits(int grav, boolean horizontal) {
+        int mask = horizontal ? Gravity.HORIZONTAL_GRAVITY_MASK
+                              : Gravity.VERTICAL_GRAVITY_MASK;
+        return grav & mask;
     }
 
     /**
@@ -988,7 +1024,10 @@ public class ViewFactory {
         sb.setMax(1000);
         double span = (max - min) == 0 ? 1 : (max - min);
         sb.setProgress((int) Math.round((value - min) / span * 1000));
-        sb.setTag(android.R.id.text1, new double[]{min, max});
+        // Keyed tags need an *application-specific* resource id — a
+        // framework id (android.R.id.text1) throws at runtime and kills
+        // every slider render.
+        sb.setTag(R.id.pydrud_tag_range, new double[]{min, max});
 
         int accent = parseColor(s != null ? s.optString("color", "") : "",
                                 PydrudTheme.primary);
@@ -1158,7 +1197,9 @@ public class ViewFactory {
                 CompoundButton.OnCheckedChangeListener listener = (btn, isChecked) ->
                     eventDispatcher.dispatch("change", key, data("value", isChecked));
                 ((CompoundButton) view).setOnCheckedChangeListener(listener);
-                view.setTag(android.R.id.text2, listener);
+                // Application-specific tag key (framework ids are rejected
+                // by setTag and used to crash switch/checkbox/chip builds).
+                view.setTag(R.id.pydrud_tag_listener, listener);
             }
         } else if (view instanceof SeekBar) {
             final SeekBar sb = (SeekBar) view;
@@ -1233,7 +1274,7 @@ public class ViewFactory {
     }
 
     private double[] rangeOf(SeekBar bar) {
-        Object tag = bar.getTag(android.R.id.text1);
+        Object tag = bar.getTag(R.id.pydrud_tag_range);
         if (tag instanceof double[]) return (double[]) tag;
         return new double[]{0, 100};
     }
@@ -1246,21 +1287,38 @@ public class ViewFactory {
 
     // ── Layout params ───────────────────────────────────────────────────────
 
+    /**
+     * Widget kinds that stretch to the full available width by default —
+     * bars, inputs, tiles and charts. Everything else (a {@code Container}
+     * above all) hugs its content like Flutter's Container, so a padded
+     * wrapper around an icon stays a compact 48dp target instead of
+     * stretching across the whole screen.
+     */
+    private static boolean fillsWidthByDefault(String type) {
+        switch (type) {
+            case "Column": case "Row": case "Card":
+            case "ListView": case "GridView": case "Divider": case "Padding":
+            case "Slider": case "ProgressBar":
+            case "TextField": case "SearchBar": case "ListTile":
+            case "ExpansionTile": case "Tabs": case "BottomNavigationBar":
+            case "SegmentedButton": case "Chart": case "RefreshIndicator":
+            case "Form":
+                return true;
+            default:
+                return false;
+        }
+    }
+
     /** Give every view a sensible default size before styles are applied. */
     private void applyDefaultSize(View view, JSONObject json) {
         String type = json.optString("type", "");
-        int w = ViewGroup.LayoutParams.WRAP_CONTENT;
+        int w = fillsWidthByDefault(type)
+            ? ViewGroup.LayoutParams.MATCH_PARENT
+            : ViewGroup.LayoutParams.WRAP_CONTENT;
         int h = ViewGroup.LayoutParams.WRAP_CONTENT;
-        switch (type) {
-            case "Container": case "Column": case "Row": case "Card":
-            case "ListView": case "GridView": case "Divider": case "Padding":
-                w = ViewGroup.LayoutParams.MATCH_PARENT; break;
-            case "Center": case "Stack":
-                w = ViewGroup.LayoutParams.MATCH_PARENT;
-                h = ViewGroup.LayoutParams.MATCH_PARENT; break;
-            case "Slider": case "ProgressBar":
-                w = ViewGroup.LayoutParams.MATCH_PARENT; break;
-            default: break;
+        if ("Center".equals(type) || "Stack".equals(type)) {
+            w = ViewGroup.LayoutParams.MATCH_PARENT;
+            h = ViewGroup.LayoutParams.MATCH_PARENT;
         }
         if ("Divider".equals(type)) {
             JSONObject s = json.optJSONObject("style");
@@ -1271,6 +1329,16 @@ public class ViewFactory {
 
     private LinearLayout.LayoutParams linearParams(JSONObject json, int orientation) {
         ViewGroup.LayoutParams base = sizeFor(json);
+        // Inside a horizontal layout a full-width child (a Card, a Column,
+        // an input…) would swallow the whole row and starve its siblings —
+        // the classic symptom was an app bar whose title vanished behind
+        // one oversized action slot. Block widgets hug their content here
+        // unless they declare a width or expand to claim the space.
+        if (orientation == LinearLayout.HORIZONTAL
+                && base.width == ViewGroup.LayoutParams.MATCH_PARENT
+                && !declaresWidth(json)) {
+            base.width = ViewGroup.LayoutParams.WRAP_CONTENT;
+        }
         LinearLayout.LayoutParams lp =
             new LinearLayout.LayoutParams(base.width, base.height);
         applyMargins(lp, json);
@@ -1334,15 +1402,10 @@ public class ViewFactory {
         if (json == null) return new ViewGroup.LayoutParams(w, h);
 
         String type = json.optString("type", "");
-        switch (type) {
-            case "Container": case "Column": case "Row": case "Card":
-            case "ListView": case "GridView": case "Divider": case "Padding":
-            case "Slider": case "ProgressBar":
-                w = ViewGroup.LayoutParams.MATCH_PARENT; break;
-            case "Center": case "Stack":
-                w = ViewGroup.LayoutParams.MATCH_PARENT;
-                h = ViewGroup.LayoutParams.MATCH_PARENT; break;
-            default: break;
+        if (fillsWidthByDefault(type)) w = ViewGroup.LayoutParams.MATCH_PARENT;
+        if ("Center".equals(type) || "Stack".equals(type)) {
+            w = ViewGroup.LayoutParams.MATCH_PARENT;
+            h = ViewGroup.LayoutParams.MATCH_PARENT;
         }
         if ("Divider".equals(type)) {
             JSONObject ds = json.optJSONObject("style");
@@ -1381,8 +1444,14 @@ public class ViewFactory {
             lp.setMargins(a, a, a, a);
         } else {
             lp.setMargins(dp(m.optInt("left", 0)), dp(m.optInt("top", 0)),
-                          dp(m.optInt("right", 0)), dp(m.optInt("bottom", 0)));
+                           dp(m.optInt("right", 0)), dp(m.optInt("bottom", 0)));
         }
+    }
+
+    /** Does the node pin its own width (``style.width``)? */
+    private static boolean declaresWidth(JSONObject json) {
+        JSONObject s = json != null ? json.optJSONObject("style") : null;
+        return s != null && s.has("width");
     }
 
     /** Re-apply width/height onto an existing view's layout params. */
@@ -1543,7 +1612,7 @@ public class ViewFactory {
      */
     static ViewGroup childHost(View view) {
         if (view == null) return null;
-        Object tag = view.getTag(android.R.id.content);
+        Object tag = view.getTag(R.id.pydrud_tag_children);
         if (tag instanceof ViewGroup) return (ViewGroup) tag;
         return view instanceof ViewGroup ? (ViewGroup) view : null;
     }
@@ -1845,7 +1914,7 @@ public class ViewFactory {
             double[] range = rangeOf(sb);
             double min = p.has("min") ? p.optDouble("min", range[0]) : range[0];
             double max = p.has("max") ? p.optDouble("max", range[1]) : range[1];
-            sb.setTag(android.R.id.text1, new double[]{min, max});
+            sb.setTag(R.id.pydrud_tag_range, new double[]{min, max});
             if (p.has("value")) {
                 double span = (max - min) == 0 ? 1 : (max - min);
                 sb.setProgress((int) Math.round((p.optDouble("value", min) - min) / span * 1000));
@@ -1872,7 +1941,7 @@ public class ViewFactory {
                 boolean next = p.optBoolean("checked", p.optBoolean("active",
                                p.optBoolean("selected", cb.isChecked())));
                 if (cb.isChecked() != next) {
-                    Object tag = cb.getTag(android.R.id.text2);
+                    Object tag = cb.getTag(R.id.pydrud_tag_listener);
                     CompoundButton.OnCheckedChangeListener listener =
                         (tag instanceof CompoundButton.OnCheckedChangeListener)
                             ? (CompoundButton.OnCheckedChangeListener) tag : null;
@@ -2148,12 +2217,17 @@ public class ViewFactory {
             case "topLeft":      return Gravity.TOP | Gravity.START;
             case "topCenter":    return Gravity.TOP | Gravity.CENTER_HORIZONTAL;
             case "topRight":     return Gravity.TOP | Gravity.END;
-            case "centerLeft":   case "start": return Gravity.CENTER_VERTICAL | Gravity.START;
+            case "centerLeft":   case "start": case "left":
+                                   return Gravity.CENTER_VERTICAL | Gravity.START;
             case "center":       return Gravity.CENTER;
-            case "centerRight":  case "end":   return Gravity.CENTER_VERTICAL | Gravity.END;
+            case "centerRight":  case "end": case "right":
+                                   return Gravity.CENTER_VERTICAL | Gravity.END;
             case "bottomLeft":   return Gravity.BOTTOM | Gravity.START;
             case "bottomCenter": return Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
             case "bottomRight":  return Gravity.BOTTOM | Gravity.END;
+            // Plain single-axis names used by Row/Column alignment params.
+            case "top":          return Gravity.TOP;
+            case "bottom":       return Gravity.BOTTOM;
             default:             return Gravity.NO_GRAVITY;
         }
     }
