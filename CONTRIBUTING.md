@@ -43,6 +43,15 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). In short: runtime code in
 * **Templates are code.** Changes under `pydrud/android/templates/android/`
   must pass `tools/check_java.py`; changes under `.../python/` must leave
   `pydrud init` + `pytest` green.
+* **Nothing build-time ships in the APK.** `pydrud init` vendors the runtime
+  into `src/pydrud/`; the CLI, its terminal UI and the templates
+  (`BUNDLE_EXCLUDES` in `pydrud/commands/project.py`) stay out, and the
+  bundle has to import and render with only `src/` on `sys.path`. If a
+  runtime module needs a helper from `pydrud/utils/`, move the helper —
+  do not re-bundle the CLI.
+* **Line endings are LF.** `.gitattributes` enforces it; on Windows,
+  `git config core.autocrlf` should not override it, or every source file
+  gains a byte per line and the APK size budget drifts.
 * **Update `CHANGELOG.md`** in the same commit, and bump the version in
   `pydrud/__init__.py`, `pydrud/compatibility.py` and `pyproject.toml`
   together — a test checks they agree.

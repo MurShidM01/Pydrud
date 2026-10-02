@@ -5,17 +5,62 @@ syntactically valid (Python *and* Java) and runnable.
 
 from __future__ import annotations
 
+import ast
 import compileall
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 
 from jinja2 import Environment, PackageLoader, select_autoescape
 
-from pydrud.commands.project import create_project
+from pydrud.commands.project import bundled_runtime_size_kb, create_project
+
+# Packages the scaffold deliberately leaves out of the APK. Nothing that
+# ships may import them: they are not there at runtime.
+BUILD_TIME_ONLY = ("pydrud.android", "pydrud.commands", "pydrud.utils",
+                   "pydrud.packages")
+
+
+def bundle_files(bundle: str) -> list:
+    """``(size_in_bytes, relative_path)`` for everything in *bundle*."""
+    found = []
+    for root, dirs, files in os.walk(bundle):
+        dirs[:] = [d for d in dirs if d != "__pycache__"]
+        for name in files:
+            path = os.path.join(root, name)
+            found.append((os.path.getsize(path),
+                          os.path.relpath(path, bundle)))
+    return sorted(found, reverse=True)
+
+
+def imported_modules(path: str, module: str):
+    """Absolute dotted names imported by the Python file at *path*.
+
+    Relative imports are resolved against *module* (the file's own dotted
+    name) so ``from ..utils import tui`` is reported as ``pydrud.utils``.
+    """
+    with open(path, encoding="utf-8") as fh:
+        tree = ast.parse(fh.read(), filename=path)
+    package = module.rsplit(".", 1)[0]
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                yield node.lineno, alias.name
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:  # relative: strip one package per leading dot
+                base = package.split(".")
+                base = base[:len(base) - node.level + 1]
+                prefix = ".".join(base)
+            else:
+                prefix = ""
+            name = ".".join(p for p in (prefix, node.module or "") if p)
+            yield node.lineno, name
+            for alias in node.names:  # `from pydrud import utils`
+                yield node.lineno, f"{name}.{alias.name}"
 
 try:
     import javalang
@@ -193,17 +238,86 @@ class TestGeneratedProject(unittest.TestCase):
             for mod in [m for m in list(sys.modules) if m.startswith("app")]:
                 del sys.modules[mod]
 
-    def test_bundled_runtime_is_slim_and_importable(self):
+    def test_bundled_runtime_is_slim(self):
         bundle = self.path("src", "pydrud")
         self.assertTrue(os.path.isfile(os.path.join(bundle, "main.py")))
-        # Build-time only packages must not ship inside the APK.
-        self.assertFalse(os.path.isdir(os.path.join(bundle, "android")))
-        self.assertFalse(os.path.isdir(os.path.join(bundle, "commands")))
-        size_kb = sum(
-            os.path.getsize(os.path.join(root, f))
-            for root, _d, fs in os.walk(bundle) for f in fs
-        ) / 1024
-        self.assertLess(size_kb, 600, "bundled runtime is unexpectedly large")
+        # Build-time only code must not ship inside the APK.
+        for name in ("android", "commands", "utils"):
+            self.assertFalse(os.path.isdir(os.path.join(bundle, name)),
+                             f"build-time only package '{name}' was bundled")
+        self.assertFalse(os.path.isfile(os.path.join(bundle, "packages.py")),
+                         "pydrud.packages only aliases the CLI package")
+
+        # Measured with CRLF counted as one byte, so a Windows checkout
+        # (core.autocrlf) reports the same size as a Unix one.
+        size_kb = bundled_runtime_size_kb(bundle)
+        heaviest = "".join(f"\n  {s / 1024:6.1f} KB  {p}"
+                           for s, p in bundle_files(bundle)[:5])
+        self.assertLess(size_kb, 600,
+                        f"bundled runtime is unexpectedly large "
+                        f"({size_kb:.1f} KB); heaviest modules:{heaviest}")
+
+    def test_bundled_runtime_runs_on_its_own(self):
+        """Inside the APK, ``src/`` is all there is.
+
+        Run the starter app in a subprocess started with ``-S`` — no
+        site-packages, so neither the pip-installed Pydrud nor any
+        third-party dependency can quietly fill a gap in the bundle.
+        """
+        src = self.path("src")
+        code = textwrap.dedent("""
+            import sys
+
+            import pydrud
+            from pydrud import App, Column, Router, Text  # noqa: F401
+            from pydrud.testing import AppTester
+            import pydrud.data, pydrud.runtime.app, pydrud.services.native
+
+            bundle = sys.argv[1]
+            strays = sorted(
+                m.__name__ for m in list(sys.modules.values())
+                if getattr(m, "__name__", "").startswith("pydrud")
+                and getattr(m, "__file__", None)
+                and not m.__file__.startswith(bundle))
+            print("STRAYS:", strays)
+
+            sys.path.insert(0, bundle)
+            from app.main import main
+
+            tester = AppTester(main, title="demo_app").start()
+            print("RENDERS:", tester.shows("TAPS TODAY"))
+            tester.stop()
+        """)
+        env = dict(os.environ, PYTHONPATH=src, PYTHONDONTWRITEBYTECODE="1")
+        result = subprocess.run(
+            [sys.executable, "-S", "-c", code, src],
+            # cwd holds no pydrud/ of its own, so the bundle wins.
+            cwd=self.project, env=env, capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0,
+                         f"bundled runtime does not run alone:\n"
+                         f"{result.stderr}")
+        self.assertIn("STRAYS: []", result.stdout,
+                      "the bundle reached outside itself: " + result.stdout)
+        self.assertIn("RENDERS: True", result.stdout,
+                      "the starter app did not render from the bundle alone")
+
+    def test_bundled_runtime_never_imports_build_time_code(self):
+        """A lazy ``from pydrud.utils import tui`` would crash on a device."""
+        bundle = self.path("src", "pydrud")
+        offenders = []
+        for _size, rel in bundle_files(bundle):
+            if not rel.endswith(".py"):
+                continue
+            dotted = "pydrud." + rel[:-3].replace(os.sep, ".")
+            for lineno, name in imported_modules(
+                    os.path.join(bundle, rel), dotted):
+                if any(name == b or name.startswith(b + ".")
+                       for b in BUILD_TIME_ONLY):
+                    offenders.append(f"{rel}:{lineno} imports {name}")
+        self.assertEqual(sorted(offenders), [],
+                         "bundled modules import build-time only code: "
+                         + ", ".join(sorted(offenders)))
 
     def test_package_name_includes_app_name(self):
         gradle = open(self.path("android/app/build.gradle.kts"), encoding="utf-8").read()
@@ -322,6 +436,30 @@ class TestJavaTemplates(unittest.TestCase):
         self.assertIn("onBackResult", source)
         self.assertIn("awaitingBackResult", source)
         self.assertIn("sendLifecycle", source)
+
+
+class TestBundleSizeMetric(unittest.TestCase):
+    """The APK size budget must mean the same thing on every platform."""
+
+    def test_line_endings_do_not_change_the_measurement(self):
+        tmp = tempfile.mkdtemp(prefix="pydrud-size-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        unix, windows = os.path.join(tmp, "lf"), os.path.join(tmp, "crlf")
+        os.makedirs(unix)
+        os.makedirs(windows)
+
+        body = "".join(f"line {i}\n" for i in range(500))
+        with open(os.path.join(unix, "module.py"), "wb") as fh:
+            fh.write(body.encode())
+        with open(os.path.join(windows, "module.py"), "wb") as fh:
+            fh.write(body.replace("\n", "\r\n").encode())
+
+        # A checkout with core.autocrlf is bigger on disk …
+        self.assertGreater(os.path.getsize(os.path.join(windows, "module.py")),
+                           os.path.getsize(os.path.join(unix, "module.py")))
+        # … but that is not weight the APK carries, so the budget ignores it.
+        self.assertEqual(bundled_runtime_size_kb(unix),
+                         bundled_runtime_size_kb(windows))
 
 
 if __name__ == "__main__":

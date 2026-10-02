@@ -1,0 +1,27 @@
+# Line endings are normalised to LF in the repository *and* in the working
+# tree on every platform.
+#
+# Without this, a Windows checkout (core.autocrlf=true) rewrites every source
+# file with CRLF, which adds one byte per line. The runtime that `pydrud init`
+# vendors into each project is ~17 000 lines, so the same bundle measured
+# ~584 KB on Linux/macOS and ~600 KB on Windows — enough to trip the APK size
+# budget in tests/test_scaffold_project.py and to ship a fatter APK.
+* text=auto eol=lf
+
+# Windows-only scripts must keep CRLF or cmd.exe cannot run them.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Never touch binaries.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.jar binary
+*.zip binary
+*.apk binary
+*.aab binary
+*.keystore binary
+*.jks binary

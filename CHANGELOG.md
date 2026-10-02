@@ -2,6 +2,35 @@
 
 All notable changes to Pydrud are documented here.
 
+## [Unreleased]
+
+### Fixed
+* **The bundled-runtime size budget failed on Windows checkouts.** With
+  `core.autocrlf` on, Git rewrites the ~17 000 lines of vendored runtime with
+  CRLF, adding one byte per line: the identical bundle measured 584 KB on
+  Linux/macOS and 600.4 KB on Windows, so
+  `test_bundled_runtime_is_slim_and_importable` failed there and nowhere
+  else. A `.gitattributes` now pins text files to LF in the working tree on
+  every platform, and the budget is measured with CRLF counted as one byte so
+  the number means the same thing everywhere.
+
+### Changed
+* **`pydrud init` no longer ships the CLI's terminal UI inside the APK.**
+  `pydrud/utils/` (ANSI colours, banners, tables) and the deprecated
+  `pydrud/packages.py` shim — which only aliases the build-time
+  `pydrud.commands.packages` and could never import on a device — are
+  excluded from the vendored runtime alongside `android/` and `commands/`.
+  The bundle drops from 584 KB to 566 KB; `pydrud sync` removes the stale
+  directory from existing projects.
+
+### Added
+* **The bundle is now tested the way the APK uses it.** `pydrud init`'s
+  runtime is imported and the starter app rendered in a subprocess started
+  with `-S`, so neither the pip-installed Pydrud nor any third-party package
+  can hide a gap in it; a static import scan additionally fails the build if
+  anything that ships imports `pydrud.android`, `pydrud.commands`,
+  `pydrud.utils` or `pydrud.packages`, including lazily inside a function.
+
 ## [2.0.0] — A project you can grow into
 
 Two restructures, one release: the project `pydrud init` gives you, and the
