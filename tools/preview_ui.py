@@ -456,6 +456,8 @@ class Renderer:
             cx += max(0, cw - used)
 
         for child, child_w in zip(children, widths):
+            if cx + child_w > x + w:
+                break
             fills = (child.get("style") or {}).get("height") in ("match", 0) \
                 or child.get("type") in ("NavigationRail", "Column", "ListView")
             if fills:
@@ -849,12 +851,13 @@ def render_starter(width: int, height: int, dark: bool, out_dir: Path,
 
     env = Environment(loader=PackageLoader("pydrud", "android/templates"),
                       keep_trailing_newline=True)
-    source = env.get_template("python/main.py.j2").render(
-        project_name="My App", scheme="myapp",
-        seed_color=seed or "#FF6366F1")
-    module_path = out_dir / "_starter_app.py"
-    module_path.parent.mkdir(parents=True, exist_ok=True)
-    module_path.write_text(source)
+    ctx = {"project_name": "My App", "scheme": "myapp", "seed_color": seed or "#FF6366F1"}
+    from pydrud.commands.project import _APP_MODULES
+    for tmpl, rel in _APP_MODULES:
+        dest = out_dir / "app" / rel if rel != "__init__.py" and rel != "main.py" else (out_dir / "app" / rel if rel == "__init__.py" else out_dir / "_starter_app.py")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(env.get_template(tmpl).render(**ctx))
+
     sys.path.insert(0, str(out_dir))
     import importlib
 

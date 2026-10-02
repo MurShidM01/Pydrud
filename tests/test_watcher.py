@@ -72,6 +72,26 @@ class TestPollingFallback(unittest.TestCase):
         watcher._walk_and_check(root)
         self.assertEqual(seen, [target])
 
+    def test_watcher_start_stop(self):
+        root = tempfile.mkdtemp()
+        seen = []
+        watcher = FileWatcher([root], seen.append, debounce=0.0)
+        watcher.start()
+        self.assertTrue(watcher._running)
+        watcher.stop()
+        self.assertFalse(watcher._running)
+
+    def test_check_file_direct(self):
+        root = tempfile.mkdtemp()
+        target = os.path.join(root, "app.py")
+        with open(target, "w", encoding="utf-8") as handle:
+            handle.write("x = 1\n")
+        seen = []
+        watcher = FileWatcher([target], seen.append, debounce=0.0)
+        watcher._scanned = True
+        watcher._check_file(target)
+        self.assertEqual(seen, [os.path.abspath(target)])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -254,19 +254,19 @@ class Builder:
         ]
         watch_dirs = [p for p in watch_dirs if os.path.isdir(p)]
         if not watch_dirs:
-            print(fail("Nothing to watch (no src/ directory)."))
-            return
+            watch_dirs = [self.root]
 
         print()
         print(header("═════════════════ Watch mode ═════════════════"))
         print(info(f"Watching: {', '.join(os.path.relpath(p, self.root) for p in watch_dirs)}"))
-        print(info("Edit a file to rebuild & reinstall. Ctrl+C to stop."))
+        print(info("Edit a file to rebuild & reinstall automatically. Ctrl+C to stop."))
         print()
 
         pending = threading.Event()
 
         def _on_change(filepath: str) -> None:
-            print(info(f"Changed: {os.path.relpath(filepath, self.root)}"))
+            rel = os.path.relpath(filepath, self.root)
+            print(info(f"Changed: {rel}"))
             pending.set()
 
         watcher = FileWatcher(watch_dirs, _on_change)
@@ -277,9 +277,11 @@ class Builder:
                     pending.clear()
                     time.sleep(0.3)  # debounce bursts of saves
                     pending.clear()
+                    print(step("Rebuilding and updating app..."))
                     apk = self.build(release=release)
                     if apk:
                         self._install_and_launch(apk, device)
+                        print(ok("App updated and reloaded!"))
                     else:
                         print(fail("Rebuild failed — fix the error and save again."))
         except KeyboardInterrupt:

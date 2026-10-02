@@ -23,6 +23,7 @@ class Container(Widget):
         margin: Optional[Union[EdgeInsets, float, int, dict]] = None,
         bg: Optional[str] = None,
         border_radius: Optional[float] = None,
+        border: Optional[Union[Border, dict]] = None,
         width: Optional[Union[float, str]] = None,
         height: Optional[Union[float, str]] = None,
         alignment: Optional[str] = None,
@@ -49,6 +50,12 @@ class Container(Widget):
             s.bg(bg)
         if border_radius is not None:
             s.border_radius(border_radius)
+        if border is not None:
+            from pydrud.widgets.styling import Border
+            if isinstance(border, Border):
+                s.border(border)
+            elif isinstance(border, dict):
+                s._data["border"] = border
         if width is not None:
             s.width(width)
         if height is not None:
