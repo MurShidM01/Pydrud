@@ -19,6 +19,19 @@ silent hang, a no-op, or a two-minute Gradle error.
   "no expiry"; it now means "already expired". Expiry comparisons are
   inclusive, and the index is read defensively so a cache written by an older
   version can no longer raise `KeyError`.
+* **The newest installed NDK is now picked numerically.** `sorted()` on the
+  SDK's `ndk/` directory ranked `9.0.x` above `28.2.x`; the builder also had a
+  hardcoded fallback that disagreed with the pinned `COMPATIBILITY.ndk_version`
+  and is gone.
+* **`pydrud.yaml` parsing no longer reads nested keys.** Indented keys and list
+  items could shadow a real top-level setting, and inline `# comments` ended up
+  inside values. Unreadable files now warn instead of failing silently.
+* **`Store.mutate()` honours deletions.** A draft edited in place now replaces
+  the state, so `draft.pop("key")` actually removes the key.
+* **`Computed` is lazy again.** Invalidating a source recomputed the value
+  immediately even with no subscribers.
+* **Selector leak.** `Store.select()` kept every selector forever;
+  `Selector.dispose()` (and `Store.unselect()`) detach one.
 * **`pydrud run` no longer fails to compile.** `ViewFactory` called
   `AdvancedViews.setEventDispatcher()` and `ViewFactory.isReusableType()`,
   neither of which existed. Added the late-binding setter (matching

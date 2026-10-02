@@ -194,15 +194,30 @@ def _camel(name: str) -> str:
     return camel
 
 
+def _version_key(name: str) -> tuple:
+    """Sort key that orders ``9.0.1`` *before* ``28.2.3`` (numeric, not text)."""
+    return tuple(int(part) if part.isdigit() else -1
+                 for part in str(name).split("."))
+
+
 def _detect_ndk(sdk_dir: str) -> str:
-    """Detect the latest installed NDK version from the SDK directory."""
+    """Detect the newest installed NDK version from the SDK directory.
+
+    Directory names are compared numerically: a plain ``sorted()`` would
+    rank ``"9.0.9519653"`` above ``"28.2.13676358"`` and hand Gradle an NDK
+    that is years too old.
+    """
     ndk_dir = os.path.join(sdk_dir, "ndk") if sdk_dir else ""
     if ndk_dir and os.path.isdir(ndk_dir):
         try:
-            versions = sorted(os.listdir(ndk_dir))
+            versions = sorted(
+                (n for n in os.listdir(ndk_dir)
+                 if os.path.isdir(os.path.join(ndk_dir, n))),
+                key=_version_key,
+            )
             if versions:
                 return versions[-1]
-        except Exception:
+        except OSError:
             pass
     return COMPATIBILITY.ndk_version
 

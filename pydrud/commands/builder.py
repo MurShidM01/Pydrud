@@ -407,27 +407,38 @@ class Builder:
         """Read ``pydrud.yaml`` and return its values as a flat dict.
 
         Uses simple line-by-line parsing (no YAML dependency needed for the
-        flat key-value format Pydrud uses).
+        flat key-value format Pydrud writes). Only *top-level* keys are
+        read — indented lines belong to a nested block and must not shadow a
+        real setting (an ``ndk:`` nested under some other section used to be
+        picked up as the project's NDK). Inline ``# comments`` are stripped.
         """
         import re
         config_path = os.path.join(project_root, "pydrud.yaml")
         if not os.path.isfile(config_path):
             return {}
 
-        config = {}
+        config: dict = {}
         try:
             with open(config_path, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    m = re.match(r'^(\w[\w_]*)\s*:\s*(.*)', line)
-                    if m:
-                        key = m.group(1)
-                        value = m.group(2).strip().strip("\"'")
-                        config[key] = value
-        except Exception:
-            pass
+                raw_lines = f.readlines()
+        except OSError as exc:
+            print(f"[WARN] Could not read {config_path}: {exc}")
+            return {}
+
+        for raw in raw_lines:
+            if raw[:1].isspace() or raw.lstrip().startswith(("#", "-")):
+                continue  # nested entry, list item or comment
+            m = re.match(r'^(\w[\w_]*)\s*:\s*(.*)$', raw.rstrip("\n"))
+            if not m:
+                continue
+            value = m.group(2).strip()
+            if value[:1] and value[0] in "\"'":
+                quote = value[0]
+                end = value.find(quote, 1)
+                value = value[1:end] if end > 0 else value[1:]
+            else:
+                value = value.split(" #", 1)[0].strip()
+            config[m.group(1)] = value
         return config
 
     def _build_env(self) -> dict:
@@ -450,15 +461,9 @@ class Builder:
         # NDK version: pydrud.yaml > SDK auto-detection > hardcoded fallback.
         ndk_version = config.get("ndk", "")
         if not ndk_version:
-            ndk_dir = os.path.join(self.sdk_dir, "ndk")
-            ndk_version = "29.0.14206865"
-            if os.path.isdir(ndk_dir):
-                try:
-                    versions = sorted(os.listdir(ndk_dir))
-                    if versions:
-                        ndk_version = versions[-1]
-                except Exception:
-                    pass
+            from pydrud.commands.project import _detect_ndk
+
+            ndk_version = _detect_ndk(self.sdk_dir)
         env["PYDRUD_NDK_VERSION"] = ndk_version
         # Forward proxy env vars so Gradle can reach remote repos.
         for var in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY",
