@@ -9,6 +9,16 @@ The theme is *fail fast and loudly*: every failure mode below used to be a
 silent hang, a no-op, or a two-minute Gradle error.
 
 ### Fixed
+* **Keyed children could render in the wrong order.** `TreeDiff` computed
+  `move` indices against the *old* child list, but the native applier mutates
+  the parent as it walks the patch list, so a surviving child whose index was
+  shifted by an earlier insert/delete was never moved. The diff now tracks the
+  evolving order, and `tests/test_diff_applier.py` replays every patch through
+  a model of `ViewFactory.applyPatch` (named regressions plus a 2000-tree fuzz).
+* **`cache.set(key, value, ttl=0)` cached forever.** A zero ttl was treated as
+  "no expiry"; it now means "already expired". Expiry comparisons are
+  inclusive, and the index is read defensively so a cache written by an older
+  version can no longer raise `KeyError`.
 * **`pydrud run` no longer fails to compile.** `ViewFactory` called
   `AdvancedViews.setEventDispatcher()` and `ViewFactory.isReusableType()`,
   neither of which existed. Added the late-binding setter (matching

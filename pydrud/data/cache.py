@@ -53,6 +53,9 @@ class Cache:
     def set(self, key: str, value: Any, *, ttl: Optional[float] = None) -> Any:
         """Store *value* (JSON-serialisable or bytes). Returns the value."""
         ttl = self.default_ttl if ttl is None else ttl
+        # ``ttl=0`` means "expire immediately", not "never expire", so the
+        # expiry is computed whenever a ttl was given at all.
+        expires = None if ttl is None else time.time() + float(ttl)
         is_bytes = isinstance(value, (bytes, bytearray))
         payload = bytes(value) if is_bytes else json.dumps(value).encode()
         with self._lock:
@@ -65,7 +68,7 @@ class Cache:
                 "bytes": is_bytes,
                 "stored": time.time(),
                 "used": time.time(),
-                "expires": (time.time() + float(ttl)) if ttl else None,
+                "expires": expires,
             }
             self._save_index()
             self._evict_if_needed()
@@ -78,7 +81,8 @@ class Cache:
             if entry is None:
                 self.misses += 1
                 return default
-            if entry["expires"] is not None and entry["expires"] < time.time():
+            if (entry.get("expires") is not None
+                    and entry["expires"] <= time.time()):
                 self._remove(key)
                 self.misses += 1
                 return default
@@ -93,7 +97,7 @@ class Cache:
             entry["used"] = time.time()
             self.hits += 1
             self._save_index()
-        if entry["bytes"]:
+        if entry.get("bytes"):
             return raw
         try:
             return json.loads(raw.decode())
@@ -132,7 +136,7 @@ class Cache:
         now = time.time()
         with self._lock:
             stale = [k for k, e in self._index.items()
-                     if e["expires"] is not None and e["expires"] < now]
+                     if e.get("expires") is not None and e["expires"] <= now]
             for key in stale:
                 self._remove(key)
             if stale:
@@ -149,12 +153,15 @@ class Cache:
     def size(self) -> int:
         """Total bytes currently stored."""
         with self._lock:
-            return sum(e["size"] for e in self._index.values())
+            return sum(int(e.get("size") or 0) for e in self._index.values())
 
     def age(self, key: str) -> Optional[float]:
         """Seconds since *key* was written, or ``None`` when absent."""
-        entry = self._index.get(key)
-        return None if entry is None else time.time() - entry["stored"]
+        with self._lock:
+            entry = self._index.get(key)
+            if entry is None:
+                return None
+            return time.time() - float(entry.get("stored") or 0.0)
 
     def stats(self) -> dict:
         return {"entries": len(self._index), "bytes": self.size,
@@ -179,7 +186,8 @@ class Cache:
         if self.size <= self.max_bytes:
             return
         # Least-recently-used first.
-        for key, _ in sorted(self._index.items(), key=lambda kv: kv[1]["used"]):
+        for key, _ in sorted(self._index.items(),
+                             key=lambda kv: kv[1].get("used") or 0):
             self._remove(key)
             if self.size <= self.max_bytes:
                 break
