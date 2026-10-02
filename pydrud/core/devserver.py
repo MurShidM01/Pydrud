@@ -16,11 +16,10 @@ import json
 import logging
 import os
 import socket
-import sys
 import threading
 import time
 import traceback
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pydrud.runtime.app import App

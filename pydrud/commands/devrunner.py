@@ -14,18 +14,17 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import signal
 import socket
 import subprocess
 import sys
 import threading
 import time
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 
 from pydrud.commands.builder import Builder
 from pydrud.core.watcher import FileWatcher
-from pydrud.utils.colors import ok, fail, info, warn, header, print_step
+from pydrud.utils.colors import print_step
 from pydrud.utils import tui
 
 
@@ -223,7 +222,7 @@ class DevRunner:
                 line = rfile.readline()
                 if line:
                     return json.loads(line.strip())
-            except Exception as exc:
+            except Exception:
                 try:
                     if self._dev_sock:
                         self._dev_sock.close()
