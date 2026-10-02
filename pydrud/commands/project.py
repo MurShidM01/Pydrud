@@ -427,7 +427,7 @@ def create_project(
         "version_code": 1,
         "version_name": "1.0.0",
         "permissions": list(permissions or []),
-        "capabilities": {"foreground_service": bool(firebase is False and False), "boot_receiver": False, "wake_lock": False, "haptics": False, "notifications": False},
+        "capabilities": {"foreground_service": False, "boot_receiver": False, "wake_lock": False, "haptics": False, "notifications": False},
         # ABIs shipped in the APK. 32-bit arm is still common on budget
         # devices; x86_64 keeps the emulator working.
         "abi_filters": ", ".join(
