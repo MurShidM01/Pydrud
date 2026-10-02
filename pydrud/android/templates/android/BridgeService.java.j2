@@ -34,6 +34,8 @@ public class BridgeService {
 
     private static final String TAG = "PydrudBridge";
     private static final int PORT = 8595;
+    private static final int PROTOCOL_VERSION = 2;
+    private static final int MAX_FRAME_BYTES = 2 * 1024 * 1024;
 
     private final {{ app_name }}Activity activity;
     private final FrameLayout rootView;
@@ -152,6 +154,10 @@ public class BridgeService {
                 new InputStreamReader(socket.getInputStream(), "UTF-8"))) {
             String line;
             while (running && (line = reader.readLine()) != null) {
+                if (line.length() > MAX_FRAME_BYTES) {
+                    sendProtocolError("frame_too_large", "bridge frame exceeds 2 MiB");
+                    break;
+                }
                 String msg = line.trim();
                 if (!msg.isEmpty()) handleMessage(msg);
             }
@@ -164,10 +170,31 @@ public class BridgeService {
 
     private void sendReady() {
         try {
-            sendEvent("ready", "", collectMetrics());
+            JSONObject data = collectMetrics();
+            data.put("protocol_version", PROTOCOL_VERSION);
+            data.put("renderer_version", "{{ pydrud_runtime_version | default('2.0.0') }}");
+            JSONObject capabilities = new JSONObject();
+            capabilities.put("transactional_render", true);
+            capabilities.put("revisioned_render", true);
+            capabilities.put("ack_nack", true);
+            capabilities.put("resync", true);
+            capabilities.put("coalescing", true);
+            capabilities.put("native_animation_clock", true);
+            data.put("capabilities", capabilities);
+            sendEvent("ready", "", data);
         } catch (Exception e) {
             Log.e(TAG, "Failed to send ready event", e);
         }
+    }
+
+    private void sendProtocolError(String code, String message) {
+        JSONObject data = new JSONObject();
+        try {
+            data.put("protocol_version", PROTOCOL_VERSION);
+            data.put("code", code);
+            data.put("message", message);
+        } catch (JSONException ignored) { }
+        sendEvent("protocol_error", "", data);
     }
 
     /**
@@ -283,6 +310,7 @@ public class BridgeService {
             JSONObject json = new JSONObject(message);
             String cmd = json.optString("cmd", "");
             switch (cmd) {
+                case "render_transaction": handleRenderTransaction(json); break;
                 case "full_render":     handleFullRender(json); break;
                 case "render":          handleRender(json); break;
                 case "toast":           showToast(json); break;
@@ -404,6 +432,73 @@ public class BridgeService {
             if (json.optBoolean("keyboard", true)) {
                 activity.setKeyboardVisible(true);
             }
+        });
+    }
+
+    private volatile long nativeRevision = 0L;
+
+    private void sendRenderAck(String txId, long revision) {
+        JSONObject data = new JSONObject();
+        try {
+            data.put("transaction_id", txId);
+            data.put("revision", revision);
+        } catch (JSONException ignored) { }
+        sendEvent("render_ack", "", data);
+    }
+
+    private void sendRenderNack(String txId, long revision, String reason) {
+        JSONObject data = new JSONObject();
+        try {
+            data.put("transaction_id", txId);
+            data.put("revision", revision);
+            data.put("native_revision", nativeRevision);
+            data.put("reason", reason);
+            data.put("recoverable", true);
+        } catch (JSONException ignored) { }
+        sendEvent("render_nack", "", data);
+    }
+
+    private void handleRenderTransaction(JSONObject json) throws JSONException {
+        int version = json.optInt("protocol_version", 0);
+        if (version != PROTOCOL_VERSION) {
+            sendProtocolError("unsupported_version", "expected " + PROTOCOL_VERSION + ", got " + version);
+            return;
+        }
+        final String txId = json.optString("transaction_id", "");
+        final long revision = json.optLong("revision", -1L);
+        final long base = json.optLong("base_revision", -1L);
+        final String kind = json.optString("kind", "");
+        if (txId.isEmpty() || revision < 0 || base < 0) {
+            sendRenderNack(txId, revision, "invalid_transaction");
+            return;
+        }
+        if ("patch".equals(kind) && base != nativeRevision) {
+            sendRenderNack(txId, revision, "stale_base_revision");
+            return;
+        }
+
+        activity.runOnUiThread(() -> {
+            boolean ok = false;
+            try {
+                if ("snapshot".equals(kind)) {
+                    JSONObject tree = json.getJSONObject("tree");
+                    viewFactory.buildTree(tree, rootView);
+                    nativeRevision = revision;
+                    ok = true;
+                } else if ("patch".equals(kind)) {
+                    JSONArray patches = json.getJSONArray("patches");
+                    for (int i = 0; i < patches.length(); i++) {
+                        viewFactory.applyPatch(patches.getJSONObject(i));
+                    }
+                    nativeRevision = revision;
+                    ok = true;
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "transaction " + txId + " failed", e);
+                ok = false;
+                sendRenderNack(txId, revision, e.getClass().getSimpleName() + ": " + String.valueOf(e.getMessage()));
+            }
+            if (ok) sendRenderAck(txId, revision);
         });
     }
 

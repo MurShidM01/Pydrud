@@ -7,7 +7,9 @@ and re-renders the UI on change.
 """
 
 from __future__ import annotations
-from typing import Any, Callable, Generic, TypeVar
+from typing import Any, Callable, Generic, Optional, TypeVar
+
+from pydrud.core.subscriptions import Subscription
 
 T = TypeVar("T")
 
@@ -21,9 +23,10 @@ class State(Generic[T]):
         count.value += 1   # triggers watchers
     """
 
-    def __init__(self, initial: T, *, name: str = ""):
+    def __init__(self, initial: T, *, name: str = "", distinct: bool = False):
         self._value: T = initial
-        self._watchers: list[Callable[[T, T], None]] = []
+        self._watchers: list[tuple[Callable[[T, T], None], Optional[Callable]]] = []
+        self.distinct = bool(distinct)
         #: Optional label. Naming a State lets stateful hot reload match it
         #: to its replacement after a module is reloaded, even if the order
         #: of declarations in the file changed.
@@ -36,19 +39,35 @@ class State(Generic[T]):
     @value.setter
     def value(self, new_value: T):
         old = self._value
+        if self.distinct and old == new_value:
+            return
         self._value = new_value
-        for cb in self._watchers:
-            cb(old, new_value)
+        for cb, scheduler in list(self._watchers):
+            if scheduler is None:
+                cb(old, new_value)
+            else:
+                scheduler(lambda cb=cb, old=old, new_value=new_value: cb(old, new_value))
 
-    def watch(self, callback: Callable[[T, T], None]):
-        """Register a watcher called as ``fn(old_value, new_value)``."""
-        self._watchers.append(callback)
+    def watch(
+        self,
+        callback: Callable[[T, T], None],
+        *,
+        scheduler: Optional[Callable[[Callable], None]] = None,
+    ) -> Subscription:
+        """Register a watcher and return an explicit lifetime handle."""
+        entry = (callback, scheduler)
+        self._watchers.append(entry)
+
+        def _unsubscribe() -> None:
+            try:
+                self._watchers.remove(entry)
+            except ValueError:
+                pass
+
+        return Subscription(_unsubscribe)
 
     def unwatch(self, callback: Callable[[T, T], None]):
-        try:
-            self._watchers.remove(callback)
-        except ValueError:
-            pass
+        self._watchers[:] = [entry for entry in self._watchers if entry[0] is not callback]
 
     def __repr__(self) -> str:
         if self.name:

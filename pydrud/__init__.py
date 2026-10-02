@@ -14,6 +14,8 @@ from pydrud.core.state import State, ReactiveDict
 from pydrud.core.store import Store, Selector, Computed, ReactiveList
 from pydrud.core.events import Event, EventDispatcher
 from pydrud.core.results import Result, ResultError
+from pydrud.core.elements import Element, ElementTree
+from pydrud.core.subscriptions import Subscription
 from pydrud.core.tasks import TaskRunner, Timer, debounce, throttle
 from pydrud.core.responsive import (Breakpoints, MediaQuery, Responsive,
                                     ScreenInfo)
@@ -148,6 +150,9 @@ __all__ = [
     "EventDispatcher",
     "Result",
     "ResultError",
+    "Element",
+    "ElementTree",
+    "Subscription",
     "TaskRunner",
     "Timer",
     "debounce",

@@ -59,9 +59,9 @@ class TaskRunner:
 
                 return asyncio.run(value)
             return value
-        except BaseException as exc:  # noqa: BLE001 - reported, never swallowed
+        except BaseException as exc:  # noqa: BLE001 - report, then preserve Future failure
             self._report(exc)
-            return None
+            raise
 
     # ── timers ───────────────────────────────────────────────────────────
 

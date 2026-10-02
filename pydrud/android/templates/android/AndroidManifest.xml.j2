@@ -4,15 +4,25 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Optional: required only when the app calls page.vibrate()/page.haptics. -->
+{% if capabilities and capabilities.haptics %}
     <uses-permission android:name="android.permission.VIBRATE" />
+{% endif %}
     <!-- Optional: required only when the app calls page.notifications.show(). -->
+{% if capabilities and capabilities.notifications %}
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+{% endif %}
 
     <!-- Background work (page.background.schedule / start_service). -->
+{% if capabilities and capabilities.foreground_service %}
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+{% endif %}
+{% if capabilities and capabilities.boot_receiver %}
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+{% endif %}
+{% if capabilities and capabilities.wake_lock %}
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+{% endif %}
 {%- for permission in permissions | default([]) %}
     <uses-permission android:name="android.permission.{{ permission }}" />
 {%- endfor %}
