@@ -98,6 +98,7 @@ class App:
         #: Bound reactive objects — also used to carry values across reloads.
         self._bound_states: list = []
         self._bound_stores: list = []
+        self._subscriptions: list = []
         self._preserve_state: bool = True
         self._error_handler: Optional[Callable[[BaseException], None]] = None
         # ── Native service calls (request/response) ────────────────
@@ -263,10 +264,10 @@ class App:
         for state in states:
             if isinstance(state, State):
                 self._bound_states.append(state)
-                state.watch(lambda _old, _new: self.update(), scheduler=self.run_on_ui)
+                self._subscriptions.append(state.watch(lambda _old, _new: self.update(), scheduler=self.run_on_ui))
             elif hasattr(state, "subscribe"):
                 self._bound_stores.append(state)
-                state.subscribe(lambda *_args, **_kw: self.update())
+                self._subscriptions.append(state.subscribe(lambda *_args, **_kw: self.update()))
             else:
                 raise TypeError(
                     f"App.bind() expects State or an observable store, "
@@ -285,6 +286,12 @@ class App:
             self._watcher = None
         self._event_queue.put(None)
         self._cancel_pending("app stopped")
+        for subscription in list(self._subscriptions):
+            try:
+                subscription.cancel()
+            except Exception:
+                pass
+        self._subscriptions.clear()
         try:
             self._tasks.shutdown()
         except Exception:
