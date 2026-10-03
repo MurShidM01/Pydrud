@@ -117,6 +117,10 @@ class TestStarterAppEndToEnd(unittest.TestCase):
 
     def test_dark_mode_switch_rethemes_natively(self):
         device = self.device
+        switch = device.root.find("dark_switch")
+        self.assertEqual(switch.parent.key, "dark_mode_tile")
+        self.assertEqual(switch.parent.props["title"], "Dark mode")
+        self.assertEqual(switch.props["label"], "")
         device.change("dark_switch", True)
         # Theme changes reach the native layer as a palette + a mode switch.
         self.assertTrue(device.wait_for_command("theme_mode"))

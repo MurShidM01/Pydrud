@@ -434,6 +434,7 @@ class TestBuildPython(unittest.TestCase):
                 env = builder._build_env()
             detect.assert_called_once_with("3.11")
             self.assertEqual(env["PYDRUD_PYTHON"], "/opt/py311")
+            self.assertEqual(env["PYDRUD_COMPILE_PYC"], "false")
         finally:
             os.chdir(cwd)
             shutil.rmtree(tmp, ignore_errors=True)
@@ -448,9 +449,12 @@ class TestBuildPython(unittest.TestCase):
             create_project("envdemo2", org="com.example")
             builder = Builder(os.path.join(tmp, "envdemo2"))
             with mock.patch.dict(os.environ,
-                                 {"PYDRUD_PYTHON": "/custom/python"}):
+                                 {"PYDRUD_PYTHON": "/custom/python"}), \
+                    mock.patch("pydrud.commands.project._python_version_of",
+                               return_value="3.11"):
                 env = builder._build_env()
             self.assertEqual(env["PYDRUD_PYTHON"], "/custom/python")
+            self.assertEqual(env["PYDRUD_COMPILE_PYC"], "true")
         finally:
             os.chdir(cwd)
             shutil.rmtree(tmp, ignore_errors=True)

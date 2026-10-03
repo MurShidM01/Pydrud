@@ -43,6 +43,13 @@ class TestYamlControlledAndroidSync(unittest.TestCase):
         self.assertIn("android.permission.VIBRATE", manifest)
         self.assertIn("android.permission.POST_NOTIFICATIONS", manifest)
 
+        bridge = self.read(
+            "android/app/src/main/java/com/pydrud/gone/BridgeService.java")
+        self.assertIn("VIBRATOR_MANAGER_SERVICE", bridge)
+        self.assertIn("getDefaultVibrator", bridge)
+        self.assertIn("createPredefined", bridge)
+        self.assertIn("USAGE_ASSISTANCE_SONIFICATION", bridge)
+
     def test_sync_applies_identity_sdk_toolchain_and_manifest_settings(self):
         # This intentionally replaces the generated file: sync must use YAML,
         # not infer stale identity from the old Java source tree.
@@ -101,6 +108,7 @@ pydrud_version: "1.0.0"
             "compileSdk = 36", "minSdk = 26", "targetSdk = 35",
             "versionCode = 42", 'versionName = "2.5.0"',
             'version = "3.12"',
+            'System.getenv("PYDRUD_COMPILE_PYC")',
             'listOf("arm64-v8a", "x86_64")',
             'assets.srcDirs("../../static")',
             'pydrudShrink") ?: "true"',

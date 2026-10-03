@@ -4,7 +4,55 @@ All notable changes to Pydrud are documented here.
 
 ## [Unreleased]
 
-No unreleased changes yet.
+### Added
+* **Host-driven live preview foundation.** `pydrud dev` now imports and runs
+  project Python on the developer machine, binds a configurable LAN preview
+  server, watches source files, and prints a QR code plus exact connection URI
+  for the future independent Pydash rendering client. This path never builds
+  or reinstalls an APK.
+* **Stable Preview Protocol v1.** The documented Android-agnostic contract
+  defines short-lived bearer-token authentication, project/session identity,
+  client and renderer version negotiation, required capabilities, metrics,
+  initial snapshots, incremental revisioned patches, ACK/NACK recovery,
+  reconnect resynchronization, frame limits, and QR fields.
+* Added a transport-neutral `App.serve_transport()` adapter so an authenticated
+  accepted renderer socket can reuse Pydrud's existing widget serialization,
+  state/event ownership, diffing, revisions and bridge protocol without
+  changing the outbound generated-Android bridge used by `pydrud run`.
+
+### Changed
+* Host file reloads are serialized on the UI actor while a preview client is
+  connected. Generated routers and runtime bindings are refreshed in
+  dependency order; a failed reload reports its traceback and keeps the last
+  good rendered UI visible.
+* Bridge input now applies the same 2 MiB frame limit as the core protocol, and
+  NACK recovery snapshots retain their sent-tree bookkeeping so their ACK can
+  correctly advance the confirmed snapshot.
+
+## [2.0.2] — Reliable haptics and expanded widget catalogue
+
+### Fixed
+* Android 12+ haptics now resolve the default device through
+  `VibratorManager`, use hardware-tuned predefined effects for named impacts,
+  and apply explicit amplitudes on older devices. Pattern input and durations
+  are bounded, and the starter's demo uses a clearly perceptible heavy impact.
+* `pydrud run` scopes logcat to the app PID, so unrelated OEM `System.err`
+  exceptions (including Transsion push/network services) no longer pollute the
+  application's live output.
+* A host Python/runtime minor-version mismatch now sets
+  `PYDRUD_COMPILE_PYC=false`, avoiding Chaquopy's bytecode warning while
+  preserving the supported source-code fallback.
+* Labelled `Switch` controls fill their row by default, and the playground's
+  dark-mode control is a `SwitchListTile` with left text and a right-aligned
+  toggle.
+
+### Added
+* Expanded the public catalogue to 130+ widget classes with 40 native-backed
+  Flutter-style presets: flex/constraint helpers, typography and image
+  presets, list-tile controls, navigation buttons, app states, dashboard
+  cards, settings rows and form sections.
+* New projects include an `app/components/` package for reusable UI. The old
+  `app.ui` module remains as a compatibility re-export.
 
 ## [2.0.1] — Starter capability and UI hardening
 

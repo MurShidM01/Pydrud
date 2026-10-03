@@ -1,26 +1,39 @@
 # Architecture
 
-Pydrud is two programs talking over one socket: a **Python actor** that owns
-the widget tree, and an **Android runtime** that owns real views. Neither
-side guesses what the other is doing — every change is a transaction.
+Pydrud rendering is two peers talking over one socket: a **Python actor** that
+owns the widget tree and a renderer that owns native views. Neither side
+guesses what the other is doing — every change is a transaction.
+
+The normal APK and host-preview topologies share that rendering contract but
+have deliberately separate connection setup:
 
 ```
-your screens  ──►  pydrud.runtime.App  ──NDJSON──►  BridgeService (Java)
-                       │  tree, state, events                │
-                       ◄──────── events, acks ───────────────┘
+normal `pydrud run` / generated APK
+  embedded App ──outbound NDJSON──► generated BridgeService (Java)
+
+host `pydrud dev` / no APK build
+  project source ─► desktop App ◄── authenticated accepted socket ─► Pydash
+                       │ tree, state, events, diff, revisions │
+                       ◄──────────── events, ACK/NACK ────────┘
 ```
+
+`pydrud.core.devserver.DevServer` remains the APK/ADB source-sync endpoint and
+is not the Pydash server. Host preview uses `PreviewServer`, which owns only
+listener/session/handshake concerns and hands an authenticated transport to
+`App.serve_transport()`. The stable contract is documented in
+[Preview Protocol v1](PREVIEW_PROTOCOL.md).
 
 ## Layers
 
 | Package | Owns |
 | --- | --- |
 | `pydrud/runtime/` | `App` (the single-threaded UI actor, event loop, render transactions, hot reload) and `navigation` (`Router`, `Route`, the back stack) |
-| `pydrud/core/` | the machinery `App` is built from: `protocol`, `bridge`, `diff`, `elements`, `events`, `state`, `store`, `results`, `tasks`, `subscriptions`, `responsive`, `controllers`, `watcher` |
+| `pydrud/core/` | the machinery `App` is built from: renderer `protocol`/`bridge`, authenticated `preview`/`preview_server`, `diff`, `elements`, `events`, `state`, `store`, `results`, `tasks`, `subscriptions`, `responsive`, `controllers`, `watcher` |
 | `pydrud/widgets/` | the widget vocabulary — `base`, `layout`, `basic`, `material`, `forms`, `advanced`, `canvas`, `animation`, `theme`, `styling`, `tokens`, `scaffold`, `app_bar`, `gestures`, `responsive` |
 | `pydrud/services/` | device capabilities called from Python — `native` (camera, BLE, NFC, sensors, …) and `http` |
 | `pydrud/data/` | `database` (SQLite) and `cache` |
 | `pydrud/android/` | `templates/` (the generated Java/Gradle/Python project) and `javacheck` (static Java validation, no JDK needed) |
-| `pydrud/commands/` | the `pydrud` CLI — `project`, `builder`, `release`, `analyzer`, `doctor`, `docs`, `inspector`, `packages` |
+| `pydrud/commands/` | the `pydrud` CLI — host `preview`, APK `project`/`builder`, `release`, `analyzer`, `doctor`, `docs`, `inspector`, `packages` |
 | `pydrud/testing.py` | `FakeDevice` and `AppTester`: run a whole app with no emulator |
 | `pydrud/compatibility.py` | the frozen toolchain matrix (AGP, Gradle, Chaquopy, SDK, NDK, JDK) and the protocol version |
 

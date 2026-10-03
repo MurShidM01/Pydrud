@@ -245,8 +245,12 @@ class TestGeneratedProject(unittest.TestCase):
         for name in ("android", "commands", "utils"):
             self.assertFalse(os.path.isdir(os.path.join(bundle, name)),
                              f"build-time only package '{name}' was bundled")
-        self.assertFalse(os.path.isfile(os.path.join(bundle, "packages.py")),
-                         "pydrud.packages only aliases the CLI package")
+        for name in ("packages.py", "compatibility.py"):
+            self.assertFalse(os.path.isfile(os.path.join(bundle, name)),
+                             f"build-time-only module '{name}' was bundled")
+        for name in ("preview.py", "preview_server.py"):
+            self.assertFalse(os.path.isfile(os.path.join(bundle, "core", name)),
+                             f"host-only preview module '{name}' was bundled")
 
         # Measured with CRLF counted as one byte, so a Windows checkout
         # (core.autocrlf) reports the same size as a Unix one.

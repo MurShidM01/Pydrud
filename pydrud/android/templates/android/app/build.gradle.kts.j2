@@ -91,6 +91,14 @@ chaquopy {
         buildPython(System.getenv("PYDRUD_PYTHON") ?: "{{ python_executable }}")
         version = "{{ python_version | default("3.11") }}"
 
+        // Chaquopy can only compile source to .pyc when buildPython has the
+        // same minor version as the embedded runtime. Pydrud sets this false
+        // automatically on machines which only have a different Python
+        // version, avoiding a scary-but-harmless Gradle warning.
+        pyc {
+            src = (System.getenv("PYDRUD_COMPILE_PYC") ?: "true").toBoolean()
+        }
+
         // Managed by `pydrud pip add` — edit pydrud.toml, not this block.
         pip {
             // pydrud:pip:begin

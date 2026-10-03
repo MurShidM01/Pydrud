@@ -31,7 +31,79 @@ pydrud run                            # Build, install, launch
 
 **First APK in ~2 minutes.** Connect your Android device via USB (or ADB over TCP).
 
+For host-driven live UI preview with the separate Pydash companion protocol:
+
+```bash
+pydrud dev                            # Run Python locally, show LAN QR, wait for Pydash
+```
+
+`pydrud dev` does not build or install an APK. Pydash is an independent future
+client and is not shipped by this repository; Pydrud now provides the stable,
+authenticated development-server side of that connection.
+
 ---
+
+## Host-driven live preview (`pydrud dev`)
+
+The preview workflow keeps Python and project source on the development
+machine. It watches `src/`, computes the existing keyed widget-tree diffs and
+revisioned render transactions, and sends only rendering commands to an
+authenticated lightweight client:
+
+```bash
+pydrud dev
+pydrud dev --host 0.0.0.0 --port 8597
+pydrud dev --connect-host 192.168.1.24   # advertise a specific LAN/VPN address
+pydrud dev --no-qr                       # URI-only output for scripts
+```
+
+The terminal shows the project/session identity, listening and connect
+addresses, a QR code and the exact one-run connection URI. On connection it
+sends a full snapshot; acknowledged edits use patches. Disconnects leave the
+host runtime and watcher alive, and reconnects force a safe full resync from
+the client's reported revision. Syntax/reload errors are shown in the terminal
+while the last good UI remains visible.
+
+The preview listener defaults to the local network and uses a random 256-bit
+bearer token embedded in the QR. It is a trusted-LAN development protocol, not
+an internet service: traffic is not encrypted, so do not port-forward it or
+share the connection URI. See [Preview Protocol v1](docs/PREVIEW_PROTOCOL.md)
+for handshake, capabilities, framing, ACK/NACK and reconnect semantics.
+
+Existing `pydrud run`, APK generation and the embedded Android bridge remain
+separate and unchanged.
+
+---
+
+## New in v2.0.2 — reliable haptics, clean logs and 130+ widgets
+
+v2.0.2 hardens the device experience and expands the Flutter-style UI layer:
+
+* **Haptics are perceptible across more hardware.** Android 12+ now resolves
+  the default vibrator through `VibratorManager`, named impacts use
+  device-tuned predefined effects, and older devices receive explicit
+  amplitude fallbacks. The playground uses an unmistakable heavy impact.
+* **Live logs belong to your app.** `pydrud run` scopes logcat to the app PID,
+  preventing unrelated `System.err` output from Transsion and other OEM
+  services from looking like a Pydrud failure.
+* **The Python mismatch warning is gone.** If the build machine has Python
+  3.12 while the app embeds 3.11, Pydrud disables Chaquopy source bytecode
+  compilation automatically. Builds remain successful; only first start is
+  slightly slower.
+* **130+ widget constructors.** New native-backed Flutter-style presets include
+  `Expanded`, `Flexible`, `Align`, `Wrap`, `ConstrainedBox`,
+  `SwitchListTile`, `CheckboxListTile`, `RadioListTile`, typography/image
+  presets, empty/error/loading states, dashboard cards and settings tiles.
+* **The starter is easier to grow.** Shared UI now lives under
+  `app/components/`, and the dark-mode row uses `SwitchListTile` so its label
+  stays left while its switch is aligned to the right.
+
+Existing projects should regenerate their managed runtime after upgrading:
+
+```bash
+pydrud sync
+pydrud run
+```
 
 ## New in v2.0.1 — starter app fixes, capabilities and more UI presets
 
@@ -40,7 +112,7 @@ issues most visible in a brand-new `pydrud init` app:
 
 * **Vibration works out of the box.** New projects enable the `haptics`
   capability, so the generated manifest includes `android.permission.VIBRATE`.
-  `page.haptics.*` results now settle successfully or fail with an actionable
+  `page.haptics.*` results settle successfully or fail with an actionable
   message instead of only logging `Vibrate unavailable`.
 * **Runtime permission demos work out of the box.** New projects enable the
   `notifications` capability, so `page.permissions.request("notifications")`
@@ -167,11 +239,11 @@ should be treated as a fully certified production matrix.
 
 | Feature | Description |
 |---------|-------------|
-| Declarative UI | 90+ widgets and presets: layout, Material 3 components, form fields, chips, charts, media, gestures, animations |
+| Declarative UI | 130+ widgets and presets: layout, Material 3 components, form fields, chips, charts, media, gestures, animations and Flutter-style compositions |
 | Reactive State | `State<T>` auto-triggers UI re-renders on value change |
 | Full Styling | Colors, padding, margin, borders, fonts, elevation, alignment |
 | Native Rendering | Every widget becomes a real Android View — not a WebView or canvas |
-| CLI Toolchain | `init` / `run` / `sync` / `build` / `watch` / `analyze` / `doctor` / `clean` / `pip` / `icons` / `keygen` / `permissions` / `capabilities` / `docs` / `inspect` |
+| CLI Toolchain | `init` / `dev` / `run` / `sync` / `build` / `watch` / `analyze` / `doctor` / `clean` / `pip` / `icons` / `keygen` / `permissions` / `capabilities` / `docs` / `inspect` |
 | No XML, no Java | Even `themes.xml` is generated from the Python palette — `pydrud init --accent "#FF0EA5E9"` |
 | Data Layer | SQLite `Database`, `Model` ORM with migrations, and a TTL `Cache` |
 | PyPI on Android | 119 verified packages installable with `pydrud pip add` |
@@ -639,6 +711,15 @@ app.enable_hot_reload()  # Watch src/ for .py changes
 app.run()
 ```
 
+There are two deliberately separate development topologies:
+
+- `pydrud dev` executes Python on the developer machine and serves revisioned
+  UI snapshots/patches to a Pydash-compatible preview renderer over the LAN.
+  No APK is built or installed.
+- `pydrud run` builds/installs the normal Android application, where the
+  embedded Python runtime and generated Android bridge continue to work as
+  before.
+
 ## Hot Reload & Interactive Dev Runner
 
 Pydrud features Flutter-style **instant Hot Reload** and **Hot Restart** during `pydrud run`. When you edit Python files under `src/` (screens, components, state, config), changes are synced directly to the running Python runtime on the Android device in milliseconds — **without rebuilding the APK or reinstalling**:
@@ -736,7 +817,7 @@ pydrud build    # proxy forwarded to Gradle automatically
 | `Image` | Display image | `src` (asset or URL), `fit` |
 | `Icon` | Material icon | `name` (star, home, search, ...), `size`, `color` |
 | `Checkbox` | Checkable box | `label`, `checked` |
-| `Switch` | Toggle switch | `label`, `active` |
+| `Switch` | Toggle switch; labelled switches put text left and control right | `label`, `active`, `full_width` |
 | **`ProgressBar`** (v1.1) | Determinate or spinning progress | `value` (0-1), `indeterminate`, `circular`, `color` |
 | **`Slider`** (v1.1) | Draggable value slider | `value`, `min`, `max`, `divisions`, `color` |
 | **`Dropdown`** (v1.1) | Option picker (spinner) | `options`, `value`, `hint` |
@@ -757,6 +838,22 @@ pydrud build    # proxy forwarded to Gradle automatically
 | **`WebView`** (v1.2) | Embedded browser, 2-way `postMessage` | `url`, `html`, `on_load`, `on_message` |
 | **`VideoPlayer`** (v1.2) | Native video surface | `source`, `autoplay`, `loop`, `controls` |
 | **`Tooltip`** (v1.2) | Long-press hint | `message`, `child` |
+
+### Flutter-style presets and compositions
+
+These constructors reuse the native primitives above, so they add ergonomics
+without adding protocol-only or WebView-backed controls.
+
+| Area | Widgets |
+|------|---------|
+| Flex and constraints | `Expanded`, `Flexible`, `Align`, `ConstrainedBox`, `LimitedBox`, `Gap` |
+| Box and scrolling | `ColoredBox`, `DecoratedBox`, `VerticalDivider`, `SingleChildScrollView`, `Wrap`, `ButtonBar` |
+| Typography | `Heading`, `Title`, `Subtitle`, `Label`, `Caption`, `Link` |
+| Images | `NetworkImage`, `AssetImage`, `CircleImage`, `Placeholder` |
+| Selection | `SwitchListTile`, `CheckboxListTile`, `RadioListTile`, `ActionChip`, `ChoiceChip` |
+| Common controls | `CircleAvatar`, `BackButton`, `CloseButton`, `MenuButton`, `SectionHeader` |
+| App states and cards | `EmptyState`, `ErrorState`, `LoadingState`, `InfoCard`, `StatCard` |
+| Settings and forms | `SettingsTile`, `NavigationTile`, `FormSection` |
 
 ### Events
 
@@ -1307,7 +1404,7 @@ capabilities:
 firebase: false
 shrink: false
 python_version: "3.11"
-framework_version: "2.0.1"
+framework_version: "2.0.2"
 protocol_version: 2
 chaquopy_version: "17.0.0"
 agp_version: "8.13.2"
@@ -1345,6 +1442,8 @@ as `pydrud analyze --json` remains plain JSON.
 | `pydrud init <name> --org com.example` | With custom package |
 | `pydrud build` | Build debug APK |
 | `pydrud build --release` | Build release APK |
+| `pydrud dev [project_dir]` | Run Python locally, expose authenticated LAN preview, print QR and wait for Pydash |
+| `pydrud dev --host <ip> --port <port>` | Configure preview listener (`--connect-host` overrides the QR address) |
 | `pydrud run` | Build + install + launch with Flutter-style Hot Reload & live logs |
 | `pydrud run --device <id>` | Target specific device |
 | `pydrud run --no-interactive` | Run without interactive keyboard mode (for CI/scripts) |
@@ -1476,6 +1575,7 @@ pydrud/
 |   |   +-- base.py               # Widget base class
 |   |   +-- layout.py             # Container, Column, Row, Center, Spacer, Divider
 |   |   +-- basic.py              # Text, Button, TextField, Image, Icon, Checkbox, Switch
+|   |   +-- presets.py            # Flutter-style convenience widgets and compositions
 |   |   +-- styling.py            # Style, EdgeInsets, Alignment, FontStyle
 |   |   +-- app_bar.py            # AppBar (new)
 |   |   +-- scaffold.py           # Scaffold (new)
