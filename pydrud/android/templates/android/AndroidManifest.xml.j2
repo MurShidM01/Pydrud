@@ -49,8 +49,15 @@
     <uses-feature android:name="android.hardware.nfc" android:required="false" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
 
+    <!--
+      Cleartext HTTP is allowed by default so local development servers,
+      LAN devices and plain-http intranet APIs work out of the box
+      (Android 9+ blocks them otherwise). Shipping an app that only talks
+      HTTPS? Set ``cleartext_traffic: false`` in pydrud.yaml and re-sync.
+    -->
     <application
         android:allowBackup="true"
+        android:usesCleartextTraffic="{{ 'true' if (cleartext_traffic | default(true)) else 'false' }}"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:label="{{ project_name }}"

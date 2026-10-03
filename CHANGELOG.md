@@ -4,6 +4,58 @@ All notable changes to Pydrud are documented here.
 
 ## [Unreleased]
 
+### Fixed — runtime hardening batch
+* **Legacy Gingerbread-era icons removed.** The ~106-entry
+  `android.R.drawable` lookup table in the generated `ViewFactory` (which
+  rendered `chevron_right` as a media-rewind button, `qr_code` as a crop
+  tool, `sparkle` as a sun and `code` as a wrench) is deleted. Every icon
+  now renders through the vector `PydrudIcons` path only — sharp at any
+  density and tintable.
+* **Managed image pipeline.** Network/asset images no longer spawn a raw
+  `Thread` each: they run on a shared 3-thread pool, are cached in a
+  heap-aware `LruCache` (scrolling back over a list never re-downloads),
+  are downsampled at decode time (`inSampleSize` — a 4K photo can no longer
+  OOM the app), and carry a tag-based cancellation token so recycled
+  `ImageView`s never show stale bitmaps. `Image(style={"placeholder": …,
+  "error_image": …})` assets are honoured and remote bitmaps fade in.
+* **Cleartext HTTP works by default.** The generated manifest now includes
+  `android:usesCleartextTraffic="true"`, so local dev servers and plain-HTTP
+  LAN APIs stop failing with "Cleartext HTTP traffic not permitted" on
+  Android 9+. Opt out with `cleartext_traffic: false` in `pydrud.yaml`.
+* **Predictive back gesture (Android 13+).** The deprecated
+  `onBackPressed()` override is gone; all presses flow through
+  `OnBackPressedDispatcher`, restoring swipe-to-go-back animations, and the
+  Python-router round trip now falls back to a dispatcher-safe default.
+* **ListView virtualization.** A `ListView` with 24+ children (or
+  `style={"virtualized": True}`) is backed by a `RecyclerView` with
+  view-holder recycling instead of an eager `LinearLayout` — long lists
+  scroll without jank or memory spikes. Structural patches
+  (insert/delete/move/replace) against virtualized lists are handled
+  safely instead of crashing on `RecyclerView.addView`.
+* **Versioned HTTP client.** The `User-Agent` is generated from the
+  installed package version (`Pydrud/<version> (Android)`) instead of the
+  stale hardcoded `Pydrud/1.2`.
+
+### Added — runtime hardening batch
+* **TextField IME actions.** `TextField(ime_action="search" | "done" |
+  "send" | "go" | "next" | "previous")` sets the keyboard action button;
+  pressing it (including SEARCH) fires `on_submit` and dismisses the
+  keyboard. `SearchField` defaults to `ime_action="search"`.
+* **Tap-outside keyboard dismissal.** Touching anywhere outside a focused
+  text field hides the soft keyboard and clears focus — no more hunting
+  for the back button.
+* **Custom fonts from assets.** Drop `inter.ttf` into `assets/fonts/` and
+  use `font_family="inter"`; the native layer resolves and caches
+  `.ttf`/`.otf` typefaces from the app assets, falling back to the
+  framework typeface when a family is missing.
+* **Synchronous permission check.** `page.permissions.is_granted("camera")`
+  returns a plain `bool` without ever opening a system prompt — ideal for
+  guards; async code can keep using `await page.permissions.check(name)`.
+
+### Changed — runtime hardening batch
+* `InfiniteList`'s `virtualized` style prop graduated from the inert ledger
+  (`NATIVE_IGNORED_PROPS`) to a natively honoured setting.
+
 ### Added
 * **Host-driven live preview foundation.** `pydrud dev` now imports and runs
   project Python on the developer machine, binds a configurable LAN preview

@@ -193,6 +193,16 @@ class TextField(Widget):
 
     ``icon`` shows a leading glyph and ``accent`` overrides the focus
     colour; everything else follows :class:`pydrud.Theme`.
+
+    ``ime_action`` (``"done"``, ``"search"``, ``"send"``, ``"go"``,
+    ``"next"``, ``"previous"``) picks the keyboard action button, and
+    ``on_submit`` fires when the user presses it::
+
+        TextField(hint="Search", ime_action="search",
+                  on_submit=lambda e: run_search(e.data["value"]))
+
+    The keyboard also dismisses itself when the user taps anywhere outside
+    the field or presses the submit action.
     """
 
     _widget_type = "TextField"
@@ -208,6 +218,7 @@ class TextField(Widget):
         password: bool = False,
         read_only: bool = False,
         keyboard: Optional[str] = None,  # "text", "number", "email", "phone", "url"
+        ime_action: Optional[str] = None,  # "done", "search", "send", "go", "next", "previous"
         variant: str = "filled",         # "filled" | "outlined"
         icon: Optional[str] = None,
         accent: Optional[str] = None,
@@ -237,6 +248,8 @@ class TextField(Widget):
             self.style["readOnly"] = True
         if keyboard:
             self.style["keyboard"] = keyboard
+        if ime_action:
+            self.style["ime"] = ime_action
 
     @property
     def value(self) -> str:
@@ -262,6 +275,7 @@ class SearchField(TextField):
         kwargs.setdefault("hint", "Search")
         kwargs.setdefault("keyboard", "text")
         kwargs.setdefault("icon", "search")
+        kwargs.setdefault("ime_action", "search")
         super().__init__(value, **kwargs)
 
 

@@ -102,9 +102,13 @@ public class {{ app_name }}Activity extends AppCompatActivity {
 
         // A deep link (myapp://route), launcher shortcut or notification tap
         // may have started us — forward it once Python is listening.
-        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+        // Modern back handling: Android 13+ predictive back gestures only
+        // animate correctly when the press goes through the dispatcher;
+        // overriding the deprecated onBackPressed() bypasses it entirely.
+        backCallback = new OnBackPressedCallback(true) {
             @Override public void handleOnBackPressed() { requestPydrudBack(); }
-        });
+        };
+        getOnBackPressedDispatcher().addCallback(this, backCallback);
 
         handleDeepLinkIntent(getIntent());
 
@@ -423,19 +427,19 @@ public class {{ app_name }}Activity extends AppCompatActivity {
     }
 
     // ── Back button ───────────────────────────────────────────────────────
+    //
+    // No deprecated onBackPressed() override here: every press arrives via
+    // the OnBackPressedDispatcher callback registered in onCreate, so the
+    // Android 13+ predictive back gesture animates and stays interceptable.
 
-    @Override
-    @SuppressWarnings("deprecation")
-    public void onBackPressed() {
-        requestPydrudBack();
-    }
+    private OnBackPressedCallback backCallback;
 
     private void requestPydrudBack() {
         // Ask Python first: the Router may want to pop a screen. Only fall
         // back to the default behaviour if Python does not answer in time
         // or reports that it did not handle the press.
         if (bridge == null || !bridge.isConnected()) {
-            super.onBackPressed();
+            defaultBack();
             return;
         }
         if (awaitingBackResult) return;
@@ -464,7 +468,42 @@ public class {{ app_name }}Activity extends AppCompatActivity {
     }
 
     private void defaultBack() {
-        super.onBackPressed();
+        // Run the dispatcher's default action (finish + system animation)
+        // without re-entering our own callback.
+        if (backCallback != null) backCallback.setEnabled(false);
+        getOnBackPressedDispatcher().onBackPressed();
+        if (backCallback != null) backCallback.setEnabled(true);
+    }
+
+    // ── Soft keyboard ─────────────────────────────────────────────────────
+
+    /**
+     * Tap-outside-to-dismiss: when a touch lands outside the focused text
+     * field, the keyboard hides and the field loses focus — so users never
+     * have to hunt for the hardware/system back button to close it.
+     */
+    @Override
+    public boolean dispatchTouchEvent(android.view.MotionEvent event) {
+        if (event.getAction() == android.view.MotionEvent.ACTION_DOWN) {
+            android.view.View focused = getCurrentFocus();
+            if (focused instanceof android.widget.EditText) {
+                android.graphics.Rect bounds = new android.graphics.Rect();
+                focused.getGlobalVisibleRect(bounds);
+                if (!bounds.contains((int) event.getRawX(), (int) event.getRawY())) {
+                    hideKeyboard(focused);
+                }
+            }
+        }
+        return super.dispatchTouchEvent(event);
+    }
+
+    /** Hide the soft keyboard and clear focus from a text field. */
+    public void hideKeyboard(android.view.View focused) {
+        android.view.inputmethod.InputMethodManager imm =
+            (android.view.inputmethod.InputMethodManager)
+                getSystemService(INPUT_METHOD_SERVICE);
+        if (imm != null) imm.hideSoftInputFromWindow(focused.getWindowToken(), 0);
+        focused.clearFocus();
     }
 
     // ── Lifecycle → Python ────────────────────────────────────────────────

@@ -304,6 +304,16 @@ class Permissions(_Service):
         """
         return self._invoke("permission_check", permission=self.resolve(name))
 
+    def is_granted(self, name: str, *, timeout: float = 2.0) -> bool:
+        """Synchronous ``True``/``False`` — never opens a system prompt.
+
+        The bridge answers permission checks from native side immediately,
+        so blocking the calling thread here is safe (and this is what makes
+        guards like ``if page.permissions.is_granted("camera"):`` feel
+        natural). Inside async code prefer ``await page.permissions.check(name)``.
+        """
+        return bool(self.check(name).wait(timeout=timeout, default=False))
+
     def status(self, name: str) -> Result:
         """Query permission state without opening a system prompt.
 
