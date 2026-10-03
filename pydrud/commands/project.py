@@ -53,6 +53,7 @@ BUNDLE_EXCLUDES = (
     "packages.py",  # deprecated shim for pydrud.commands.packages (CLI only)
     "compatibility.py",  # generated Android toolchain matrix (build-time only)
     "preview.py", "preview_server.py",  # host-only Pydash session/listener
+    "qr.py",        # terminal QR encoder for ``pydrud dev`` (host-only)
 )
 
 

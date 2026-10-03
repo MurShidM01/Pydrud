@@ -20,7 +20,17 @@ All notable changes to Pydrud are documented here.
   state/event ownership, diffing, revisions and bridge protocol without
   changing the outbound generated-Android bridge used by `pydrud run`.
 
+* **Built-in QR encoder.** `pydrud.core.qr` implements QR symbol generation
+  (byte mode, all versions and error-correction levels, Reed-Solomon ECC,
+  masking and format/version information) with nothing but the standard
+  library, so `pydrud dev` always prints a scannable code.
+
 ### Changed
+* `qrcode` is no longer a required dependency. `pydrud dev` falls back to the
+  bundled encoder when it is absent; install the `qr` extra to keep using the
+  third-party encoder. This fixes `ModuleNotFoundError: No module named
+  'qrcode'` / "QR support is unavailable" in environments where the optional
+  package was missing.
 * Host file reloads are serialized on the UI actor while a preview client is
   connected. Generated routers and runtime bindings are refreshed in
   dependency order; a failed reload reports its traceback and keeps the last

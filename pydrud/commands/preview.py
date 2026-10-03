@@ -17,6 +17,7 @@ from pydrud.core.preview import (
     build_preview_uri,
     fallback_project_id,
 )
+from pydrud.core.qr import encode_matrix as encode_qr_matrix
 from pydrud.core.preview_server import PreviewServer
 from pydrud.runtime.app import App
 
@@ -205,13 +206,17 @@ def resolve_connect_host(bind_host: str, *, override: Optional[str] = None) -> s
     return "127.0.0.1"
 
 
-def terminal_qr(payload: str, *, ansi: Optional[bool] = None) -> str:
-    """Render a compact, scanner-friendly terminal QR code."""
+def _qr_matrix(payload: str) -> list[list[bool]]:
+    """Return the QR modules for ``payload`` (``True`` == dark module).
+
+    Pydrud ships a dependency-free encoder so ``pydrud dev`` always prints a
+    scannable code. The third-party ``qrcode`` package is used when it happens
+    to be installed, purely to stay byte-identical with previous releases.
+    """
     try:
         import qrcode
-    except ImportError as exc:  # pragma: no cover - packaging guard
-        raise RuntimeError(
-            "QR support is unavailable; reinstall Pydrud with its dependencies") from exc
+    except ImportError:
+        return encode_qr_matrix(payload, error_correction="M", border=2)
 
     qr = qrcode.QRCode(
         version=None,
@@ -221,7 +226,12 @@ def terminal_qr(payload: str, *, ansi: Optional[bool] = None) -> str:
     )
     qr.add_data(payload)
     qr.make(fit=True)
-    matrix = qr.get_matrix()
+    return [[bool(cell) for cell in row] for row in qr.get_matrix()]
+
+
+def terminal_qr(payload: str, *, ansi: Optional[bool] = None) -> str:
+    """Render a compact, scanner-friendly terminal QR code."""
+    matrix = _qr_matrix(payload)
     if len(matrix) % 2:
         matrix.append([False] * len(matrix[0]))
     if ansi is None:
