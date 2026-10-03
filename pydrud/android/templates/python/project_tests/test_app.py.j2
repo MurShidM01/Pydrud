@@ -32,7 +32,7 @@ class TestApp(unittest.TestCase):
 
     def test_typing_a_name_updates_the_greeting(self):
         self.app.type_in("name_input", "Ada")
-        self.assertEqual(self.app.prop("greeting", "value"), "Hello, Ada 👋")
+        self.assertEqual(self.app.prop("greeting", "value"), "Hello, Ada!")
 
 
 if __name__ == "__main__":

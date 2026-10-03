@@ -105,7 +105,7 @@ class TestStarterAppEndToEnd(unittest.TestCase):
         device = self.device
         device.change("name_input", "Ada")
         self.assertTrue(device.wait_for(
-            lambda d: d.root.find("greeting").props["value"] == "Hello, Ada 👋"))
+            lambda d: d.root.find("greeting").props["value"] == "Hello, Ada!"))
 
     def test_slider_drives_the_label_and_progress_bar(self):
         device = self.device

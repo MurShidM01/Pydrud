@@ -124,7 +124,7 @@ def native_card(page):
             granted = (all(result.values())
                        if isinstance(result, dict) and result
                        else bool(result))
-            page.toast("Permission granted 🎉" if granted
+            page.toast("Permission granted" if granted
                        else "Permission denied")
         page.permissions.request("notifications").then(report)
 
@@ -135,7 +135,7 @@ def native_card(page):
             ResponsiveGrid(key="native_grid", min_item_width=150,
                            max_columns=4, spacing=Spacing.SM, children=[
                 demo_button("Toast", Icons.CHAT, "toast_btn",
-                            lambda _e: page.toast("Hello from Python 👋")),
+                            lambda _e: page.toast("Hello from Python!")),
                 demo_button("Snackbar", Icons.INFO, "snack_btn",
                             lambda _e: page.snack_bar(
                                 "A native snackbar", action="Nice",
@@ -181,7 +181,7 @@ def components_card(page):
         amount.value = float(event.get("value", 0))
         refresh()
 
-    greeting = (f"Hello, {your_name.value.strip()} 👋"
+    greeting = (f"Hello, {your_name.value.strip()}!"
                 if your_name.value.strip() else "Type your name above…")
 
     return Card(key="components_card", padding=Spacing.LG, child=Column(

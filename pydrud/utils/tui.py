@@ -68,6 +68,20 @@ C_BORDER    = _s("38;5;240")    # Dark Slate Border
 C_BG_ERR    = _s("48;5;52")     # Deep Red BG
 
 
+# ── Status Glyphs ────────────────────────────────────────────────────────────
+# One deliberately professional, monochrome symbol set. These are plain
+# text glyphs (never emoji), so every terminal renders them in the ANSI
+# colour we choose instead of as coloured emoji artwork.
+GLYPH_OK      = "✓"    # success
+GLYPH_FAIL    = "✗"    # error / failure
+GLYPH_INFO    = "i"    # information
+GLYPH_WARN    = "▲"    # warning
+GLYPH_NEUTRAL = "•"    # neutral note
+GLYPH_STEP    = "→"    # step / progress
+GLYPH_RELOAD  = "↻"    # hot reload
+GLYPH_RESTART = "↺"    # hot restart
+
+
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
@@ -220,7 +234,7 @@ def render_summary(
 ) -> str:
     """Render a compact completion card."""
     colour = C_SUCCESS if success else C_ERROR
-    icon = "✓" if success else "✗"
+    icon = GLYPH_OK if success else GLYPH_FAIL
     lines = [f"\n  {colour}{icon}{RESET} {BOLD}{title}{RESET}"]
     if items:
         lines.append(render_key_values(items))
@@ -243,19 +257,19 @@ def render_next_steps(commands: Sequence[tuple[str, str] | str]) -> str:
 # ── Status Badges ────────────────────────────────────────────────────────────
 
 def ok_badge(text: str) -> str:
-    return f"  {C_SUCCESS}✓{RESET} {text}"
+    return f"  {C_SUCCESS}{GLYPH_OK}{RESET} {text}"
 
 def info_badge(text: str) -> str:
-    return f"  {C_PRIMARY}ℹ{RESET} {text}"
+    return f"  {C_PRIMARY}{BOLD}{GLYPH_INFO}{RESET} {text}"
 
 def warn_badge(text: str) -> str:
-    return f"  {C_WARN}▲{RESET} {text}"
+    return f"  {C_WARN}{GLYPH_WARN}{RESET} {text}"
 
 def error_badge(text: str) -> str:
-    return f"  {C_ERROR}✗{RESET} {text}"
+    return f"  {C_ERROR}{GLYPH_FAIL}{RESET} {text}"
 
 def neutral_badge(text: str) -> str:
-    return f"  {C_MUTED}•{RESET} {text}"
+    return f"  {C_MUTED}{GLYPH_NEUTRAL}{RESET} {text}"
 
 def add_badge(text: str) -> str:
     return f"  {C_SUCCESS}[+]{RESET} {text}"
@@ -264,7 +278,7 @@ def remove_badge(text: str) -> str:
     return f"  {C_ERROR}[-]{RESET} {text}"
 
 def step_badge(step: str, status: str = "...") -> str:
-    return f"  {C_PRIMARY}➜{RESET} {BOLD}{step:<38}{RESET} {C_MUTED}{status}{RESET}"
+    return f"  {C_PRIMARY}{GLYPH_STEP}{RESET} {BOLD}{step:<38}{RESET} {C_MUTED}{status}{RESET}"
 
 
 # ── Hot Reload & Hot Restart Badges ──────────────────────────────────────────
@@ -284,7 +298,7 @@ def hot_reload_success(duration_ms: float, reloaded: list[str] | str, states_kep
 
     kept_str = f" • {C_MUTED}kept {states_kept} state(s){RESET}" if states_kept > 0 else ""
     return (
-        f"\n  {C_WARN}⚡{RESET} {BOLD}{C_WARN}Hot reload{RESET} {BOLD}completed in {C_CYAN}{dur_str}{RESET} "
+        f"\n  {C_WARN}{GLYPH_RELOAD}{RESET} {BOLD}{C_WARN}Hot reload{RESET} {BOLD}completed in {C_CYAN}{dur_str}{RESET} "
         f"{C_MUTED}({files_str}){RESET}{kept_str}\n"
     )
 
@@ -292,7 +306,7 @@ def hot_restart_success(duration_ms: float) -> str:
     """Format an attractive Hot Restart success message."""
     dur_str = f"{duration_ms:.0f}ms" if duration_ms >= 10 else f"{duration_ms:.1f}ms"
     return (
-        f"\n  {C_PURPLE}🔄{RESET} {BOLD}{C_PURPLE}Hot restart{RESET} {BOLD}completed in {C_CYAN}{dur_str}{RESET} "
+        f"\n  {C_PURPLE}{GLYPH_RESTART}{RESET} {BOLD}{C_PURPLE}Hot restart{RESET} {BOLD}completed in {C_CYAN}{dur_str}{RESET} "
         f"{C_MUTED}(state reset & restarted){RESET}\n"
     )
 
@@ -308,7 +322,7 @@ def render_header_banner(
     """Render the live runner banner using the shared command visual system."""
     return render_command_header(
         "run",
-        "⚡ Pydrud Native Runner",
+        "Pydrud Native Runner",
         subtitle="Hot reload, device logs and interactive developer tools",
         details=(
             ("App", package_name or app_name),
@@ -361,7 +375,7 @@ def render_error_box(
     width = _term_width()
     inner = width - 4
 
-    header_text = f" ❌ {title} "
+    header_text = f" {GLYPH_FAIL} {title} "
     top = f"  {C_ERROR}╭──{RESET}{BOLD}{C_ERROR}{header_text}{RESET}{C_ERROR}{'─' * max(2, inner - len(header_text) - 2)}╮{RESET}"
     bottom = f"  {C_ERROR}╰{'─' * inner}╯{RESET}"
 
@@ -401,7 +415,7 @@ def render_syntax_error_box(
     width = _term_width()
     inner = width - 4
 
-    header_text = " ⚠️ Hot Reload Syntax Error "
+    header_text = f" {GLYPH_WARN} Hot Reload Syntax Error "
     top = f"  {C_WARN}╭──{RESET}{BOLD}{C_WARN}{header_text}{RESET}{C_WARN}{'─' * max(2, inner - len(header_text) - 2)}╮{RESET}"
     bottom = f"  {C_WARN}╰{'─' * inner}╯{RESET}"
 
