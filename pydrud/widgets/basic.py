@@ -419,7 +419,13 @@ class Checkbox(Widget):
 
 
 class Switch(Widget):
-    """A toggle switch with a label."""
+    """A toggle switch with an optional label.
+
+    Labelled switches fill the available row by default, placing the label at
+    the start and the native toggle at the end (the Material/Flutter
+    ``SwitchListTile`` convention). An unlabelled switch stays compact. Pass
+    ``full_width=False`` to opt a labelled switch back into the compact form.
+    """
 
     _widget_type = "Switch"
 
@@ -429,6 +435,7 @@ class Switch(Widget):
         *,
         active: bool = False,
         active_color: Optional[str] = None,
+        full_width: Optional[bool] = None,
         key: Optional[str] = None,
         style: Optional[dict] = None,
         expand: Optional[int] = None,
@@ -438,6 +445,10 @@ class Switch(Widget):
         super().__init__(key=key, style=style, expand=expand, visible=visible, **kwargs)
         self._label = label
         self._active = active
+        if full_width is None:
+            full_width = bool(label)
+        if full_width:
+            self.style.setdefault("width", "match")
         if active_color:
             self.style["activeColor"] = active_color
 

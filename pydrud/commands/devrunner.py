@@ -53,6 +53,7 @@ class DevRunner:
         self._key_reader: Optional[_KeyReader] = None
         self._logcat_proc: Optional[subprocess.Popen] = None
         self._logcat_thread: Optional[threading.Thread] = None
+        self._app_pid: Optional[str] = None
         self._dev_listener_thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
 
@@ -442,12 +443,44 @@ class DevRunner:
 
     # ── Logcat Streamer & Error Parser ───────────────────────────────────
 
-    def _start_logcat_streamer(self) -> None:
-        """Stream logcat and format Python exceptions & logs in the TUI."""
+    def _resolve_app_pid(self) -> Optional[str]:
+        """Return the running app PID, if Android can resolve it.
+
+        Tag-only logcat filters are global: an OEM service which writes to
+        ``System.err`` used to appear as if it had crashed the Pydrud app.
+        Scoping logcat to the package process keeps live output actionable.
+        """
         device_arg = ["-s", self.device] if self.device else []
-        logcat_cmd = ["adb"] + device_arg + [
-            "logcat",
-            "-v", "time",
+        try:
+            result = subprocess.run(
+                ["adb"] + device_arg
+                + ["shell", "pidof", "-s", self.package_name],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                pid = result.stdout.strip().split()
+                if pid and pid[0].isdigit():
+                    return pid[0]
+        except Exception:
+            pass
+        return None
+
+    def _logcat_command(self) -> list[str]:
+        """Build a package-scoped logcat command.
+
+        ``System.err`` and ``AndroidRuntime`` are useful only with a PID
+        filter; without one they contain unrelated framework and OEM errors.
+        Pydrud/Chaquopy tags remain available as a safe fallback on older adb
+        versions where ``pidof`` is unavailable.
+        """
+        device_arg = ["-s", self.device] if self.device else []
+        self._app_pid = self._resolve_app_pid()
+        command = ["adb"] + device_arg + ["logcat", "-v", "time"]
+        if self._app_pid:
+            command.append(f"--pid={self._app_pid}")
+        command.extend([
             "-s",
             "Pydrud:V",
             "PydrudActivity:V",
@@ -457,10 +490,14 @@ class DevRunner:
             "Python:V",
             "Python.android:V",
             "chaquopy:V",
-            "AndroidRuntime:E",
-            "DEBUG:W",
-            "System.err:W",
-        ]
+        ])
+        if self._app_pid:
+            command.extend(["AndroidRuntime:E", "DEBUG:W", "System.err:W"])
+        return command
+
+    def _start_logcat_streamer(self) -> None:
+        """Stream this app's logcat and format Python errors in the TUI."""
+        logcat_cmd = self._logcat_command()
 
         try:
             self._logcat_proc = subprocess.Popen(

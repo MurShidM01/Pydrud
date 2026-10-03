@@ -6,6 +6,31 @@ All notable changes to Pydrud are documented here.
 
 No unreleased changes yet.
 
+## [2.0.2] — Reliable haptics and expanded widget catalogue
+
+### Fixed
+* Android 12+ haptics now resolve the default device through
+  `VibratorManager`, use hardware-tuned predefined effects for named impacts,
+  and apply explicit amplitudes on older devices. Pattern input and durations
+  are bounded, and the starter's demo uses a clearly perceptible heavy impact.
+* `pydrud run` scopes logcat to the app PID, so unrelated OEM `System.err`
+  exceptions (including Transsion push/network services) no longer pollute the
+  application's live output.
+* A host Python/runtime minor-version mismatch now sets
+  `PYDRUD_COMPILE_PYC=false`, avoiding Chaquopy's bytecode warning while
+  preserving the supported source-code fallback.
+* Labelled `Switch` controls fill their row by default, and the playground's
+  dark-mode control is a `SwitchListTile` with left text and a right-aligned
+  toggle.
+
+### Added
+* Expanded the public catalogue to 130+ widget classes with 40 native-backed
+  Flutter-style presets: flex/constraint helpers, typography and image
+  presets, list-tile controls, navigation buttons, app states, dashboard
+  cards, settings rows and form sections.
+* New projects include an `app/components/` package for reusable UI. The old
+  `app.ui` module remains as a compatibility re-export.
+
 ## [2.0.1] — Starter capability and UI hardening
 
 ### Fixed

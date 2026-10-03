@@ -30,6 +30,8 @@ EXPECTED_FILES = (
     "src/app/runtime.py",
     "src/app/jobs.py",
     "src/app/ui.py",
+    "src/app/components/__init__.py",
+    "src/app/components/common.py",
     "src/app/screens/__init__.py",
     "src/app/screens/playground.py",
     "src/app/screens/details.py",
@@ -78,7 +80,7 @@ class TestScaffoldLayout(unittest.TestCase):
         with open(self.path("README.md"), encoding="utf-8") as fh:
             readme = fh.read()
         for fragment in ("layout_app", "pydrud run", "src/app/screens",
-                         "Add a screen"):
+                         "components/", "Add a screen"):
             self.assertIn(fragment, readme)
 
     def test_generated_tests_pass(self):

@@ -343,10 +343,10 @@ def _detect_build_python(target: str = APP_PYTHON_VERSION) -> str:
         if version != target:
             print(info(
                 f"buildPython: using Python {version} "
-                f"(the app ships Python {target}), so Chaquopy will skip "
-                f".pyc pre-compilation — harmless, just a slower first "
-                f"start. Install Python {target} or set PYDRUD_PYTHON "
-                f"to silence it."))
+                f"(the app ships Python {target}); Pydrud will disable "
+                f".pyc pre-compilation automatically. The app still runs "
+                f"normally, with only a slightly slower first start. Install "
+                f"Python {target} or set PYDRUD_PYTHON to enable it."))
         return resolved
 
     fallback = (shutil.which("python") or shutil.which("python3")
@@ -909,7 +909,11 @@ _APP_MODULES = (
     ("python/app/state.py.j2",               "state.py"),
     ("python/app/runtime.py.j2",             "runtime.py"),
     ("python/app/jobs.py.j2",                "jobs.py"),
+    # ``ui.py`` remains a compatibility shim; reusable UI belongs in the
+    # components package so a growing app can split it across modules.
     ("python/app/ui.py.j2",                  "ui.py"),
+    ("python/app/components/__init__.py.j2", "components/__init__.py"),
+    ("python/app/components/common.py.j2",   "components/common.py"),
     ("python/app/screens/__init__.py.j2",    "screens/__init__.py"),
     ("python/app/screens/playground.py.j2",  "screens/playground.py"),
     ("python/app/screens/details.py.j2",     "screens/details.py"),
@@ -918,7 +922,7 @@ _APP_MODULES = (
 
 def _render_app_package(project_dir: str, ctx: dict) -> None:
     """Write the structured ``src/app`` package."""
-    for folder in ("", "screens"):
+    for folder in ("", "components", "screens"):
         _ensure_dir(os.path.join(project_dir, "src", "app", folder))
     for template, relative in _APP_MODULES:
         _write_template(template,

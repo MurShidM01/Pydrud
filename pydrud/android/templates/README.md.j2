@@ -35,7 +35,9 @@ pydrud test             # run the tests in tests/
         ├── state.py        the State objects every screen shares
         ├── runtime.py      the router and the live App handle (`refresh()`)
         ├── jobs.py         background work (WorkManager)
-        ├── ui.py           small reusable helpers (sections, demo buttons)
+        ├── ui.py           compatibility imports for older generated apps
+        ├── components/     reusable UI shared by multiple screens
+        │   └── common.py   sections, demo buttons and page layout
         └── screens/        one module per screen
             ├── playground.py   the Pydrud Native Playground
             └── details.py      the pushed screen (navigation demo)
