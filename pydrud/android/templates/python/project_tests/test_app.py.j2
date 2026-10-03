@@ -23,17 +23,16 @@ class TestApp(unittest.TestCase):
     def tearDown(self):
         self.app.stop()
 
-    def test_home_screen_renders(self):
-        self.assertTrue(self.app.shows("TAPS TODAY"))
+    def test_playground_renders(self):
+        self.assertTrue(self.app.shows("Pydrud Native Playground"))
 
     def test_counter_increments(self):
-        self.app.tap("tap_btn")
+        self.app.tap("inc_btn")
         self.assertEqual(self.app.prop("counter_value", "value"), "1")
 
-    def test_adding_a_todo(self):
-        self.app.type_in("todo_input", "Buy milk")
-        self.app.tap("todo_add")
-        self.assertTrue(self.app.shows("Buy milk"))
+    def test_typing_a_name_updates_the_greeting(self):
+        self.app.type_in("name_input", "Ada")
+        self.assertEqual(self.app.prop("greeting", "value"), "Hello, Ada!")
 
 
 if __name__ == "__main__":

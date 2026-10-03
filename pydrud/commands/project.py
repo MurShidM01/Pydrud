@@ -99,24 +99,32 @@ def _bundle_pydrud_source(project_dir: str):
     print(info(f"Bundled pydrud runtime ({files} files, {size_kb:.0f} KB)"))
 
 
-def _copy_icon_resources(project_dir: str):
-    """Copy launcher icons from pydrud's template res/ into the generated project."""
+def _copy_icon_resources(project_dir: str, *, overwrite: bool = True):
+    """Copy launcher icons from pydrud's template res/ into the generated project.
+
+    With ``overwrite=False`` (used by ``pydrud sync``) only *missing* files
+    are filled in, so icons the user generated with ``pydrud icons`` or
+    replaced by hand are never clobbered.
+    """
     import shutil
     # The res/ lives alongside the templates/ inside the installed package.
     src_res = os.path.join(os.path.dirname(__file__), "..", "android", "templates", "res")
     dst_res = os.path.join(project_dir, "android", "app", "src", "main", "res")
     src_res = os.path.normpath(src_res)
-    if os.path.isdir(src_res):
-        for item in os.listdir(src_res):
-            src_item = os.path.join(src_res, item)
-            dst_item = os.path.join(dst_res, item)
-            if os.path.isdir(src_item):
-                if os.path.isdir(dst_item):
-                    shutil.rmtree(dst_item)
-                shutil.copytree(src_item, dst_item)
-            elif item.endswith(".png") or item.endswith(".xml"):
-                _ensure_dir(os.path.dirname(dst_item))
-                shutil.copy2(src_item, dst_item)
+    if not os.path.isdir(src_res):
+        return
+    for root, _dirs, files in os.walk(src_res):
+        relative = os.path.relpath(root, src_res)
+        for name in files:
+            if not (name.endswith(".png") or name.endswith(".xml")):
+                continue
+            src_item = os.path.join(root, name)
+            dst_item = os.path.join(dst_res, relative, name) \
+                if relative != "." else os.path.join(dst_res, name)
+            if not overwrite and os.path.exists(dst_item):
+                continue
+            _ensure_dir(os.path.dirname(dst_item))
+            shutil.copy2(src_item, dst_item)
 
 
 def _sanitize_package(org: str, app_slug: str = "") -> str:
@@ -895,25 +903,22 @@ def create_project(
 #: One module per concern, so a real app grows by adding files instead of
 #: by growing a single ``main.py``.
 _APP_MODULES = (
-    ("python/app.py.j2",                   "__init__.py"),
-    ("python/main.py.j2",                  "main.py"),
-    ("python/app/config.py.j2",            "config.py"),
-    ("python/app/state.py.j2",             "state.py"),
-    ("python/app/runtime.py.j2",           "runtime.py"),
-    ("python/app/jobs.py.j2",              "jobs.py"),
-    ("python/app/ui/__init__.py.j2",       "ui/__init__.py"),
-    ("python/app/ui/shell.py.j2",          "ui/shell.py"),
-    ("python/app/ui/components.py.j2",     "ui/components.py"),
-    ("python/app/screens/__init__.py.j2",  "screens/__init__.py"),
-    ("python/app/screens/home.py.j2",      "screens/home.py"),
-    ("python/app/screens/settings.py.j2",  "screens/settings.py"),
-    ("python/app/screens/gallery.py.j2",   "screens/gallery.py"),
+    ("python/app.py.j2",                     "__init__.py"),
+    ("python/main.py.j2",                    "main.py"),
+    ("python/app/config.py.j2",              "config.py"),
+    ("python/app/state.py.j2",               "state.py"),
+    ("python/app/runtime.py.j2",             "runtime.py"),
+    ("python/app/jobs.py.j2",                "jobs.py"),
+    ("python/app/ui.py.j2",                  "ui.py"),
+    ("python/app/screens/__init__.py.j2",    "screens/__init__.py"),
+    ("python/app/screens/playground.py.j2",  "screens/playground.py"),
+    ("python/app/screens/details.py.j2",     "screens/details.py"),
 )
 
 
 def _render_app_package(project_dir: str, ctx: dict) -> None:
     """Write the structured ``src/app`` package."""
-    for folder in ("", "ui", "screens"):
+    for folder in ("", "screens"):
         _ensure_dir(os.path.join(project_dir, "src", "app", folder))
     for template, relative in _APP_MODULES:
         _write_template(template,
@@ -1111,6 +1116,9 @@ def sync_project(project_dir: str, *, update_runtime: bool = True) -> bool:
     _render_managed_android(project_dir, ctx)
     _sync_generated_metadata(project_dir, ctx)
     _sync_toml_identity(project_dir, ctx)
+    # Fill in any launcher icon files the project is missing (never
+    # overwriting icons the user generated or replaced themselves).
+    _copy_icon_resources(project_dir, overwrite=False)
 
     count = len(_JAVA_TEMPLATES) + 1 + (1 if ctx["firebase"] else 0)
     detail = "all Android configuration"

@@ -1,11 +1,12 @@
 """
-Full-app end-to-end test.
+Full-app end-to-end test of the generated starter app.
 
-Scaffolds a real project with ``pydrud init``, imports the generated starter
-app, runs it against :class:`FakeDevice` and drives it like a user would:
-tapping the counter, adding and deleting to-dos, moving between
-destinations with the bottom navigation bar, toggling switches and
-pressing the hardware back button.
+Scaffolds a real project with ``pydrud init``, imports the generated
+**Pydrud Native Playground**, runs it against :class:`FakeDevice` and
+drives it like a user would: tapping the native service demos (toast,
+snackbar, dialog, haptics, clipboard), typing into the components,
+dragging the slider, incrementing the counter, pushing the details
+screen and pressing the hardware back button.
 """
 
 from __future__ import annotations
@@ -19,8 +20,6 @@ import unittest
 from pydrud import App
 from pydrud.commands.project import create_project
 from tests.fake_device import FakeDevice, run_app
-
-HOME, GALLERY, SETTINGS = 0, 1, 2
 
 
 class TestStarterAppEndToEnd(unittest.TestCase):
@@ -63,216 +62,175 @@ class TestStarterAppEndToEnd(unittest.TestCase):
 
     # ── helpers ───────────────────────────────────────────────────────────
 
-    def go(self, screen: str, index: int, expect: str) -> None:
-        """Tap a bottom-navigation destination and wait for it to appear."""
-        self.device.change(f"{screen}_nav", index)
-        self.assertTrue(self.device.wait_for_text(expect))
-
     def counter(self) -> str:
         return self.device.root.find("counter_value").props["value"]
 
-    # ── tests ─────────────────────────────────────────────────────────────
+    def open_details(self) -> None:
+        self.device.click("open_details")
+        self.assertTrue(self.device.wait_for_text("This is a second screen"))
 
-    def test_initial_screen_renders_the_dashboard(self):
+    # ── the playground screen ─────────────────────────────────────────────
+
+    def test_initial_screen_renders_the_playground(self):
         texts = self.device.texts
-        self.assertIn("tour_app", texts)        # app bar title
-        self.assertIn("TAPS TODAY", texts)      # hero card
-        self.assertIn("Open tasks", texts)      # stat tiles
-        self.assertIn("To-do", texts)
-        self.assertIn("Nothing yet", texts)     # empty state
-        self.assertIsNotNone(self.device.root.find("fab"))
-        self.assertIsNotNone(self.device.root.find("home_nav"))
+        self.assertIn("tour_app", texts)                 # app bar title
+        self.assertIn("Pydrud Native Playground", texts)  # hero branding
+        self.assertIn("Native Android, powered by Python", texts)
+        self.assertIn("NATIVE ANDROID", texts)           # section labels
+        self.assertIn("COMPONENTS", texts)
+        self.assertIn("STATE & INTERACTION", texts)
+        self.assertIn("NAVIGATION", texts)
+        # Every advertised demo control exists.
+        for key in ("toast_btn", "snack_btn", "dialog_btn", "vibrate_btn",
+                    "copy_btn", "share_btn", "device_btn", "perm_btn",
+                    "name_input", "dark_switch", "like_box", "amount_slider",
+                    "inc_btn", "dec_btn", "reset_btn", "open_details"):
+            with self.subTest(key=key):
+                self.assertIsNotNone(self.device.root.find(key))
 
-    def test_counter_button_and_fab(self):
+    def test_counter_buttons_and_reset_snackbar(self):
         device = self.device
-        device.click("tap_btn")
+        device.click("inc_btn")
         self.assertTrue(device.wait_for(lambda d: self.counter() == "1"))
-
-        device.click("fab")
+        device.click("inc_btn")
         self.assertTrue(device.wait_for(lambda d: self.counter() == "2"))
+        device.click("dec_btn")
+        self.assertTrue(device.wait_for(lambda d: self.counter() == "1"))
 
         device.click("reset_btn")
         self.assertTrue(device.wait_for(lambda d: self.counter() == "0"))
         self.assertTrue(device.wait_for_command("snackbar"))
 
-    def test_todo_add_and_delete(self):
+    def test_typing_updates_the_greeting(self):
         device = self.device
+        device.change("name_input", "Ada")
+        self.assertTrue(device.wait_for(
+            lambda d: d.root.find("greeting").props["value"] == "Hello, Ada!"))
 
-        def row(item):
-            return device.root.find(f"todo_row_{item}")
-
-        device.change("todo_input", "Buy milk")
-        device.click("todo_add")
-        self.assertTrue(device.wait_for(lambda d: row("Buy milk") is not None))
-        self.assertEqual(row("Buy milk").props["title"], "Buy milk")
-
-        device.change("todo_input", "Walk dog")
-        device.click("todo_add")
-        self.assertTrue(device.wait_for(lambda d: row("Walk dog") is not None))
-
-        # Tapping a row (or swiping it away) removes it.
-        device.click("todo_row_Buy milk")
-        self.assertTrue(device.wait_for(lambda d: row("Buy milk") is None))
-        self.assertIsNotNone(row("Walk dog"))
-
-    def test_settings_controls_and_back(self):
+    def test_slider_drives_the_label_and_progress_bar(self):
         device = self.device
-        self.go("home", SETTINGS, "Settings")
+        device.change("amount_slider", 80)
+        self.assertTrue(device.wait_for(
+            lambda d: d.root.find("amount_label").props["value"] == "80%"))
+        self.assertTrue(device.wait_for(
+            lambda d: d.root.find("amount_progress").props["value"] == 0.8))
 
+    def test_dark_mode_switch_rethemes_natively(self):
+        device = self.device
         device.change("dark_switch", True)
         # Theme changes reach the native layer as a palette + a mode switch.
         self.assertTrue(device.wait_for_command("theme_mode"))
         self.assertTrue(device.wait_for_command("theme"))
 
-        device.change("volume_slider", 80)
+    def test_checkbox_toggles(self):
+        device = self.device
+        device.change("like_box", True)
         self.assertTrue(device.wait_for(
-            lambda d: d.root.find("volume_label").props["value"] == "80%"))
-
-        device.change("agree_box", True)
-        self.assertTrue(device.wait_for(
-            lambda d: d.root.find("agree_box").props["checked"] is True))
-
-        device.click("save_btn")
-        self.assertTrue(device.wait_for_command("snackbar"))
-
-        # Hardware back returns to the start destination and is "handled".
-        device.commands.clear()
-        device.back()
-        self.assertTrue(device.wait_for_text("TAPS TODAY"))
-        self.assertTrue(device.wait_for_command("back_result"))
-        result = [c for c in device.commands if c.get("cmd") == "back_result"][-1]
-        self.assertTrue(result["handled"])
-
-    def test_accent_colour_retheming(self):
-        """Picking an accent repaints Python widgets and the native layer."""
-        from pydrud import Colors, Theme
-
-        try:
-            device = self.device
-            self.go("home", SETTINGS, "Accent colour")
-            device.commands.clear()
-            device.click("accent_Teal")
-            self.assertTrue(device.wait_for_command("theme"))
-            payload = [c for c in device.commands if c.get("cmd") == "theme"][-1]
-            self.assertEqual(payload["primary"], Colors.SECONDARY)
-            self.assertEqual(Theme.primary, Colors.SECONDARY)
-        finally:
-            Theme.seed(Colors.PRIMARY)
-            Theme.light()
-
-    def test_design_tokens_are_pushed_from_python(self):
-        """The Style controls restyle the app by sending tokens."""
-        from pydrud import Colors, Theme, Tokens
-
-        try:
-            device = self.device
-            self.go("home", SETTINGS, "Corners")
-            device.commands.clear()
-
-            device.change("corners_picker", 2)            # "Soft"
-            self.assertTrue(device.wait_for_command("theme"))
-            payload = [c for c in device.commands if c.get("cmd") == "theme"][-1]
-            self.assertEqual(payload["tokens"]["radius_card"], 28)
-            self.assertEqual(Tokens.radius_card, 28)
-            # The re-render carries the new radius on real widgets.
-            self.assertTrue(device.wait_for(
-                lambda d: d.root.find("style_card").style["borderRadius"] == 28))
-
-            device.change("text_size_picker", 2)          # "Large"
-            self.assertTrue(device.wait_for(
-                lambda d: [c for c in d.commands if c.get("cmd") == "theme"]
-                [-1]["tokens"]["font_scale"] == 1.12))
-        finally:
-            Tokens.reset()
-            Theme.seed(Colors.PRIMARY)
-            Theme.light()
+            lambda d: d.root.find("like_box").props["checked"] is True))
 
     def test_updates_stay_incremental(self):
         device = self.device
         before = device.full_renders
         for _ in range(5):
-            device.click("tap_btn")
+            device.click("inc_btn")
         self.assertTrue(device.wait_for(lambda d: self.counter() == "5"))
         self.assertEqual(device.full_renders, before,
                          "counter taps should patch, not re-render the page")
 
 
-class TestStarterGalleryScreen(TestStarterAppEndToEnd):
-    """The component gallery of the generated starter app."""
+class TestPlaygroundNativeDemos(TestStarterAppEndToEnd):
+    """Every Native Android tile produces a visible native command."""
 
-    def open_gallery(self):
-        self.go("home", GALLERY, "Gallery")
+    def test_toast_demo(self):
+        self.device.click("toast_btn")
+        self.assertTrue(self.device.wait_for_command("toast"))
 
-    def test_gallery_is_reachable_and_renders_tabs(self):
-        self.open_gallery()
-        tabs = self.device.root.find("showcase_tabs")
-        self.assertIsNotNone(tabs)
-        labels = [t["label"] for t in tabs.props["tabs"]]
-        self.assertEqual(labels, ["Components", "Data", "Actions"])
-        # Only the selected tab's body is rendered.
-        self.assertIn("Swipe me away", self.device.texts)
-        self.assertNotIn("Weekly taps", self.device.texts)
+    def test_snackbar_demo(self):
+        self.device.click("snack_btn")
+        self.assertTrue(self.device.wait_for_command("snackbar"))
 
-    def test_switching_tabs_swaps_the_body(self):
-        self.open_gallery()
-        self.device.change("showcase_tabs", 1)
-        self.assertTrue(self.device.wait_for_text("Weekly taps"))
-        chart = self.device.root.find("showcase_chart")
-        self.assertEqual(chart.props["kind"], "bar")
-        self.assertEqual(len(chart.props["values"]), 7)
-
-        self.device.change("showcase_tabs", 2)
-        self.assertTrue(self.device.wait_for_text("Native power, from Python."))
-
-    def test_filter_chips_toggle(self):
-        self.open_gallery()
-        chip = self.device.root.find("chip_Flutter")
-        self.assertFalse(chip.props.get("selected"))
-        self.device.send_event("change", "chip_Flutter", {"selected": True})
-        self.assertTrue(self.device.wait_for(
-            lambda d: d.root.find("chip_Flutter").props.get("selected")))
-
-    def test_rating_updates(self):
-        self.open_gallery()
-        self.device.change("showcase_rating", 2.5)
-        self.assertTrue(self.device.wait_for(
-            lambda d: d.root.find("showcase_rating").props["value"] == 2.5))
-
-    def test_dialog_and_storage_calls_reach_the_device(self):
-        self.open_gallery()
-        self.device.change("showcase_tabs", 2)
-        self.assertTrue(self.device.wait_for_text("Confirm dialog"))
-
+    def test_dialog_demo_and_its_answer(self):
         self.device.on_command("dialog", True)
         self.device.click("dialog_btn")
         request = self.device.wait_for_request("dialog")
         self.assertEqual(request["kind"], "confirm")
         self.assertTrue(self.device.wait_for_command("toast"))
 
-        self.device.on_command("prefs_set", True)
+    def test_vibrate_demo(self):
         self.device.on_command("vibrate", True)
-        self.device.click("storage_btn")
-        self.assertEqual(self.device.wait_for_request("prefs_set")["key"], "note")
-        self.assertTrue(self.device.wait_for_command("snackbar"))
-
-    def test_gestures_on_the_actions_tab(self):
-        self.open_gallery()
-        self.device.change("showcase_tabs", 2)
-        self.assertTrue(self.device.wait_for_text("Double-tap or swipe me"))
-        box = self.device.root.find("gesture_box")
-        self.assertEqual(box.props["gestures"],
-                         ["double_tap", "swipe_left", "swipe_right"])
-        self.device.gesture("gesture_box", "double_tap")
+        self.device.click("vibrate_btn")
+        self.assertTrue(self.device.wait_for_command("vibrate"))
         self.assertTrue(self.device.wait_for_command("toast"))
 
-    def test_back_from_gallery_returns_home(self):
-        self.open_gallery()
+    def test_clipboard_demo(self):
+        self.device.on_command("clipboard_set", True)
+        self.device.click("copy_btn")
+        request = self.device.wait_for_request("clipboard_set")
+        self.assertIn("tour_app", request["text"])
+        self.assertTrue(self.device.wait_for_command("toast"))
+
+    def test_share_demo(self):
+        self.device.click("share_btn")
+        request = self.device.wait_for_request("share")
+        self.assertEqual(request["kind"], "text")
+
+    def test_device_info_demo_opens_a_dialog(self):
+        self.device.on_command("device_info",
+                               {"manufacturer": "Pydrud", "model": "Fake",
+                                "sdk": 34})
+        self.device.on_command("dialog", True)
+        self.device.click("device_btn")
+        self.assertEqual(self.device.wait_for_request("device_info")["cmd"],
+                         "device_info")
+        request = self.device.wait_for_request("dialog")
+        self.assertEqual(request["kind"], "alert")
+        self.assertIn("Pydrud Fake", request["message"])
+
+    def test_permission_demo_reports_the_result(self):
+        self.device.on_command(
+            "permission_request",
+            {"android.permission.POST_NOTIFICATIONS": True})
+        self.device.click("perm_btn")
+        request = self.device.wait_for_request("permission_request")
+        self.assertIn("android.permission.POST_NOTIFICATIONS",
+                      request["permissions"])
+        self.assertTrue(self.device.wait_for_command("toast"))
+
+
+class TestPlaygroundNavigation(TestStarterAppEndToEnd):
+    """router.push / router.pop and the hardware back button."""
+
+    def test_details_screen_opens_and_shares_state(self):
+        self.device.click("inc_btn")
+        self.assertTrue(self.device.wait_for(lambda d: self.counter() == "1"))
+
+        self.open_details()
+        self.assertIsNotNone(self.device.root.find("details_card"))
+        self.assertIsNotNone(self.device.root.find("details_back"))
+        # The shared counter State is visible on the pushed screen.
+        tile = self.device.root.find("details_counter")
+        self.assertIn("still 1", tile.props["subtitle"])
+
+    def test_back_button_pops_to_the_playground(self):
+        self.open_details()
+        self.device.click("back_btn")
+        self.assertTrue(self.device.wait_for_text("Pydrud Native Playground"))
+        self.assertEqual(self.starter.router.current_route, "playground")
+
+    def test_app_bar_arrow_pops_to_the_playground(self):
+        self.open_details()
+        self.device.click("details_back")
+        self.assertTrue(self.device.wait_for_text("Pydrud Native Playground"))
+
+    def test_hardware_back_pops_the_stack_and_is_handled(self):
+        self.open_details()
+        self.device.commands.clear()
         self.device.back()
+        self.assertTrue(self.device.wait_for_text("Pydrud Native Playground"))
         self.assertTrue(self.device.wait_for_command("back_result"))
-        handled = [c for c in self.device.commands
-                   if c.get("cmd") == "back_result"][-1]
-        self.assertTrue(handled["handled"])
-        self.assertTrue(self.device.wait_for_text("TAPS TODAY"))
+        result = [c for c in self.device.commands
+                  if c.get("cmd") == "back_result"][-1]
+        self.assertTrue(result["handled"])
 
 
 if __name__ == "__main__":

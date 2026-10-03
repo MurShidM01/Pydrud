@@ -276,7 +276,7 @@ the release plumbing you need to put an app on the Play Store.
 | **Security** | `page.secure` — EncryptedSharedPreferences-backed keystore storage |
 | **Graphics** | `Canvas` with paths, gradients, transforms, sparklines and pies; `AnimationController` + `Tween` + `Sequence_` for explicit animations |
 | **Widgets** | `CameraPreview`, `MapView`, `RichText`, `Markdown`, `ReorderableList`, virtualising `InfiniteList` |
-| **Release** | `pydrud keygen` (upload keystore), `pydrud icons` (every density + adaptive + splash), `pydrud permissions`, R8 shrinking |
+| **Release** | `pydrud keygen` (upload keystore), `pydrud icons` (every density + round + adaptive), `pydrud permissions`, R8 shrinking |
 | **DX** | Stateful hot reload (your counters survive a save), `pydrud inspect` widget inspector, `pydrud docs` offline API reference |
 
 ### Native coverage
@@ -378,7 +378,7 @@ are rejected with an explanation; anything else can still be forced with
 
 ```bash
 pydrud permissions add camera location   # friendly names -> manifest entries
-pydrud icons --source logo.png           # every density, adaptive icon, splash
+pydrud icons --source logo.png           # every density, round + adaptive icons
 pydrud keygen                            # upload keystore + keystore.properties
 pydrud build --release                   # signed, R8-shrunk APK
 ```
@@ -1316,7 +1316,7 @@ as `pydrud analyze --json` remains plain JSON.
 | `pydrud pip search <term>` | Search the supported-package registry |
 | `pydrud pip sync` | Re-apply `pydrud.toml` packages to `build.gradle.kts` |
 | `pydrud permissions add\|remove <name>...` | Update YAML and the Android manifest by friendly name |
-| `pydrud icons [--source logo.png]` | Launcher, round, adaptive icons and splash |
+| `pydrud icons [--source logo.png]` | Launcher, round and adaptive icons (splash stays theme-driven) |
 | `pydrud keygen` | Create the Play Store upload keystore |
 | `pydrud docs [--serve]` | Offline HTML API reference |
 | `pydrud inspect [--tree] [--watch]` | Widget inspector for a running app |

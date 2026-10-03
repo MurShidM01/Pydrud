@@ -410,7 +410,8 @@ class DevRunner:
         elif key in ("t", "p"):
             self.dump_widget_tree()
         elif key == "d":
-            sys.stdout.write(f"\n  {tui.C_PRIMARY}ℹ{tui.RESET} Detached from app. App remains running on device.\n\n")
+            sys.stdout.write("\n" + tui.info_badge(
+                "Detached from app. App remains running on device.") + "\n\n")
             sys.stdout.flush()
             self.stop(terminate_app=False)
             os._exit(0)

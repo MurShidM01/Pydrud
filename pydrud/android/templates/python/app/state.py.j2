@@ -1,26 +1,16 @@
 """Application state.
 
-Every screen reads and writes these :class:`~pydrud.State` objects, so
-state outlives the screen that created it and hot reload can carry it
-across a reload. For bigger apps reach for ``pydrud.Store``, which adds
-actions, selectors and time travel.
+A :class:`~pydrud.State` is a named, reactive value that outlives the
+screen that rendered it — it survives navigation and hot reload. Change
+``.value`` in an event handler, call ``refresh()``, and every widget that
+reads it re-renders. For bigger apps reach for ``pydrud.Store``, which
+adds actions, selectors and time travel.
 """
 
 from pydrud import State
 
-counter = State(0, name="counter")
-todos = State([], name="todos")             # list[str]
-new_todo = State("", name="new_todo")
-
-dark_mode = State(False, name="dark_mode")
-accent = State("{{ seed_color | default("#FF6366F1") }}", name="accent")
-corners = State("Rounded", name="corners")
-text_size = State("Normal", name="text_size")
-
-volume = State(40.0, name="volume")
-agreed = State(False, name="agreed")
-
-tab_index = State(0, name="tab_index")
-interests = State({"Python", "Android"}, name="interests")
-rating = State(4.0, name="rating")
-query = State("", name="query")
+counter = State(0, name="counter")            # the State & interaction demo
+your_name = State("", name="your_name")       # live TextField demo
+dark_mode = State(False, name="dark_mode")    # Switch demo — re-themes natively
+liked = State(False, name="liked")            # Checkbox demo
+amount = State(40.0, name="amount")           # Slider + ProgressBar demo

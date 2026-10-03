@@ -1,0 +1,60 @@
+"""Details — the screen the playground pushes onto the navigation stack.
+
+It exists to prove three things:
+
+* ``router.push("details")`` opened it on top of the playground;
+* the shared ``counter`` State is still alive over here;
+* ``router.pop()`` — the app-bar arrow, the button below or the hardware
+  back gesture — returns to exactly where you were.
+"""
+
+from pydrud import (
+    AppBar, Button, Card, Column, Icon, Icons, ListTile, Scaffold, Spacing,
+    Text, Theme,
+)
+
+from app.runtime import router
+from app.state import counter
+from app.ui import page_body, section
+
+
+def details_screen(page):
+    """Build the details screen into *page*."""
+    page.bgcolor = Theme.background
+
+    page.add(Scaffold(
+        key="details",
+        app_bar=AppBar(
+            title="Details",
+            key="details_bar",
+            leading=Icon(Icons.BACK, key="details_back", size=22,
+                         color=Theme.text).on_click(
+                lambda _e: router.pop()),
+        ),
+        body=page_body("details", [
+            section("You navigated here", "sec_details"),
+            Card(key="details_card", padding=Spacing.LG, child=Column(
+                key="details_body", spacing=Spacing.SM, children=[
+                    Text("This is a second screen", key="details_title",
+                         size=18, weight=700, color=Theme.text),
+                    Text("The playground called router.push('details'), so "
+                         "this screen sits on top of the stack. Hardware "
+                         "back — or the arrow up in the app bar — pops it.",
+                         key="details_text", size=14,
+                         color=Theme.text_secondary),
+                ]),
+            ),
+            Card(key="details_state_card", padding=0, child=Column(
+                key="details_state_body", children=[
+                    ListTile("Shared state travels with you",
+                             key="details_counter",
+                             subtitle=f"The counter is still "
+                                      f"{counter.value} over here",
+                             leading=Icons.SYNC),
+                ]),
+            ),
+            Button("Go back", key="back_btn", icon=Icons.BACK,
+                   variant="tonal", full_width=True)
+            .on_click(lambda _e: router.pop()),
+        ]),
+    ))

@@ -210,12 +210,42 @@ class TestProjectIntegration(unittest.TestCase):
         self.assertTrue(written)
         res = os.path.join(self.project, "android", "app", "src", "main", "res")
         for bucket in release.ICON_SIZES:
-            self.assertTrue(os.path.exists(os.path.join(
-                res, f"mipmap-{bucket}", "ic_launcher.png")))
-        self.assertTrue(os.path.exists(os.path.join(
-            res, "mipmap-anydpi-v26", "ic_launcher.xml")))
-        self.assertTrue(os.path.exists(os.path.join(
+            folder = os.path.join(res, f"mipmap-{bucket}")
+            self.assertTrue(os.path.exists(
+                os.path.join(folder, "ic_launcher.png")))
+            self.assertTrue(os.path.exists(
+                os.path.join(folder, "ic_launcher_round.png")))
+            # Adaptive layers mirror the init template's structure.
+            self.assertTrue(os.path.exists(
+                os.path.join(folder, "ic_launcher_adaptive_back.png")))
+            self.assertTrue(os.path.exists(
+                os.path.join(folder, "ic_launcher_adaptive_fore.png")))
+        adaptive = os.path.join(res, "mipmap-anydpi-v26", "ic_launcher.xml")
+        self.assertTrue(os.path.exists(adaptive))
+        xml = open(adaptive, encoding="utf-8").read()
+        self.assertIn("@mipmap/ic_launcher_adaptive_back", xml)
+        self.assertIn("@mipmap/ic_launcher_adaptive_fore", xml)
+        # The splash screen is a customisable screen owned by the theme —
+        # `pydrud icons` must never stamp the launcher icon into it.
+        self.assertFalse(os.path.exists(os.path.join(
             res, "drawable", "splash.xml")))
+
+    def test_icon_generation_removes_legacy_splash_artefacts(self):
+        res = os.path.join(self.project, "android", "app", "src", "main", "res")
+        drawable = os.path.join(res, "drawable")
+        values = os.path.join(res, "values")
+        os.makedirs(drawable, exist_ok=True)
+        os.makedirs(values, exist_ok=True)
+        stale_splash = os.path.join(drawable, "splash.xml")
+        stale_color = os.path.join(values, "ic_launcher_background.xml")
+        with open(stale_splash, "w", encoding="utf-8") as fh:
+            fh.write("<layer-list/>")
+        with open(stale_color, "w", encoding="utf-8") as fh:
+            fh.write("<resources/>")
+
+        release.generate_icons(self.project)
+        self.assertFalse(os.path.exists(stale_splash))
+        self.assertFalse(os.path.exists(stale_color))
 
     def test_keygen_refuses_short_passwords(self):
         self.assertFalse(release.create_keystore(self.project, password="abc"))
