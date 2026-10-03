@@ -1,5 +1,5 @@
 """
-Shipping to the Play Store: signing keys, icons, splash screens and
+Shipping to the Play Store: signing keys, launcher icons and
 manifest permissions.
 
 ``pydrud keygen`` creates an upload key and writes ``keystore.properties``
@@ -150,17 +150,33 @@ def signing_status(project_dir: str) -> dict:
 
 
 # ──────────────────────────────────────────────────────────────────────────
-# Icons and splash
+# Icons
 # ──────────────────────────────────────────────────────────────────────────
 
 
+#: How much of the adaptive canvas the art may occupy. Android masks the
+#: outer ~25% of an adaptive icon, so the art has to live inside the safe
+#: zone (66dp of the 108dp canvas) or launchers crop it.
+_ADAPTIVE_SAFE_ZONE = 66 / 108
+
+#: Adaptive layers are drawn on a 108dp canvas, 2.25x the 48dp base icon.
+_ADAPTIVE_SCALE = 108 / 48
+
+
 def generate_icons(project_dir: str, *, source: Optional[str] = None,
-                   background: str = "#FF6366F1",
-                   splash_text: Optional[str] = None) -> list[str]:
-    """Render launcher icons for every density plus a splash drawable.
+                   background: Optional[str] = None) -> list[str]:
+    """Render launcher icons (legacy, round and adaptive) for every density.
 
     With no *source* image, a clean lettermark is generated from the app
     name, so a brand-new project still looks deliberate on the home screen.
+
+    The adaptive background colour is taken from ``background`` when given;
+    otherwise it is sampled from the edges of the source art, so the icon
+    blends into its own brand colour instead of a hard-coded solid tile.
+
+    This command deliberately does **not** touch the splash screen: the
+    splash is a customisable screen owned by the app theme (see the
+    generated ``themes.xml``), not a surface for stamping the launcher icon.
     """
     try:
         # Availability probe — the helpers below import what they need.
@@ -175,13 +191,19 @@ def generate_icons(project_dir: str, *, source: Optional[str] = None,
 
     if source and os.path.exists(source):
         master = Image.open(source).convert("RGBA")
+        bg_color = _rgba(background) if background else _edge_color(master)
     else:
-        master = _lettermark(name, background)
+        bg_color = _rgba(background or "#FF6366F1")
+        master = _lettermark(name, background or "#FF6366F1")
 
+    # Legacy icon (API < 26): art flattened onto the background colour so
+    # transparent logos never end up on a black square.
+    flat = Image.new("RGBA", master.size, bg_color)
+    flat.paste(master, (0, 0), master)
     for bucket, size in ICON_SIZES.items():
         folder = os.path.join(res_dir, f"mipmap-{bucket}")
         os.makedirs(folder, exist_ok=True)
-        icon = master.resize((size, size), Image.LANCZOS)
+        icon = flat.resize((size, size), Image.LANCZOS)
         path = os.path.join(folder, "ic_launcher.png")
         icon.save(path)
         written.append(path)
@@ -190,7 +212,9 @@ def generate_icons(project_dir: str, *, source: Optional[str] = None,
         _circular(icon).save(round_path)
         written.append(round_path)
 
-    # Adaptive icon (API 26+): background colour + foreground art.
+    # Adaptive icon (API 26+): a full-bleed background layer plus the art
+    # centred in the safe zone of the foreground layer — the same structure
+    # the `pydrud init` template ships, so both pipelines stay compatible.
     anydpi = os.path.join(res_dir, "mipmap-anydpi-v26")
     os.makedirs(anydpi, exist_ok=True)
     adaptive = os.path.join(anydpi, "ic_launcher.xml")
@@ -198,53 +222,81 @@ def generate_icons(project_dir: str, *, source: Optional[str] = None,
         handle.write(
             '<?xml version="1.0" encoding="utf-8"?>\n'
             '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">\n'
-            '    <background android:drawable="@color/ic_launcher_background" />\n'
-            '    <foreground android:drawable="@mipmap/ic_launcher_foreground" />\n'
+            '    <background android:drawable="@mipmap/ic_launcher_adaptive_back" />\n'
+            '    <foreground android:drawable="@mipmap/ic_launcher_adaptive_fore" />\n'
             '</adaptive-icon>\n')
     written.append(adaptive)
 
     for bucket, size in ICON_SIZES.items():
         folder = os.path.join(res_dir, f"mipmap-{bucket}")
-        foreground = master.resize((size, size), Image.LANCZOS)
-        padded = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        inner = foreground.resize((int(size * 0.66), int(size * 0.66)),
-                                  Image.LANCZOS)
-        padded.paste(inner, (int(size * 0.17), int(size * 0.17)), inner)
-        path = os.path.join(folder, "ic_launcher_foreground.png")
-        padded.save(path)
-        written.append(path)
+        canvas = int(round(size * _ADAPTIVE_SCALE))     # 108dp layer canvas
 
-    values = os.path.join(res_dir, "values")
-    os.makedirs(values, exist_ok=True)
-    colors = os.path.join(values, "ic_launcher_background.xml")
-    with open(colors, "w", encoding="utf-8") as handle:
-        handle.write('<?xml version="1.0" encoding="utf-8"?>\n<resources>\n'
-                     f'    <color name="ic_launcher_background">'
-                     f'{_to_rgb_hex(background)}</color>\n</resources>\n')
-    written.append(colors)
+        back = Image.new("RGBA", (canvas, canvas), bg_color)
+        back_path = os.path.join(folder, "ic_launcher_adaptive_back.png")
+        back.save(back_path)
+        written.append(back_path)
 
-    # Splash screen: a layer-list drawable Android shows before the first frame.
-    drawable = os.path.join(res_dir, "drawable")
-    os.makedirs(drawable, exist_ok=True)
-    splash = os.path.join(drawable, "splash.xml")
-    with open(splash, "w", encoding="utf-8") as handle:
-        handle.write(
-            '<?xml version="1.0" encoding="utf-8"?>\n'
-            '<layer-list xmlns:android="http://schemas.android.com/apk/res/android">\n'
-            '    <item android:drawable="@color/ic_launcher_background" />\n'
-            '    <item android:gravity="center">\n'
-            '        <bitmap android:src="@mipmap/ic_launcher" '
-            'android:gravity="center" />\n'
-            '    </item>\n'
-            '</layer-list>\n')
-    written.append(splash)
+        fore = Image.new("RGBA", (canvas, canvas), (0, 0, 0, 0))
+        inner_size = int(canvas * _ADAPTIVE_SAFE_ZONE)
+        inner = master.resize((inner_size, inner_size), Image.LANCZOS)
+        offset = (canvas - inner_size) // 2
+        fore.paste(inner, (offset, offset), inner)
+        fore_path = os.path.join(folder, "ic_launcher_adaptive_fore.png")
+        fore.save(fore_path)
+        written.append(fore_path)
+
+    # Clean up artefacts older pydrud versions generated: the icon-stamped
+    # splash drawable and the solid colour resource it referenced.
+    for stale in (os.path.join(res_dir, "drawable", "splash.xml"),
+                  os.path.join(res_dir, "values", "ic_launcher_background.xml")):
+        if os.path.exists(stale):
+            try:
+                os.remove(stale)
+                print(tui.info_badge(
+                    f"Removed legacy {os.path.relpath(stale, res_dir)}"))
+            except OSError:
+                pass
+    # Older runs also wrote a padded foreground under this name.
+    for bucket in ICON_SIZES:
+        stale = os.path.join(res_dir, f"mipmap-{bucket}",
+                             "ic_launcher_foreground.png")
+        if os.path.exists(stale):
+            try:
+                os.remove(stale)
+            except OSError:
+                pass
 
     print(tui.ok_badge(f"Launcher icons for {len(ICON_SIZES)} densities"))
-    print(tui.ok_badge("Adaptive icon + splash drawable"))
-    if splash_text:
-        print(tui.info_badge(
-            f"Splash text '{splash_text}' — set it in themes.xml"))
+    print(tui.ok_badge("Adaptive icon (background + safe-zone foreground)"))
+    print(tui.info_badge(
+        "Splash screen untouched — it follows your app theme, not the icon."))
     return written
+
+
+def _edge_color(image) -> tuple:
+    """Sample the dominant opaque colour along the edges of *image*.
+
+    A logo exported on its own brand background keeps that exact colour
+    behind the adaptive icon; fully transparent edges fall back to white so
+    the icon sits on a clean card instead of a random solid tile.
+    """
+    width, height = image.size
+    pixels = image.load()
+    votes: dict[tuple, int] = {}
+    step = max(1, width // 64)
+    for x in range(0, width, step):
+        for y in (0, height - 1):
+            r, g, b, a = pixels[x, y]
+            if a > 200:
+                votes[(r, g, b, 255)] = votes.get((r, g, b, 255), 0) + 1
+    for y in range(0, height, step):
+        for x in (0, width - 1):
+            r, g, b, a = pixels[x, y]
+            if a > 200:
+                votes[(r, g, b, 255)] = votes.get((r, g, b, 255), 0) + 1
+    if not votes:
+        return (255, 255, 255, 255)
+    return max(votes, key=votes.get)
 
 
 def _lettermark(name: str, background: str):
@@ -283,11 +335,6 @@ def _rgba(color: str) -> tuple:
     if len(value) == 6:
         return tuple(int(value[i:i + 2], 16) for i in (0, 2, 4)) + (255,)
     return (99, 102, 241, 255)
-
-
-def _to_rgb_hex(color: str) -> str:
-    r, g, b, _ = _rgba(color)
-    return f"#{r:02X}{g:02X}{b:02X}"
 
 
 # ──────────────────────────────────────────────────────────────────────────

@@ -1,0 +1,276 @@
+"""The Pydrud Native Playground — one screen, every superpower.
+
+Each card demonstrates one thing Pydrud gives you out of the box:
+
+* **Native Android** — Toast, Snackbar, dialogs, haptics, clipboard,
+  share sheet, device info and runtime permissions. One Python call each.
+* **Components**     — TextField, Switch, Checkbox, Slider and friends,
+  all rendered as real Material views.
+* **State & interaction** — a reactive counter: change a ``State`` value,
+  call ``refresh()``, and the UI follows.
+* **Navigation**     — push a second screen onto the stack; hardware back
+  (or the arrow in its app bar) pops it.
+
+Tap anything — every control answers back.
+"""
+
+from pydrud import (
+    AppBar, Button, Card, Checkbox, Colors, Column, Container, Divider,
+    Elevation, Icon, Icons, ListTile, ProgressBar, Radius, ResponsiveGrid,
+    Row, Scaffold, SizedBox, Slider, Spacing, Switch, Text, TextField, Theme,
+)
+
+from app.config import APP_NAME, APP_TAGLINE
+from app.runtime import refresh, router
+from app.state import amount, counter, dark_mode, liked, your_name
+from app.ui import demo_button, page_body, section
+
+
+def playground_screen(page):
+    """Build the playground into *page*."""
+    page.bgcolor = Theme.background
+
+    page.add(Scaffold(
+        key="playground",
+        app_bar=AppBar(title=APP_NAME, key="playground_bar", actions=[
+            Icon(Icons.SHARE, key="bar_share", size=22,
+                 color=Theme.text_secondary).on_click(
+                lambda _e: page.share.text(
+                    f"{APP_NAME} — a native Android app written in Python "
+                    f"with Pydrud!")),
+        ]),
+        body=page_body("playground", [
+            hero(),
+            section("Native Android", "sec_native"),
+            native_card(page),
+            section("Components", "sec_components"),
+            components_card(page),
+            section("State & interaction", "sec_state"),
+            state_card(page),
+            section("Navigation", "sec_nav"),
+            navigation_card(page),
+        ]),
+    ))
+
+
+# ── Hero ────────────────────────────────────────────────────────────────────
+
+
+def hero():
+    """The branded header card."""
+    return Container(
+        key="hero",
+        width="match",
+        border_radius=Radius.XL,
+        padding=Spacing.XL,
+        style={"gradient": {
+            "colors": [Theme.primary,
+                       Colors.mix(Theme.primary, Theme.secondary, 0.55)],
+            "direction": "diagonal",
+        }, "elevation": Elevation.CARD},
+        child=Column(key="hero_body", spacing=Spacing.XS, children=[
+            Row(key="hero_badge", spacing=Spacing.SM,
+                vertical_alignment="center", children=[
+                    Icon(Icons.ANDROID, key="hero_android", size=18,
+                         color=Colors.with_opacity(Colors.WHITE, 0.9)),
+                    Icon(Icons.PYTHON, key="hero_python", size=18,
+                         color=Colors.with_opacity(Colors.WHITE, 0.9)),
+                ]),
+            Text("Pydrud Native Playground", key="hero_title", size=24,
+                 weight=700, color=Colors.WHITE),
+            Text(APP_TAGLINE, key="hero_subtitle", size=14,
+                 color=Colors.with_opacity(Colors.WHITE, 0.88)),
+            SizedBox(height=Spacing.XS),
+            Text("Every control on this screen drives a real Android API "
+                 "from Python.", key="hero_hint", size=12,
+                 color=Colors.with_opacity(Colors.WHITE, 0.7)),
+        ]),
+    )
+
+
+# ── Native Android ──────────────────────────────────────────────────────────
+
+
+def native_card(page):
+    """Eight native services, one Python call each."""
+
+    def show_dialog(_event):
+        page.dialog.confirm(
+            "This dialog is a real Material dialog, opened from Python.",
+            title="Native dialog", ok="Love it", cancel="Close",
+        ).then(lambda yes: page.toast("Glad you like it!" if yes
+                                      else "Dialog closed"))
+
+    def buzz(_event):
+        page.haptics.impact("medium")
+        page.toast("Bzzt — did you feel that?")
+
+    def copy_text(_event):
+        page.clipboard.copy(f"{APP_NAME} — built with Pydrud")
+        page.toast("Copied to the clipboard")
+
+    def show_device(_event):
+        def tell(info):
+            info = info or {}
+            page.dialog.alert(
+                f"{info.get('manufacturer', 'Unknown')} "
+                f"{info.get('model', 'device')} — "
+                f"Android SDK {info.get('sdk', '?')}",
+                title="This device")
+        page.device.info().then(tell)
+
+    def ask_permission(_event):
+        def report(result):
+            granted = (all(result.values())
+                       if isinstance(result, dict) and result
+                       else bool(result))
+            page.toast("Permission granted 🎉" if granted
+                       else "Permission denied")
+        page.permissions.request("notifications").then(report)
+
+    return Card(key="native_card", padding=Spacing.LG, child=Column(
+        key="native_body", spacing=Spacing.MD, children=[
+            Text("Real Android services — no Java required.",
+                 key="native_hint", size=13, color=Theme.text_secondary),
+            ResponsiveGrid(key="native_grid", min_item_width=150,
+                           max_columns=4, spacing=Spacing.SM, children=[
+                demo_button("Toast", Icons.CHAT, "toast_btn",
+                            lambda _e: page.toast("Hello from Python 👋")),
+                demo_button("Snackbar", Icons.INFO, "snack_btn",
+                            lambda _e: page.snack_bar(
+                                "A native snackbar", action="Nice",
+                                on_action=lambda: page.toast("Right?"))),
+                demo_button("Dialog", Icons.HELP, "dialog_btn", show_dialog),
+                demo_button("Vibrate", Icons.SPARKLE, "vibrate_btn", buzz),
+                demo_button("Clipboard", Icons.COPY, "copy_btn", copy_text),
+                demo_button("Share", Icons.SHARE, "share_btn",
+                            lambda _e: page.share.text(
+                                f"{APP_NAME} — native Android, "
+                                f"powered by Python")),
+                demo_button("Device info", Icons.ANDROID, "device_btn",
+                            show_device),
+                demo_button("Permission", Icons.SHIELD, "perm_btn",
+                            ask_permission),
+            ]),
+        ]),
+    )
+
+
+# ── Components ──────────────────────────────────────────────────────────────
+
+
+def components_card(page):
+    """Interactive Material widgets bound to shared state."""
+
+    def set_name(event):
+        your_name.value = event.get("value", "")
+        refresh()
+
+    def toggle_dark(event):
+        dark_mode.value = bool(event.get("value"))
+        # One call re-themes Python widgets *and* the native layer
+        # (ripples, inputs, dialogs, system bars).
+        page.set_theme_mode("dark" if dark_mode.value else "light")
+        refresh()
+
+    def set_liked(event):
+        liked.value = bool(event.get("value"))
+        refresh()
+
+    def set_amount(event):
+        amount.value = float(event.get("value", 0))
+        refresh()
+
+    greeting = (f"Hello, {your_name.value.strip()} 👋"
+                if your_name.value.strip() else "Type your name above…")
+
+    return Card(key="components_card", padding=Spacing.LG, child=Column(
+        key="components_body", spacing=Spacing.MD, children=[
+            TextField(your_name.value, key="name_input",
+                      hint="What's your name?", icon=Icons.PERSON)
+            .on_change(set_name),
+            Text(greeting, key="greeting", size=15, weight=600,
+                 color=Theme.primary if your_name.value.strip()
+                 else Theme.text_secondary),
+            Divider(key="components_div1"),
+            Switch("Dark mode", key="dark_switch", active=dark_mode.value)
+            .on_change(toggle_dark),
+            Checkbox("I'm enjoying this playground", key="like_box",
+                     checked=liked.value).on_change(set_liked),
+            Divider(key="components_div2"),
+            Row(key="amount_head", vertical_alignment="center", children=[
+                Text("Slider", key="amount_title", size=15, weight=500,
+                     color=Theme.text),
+                Container(key="amount_gap", expand=1),
+                Text(f"{int(amount.value)}%", key="amount_label", size=14,
+                     weight=600, color=Theme.primary),
+            ]),
+            Slider(amount.value, key="amount_slider", min=0, max=100)
+            .on_change(set_amount),
+            ProgressBar(amount.value / 100, key="amount_progress"),
+        ]),
+    )
+
+
+# ── State & interaction ─────────────────────────────────────────────────────
+
+
+def state_card(page):
+    """A reactive counter: State in, refresh() out."""
+
+    def add(step):
+        def handler(_event):
+            counter.value += step
+            page.haptics.selection()
+            refresh()
+        return handler
+
+    def reset(_event):
+        previous = counter.value
+        counter.value = 0
+
+        def undo():
+            counter.value = previous
+            refresh()
+
+        page.snack_bar("Counter reset", action="Undo", on_action=undo)
+        refresh()
+
+    return Card(key="state_card", padding=Spacing.LG, child=Column(
+        key="state_body", spacing=Spacing.SM,
+        horizontal_alignment="center", children=[
+            Text("COUNTER", key="counter_caption", size=11, weight=700,
+                 color=Theme.text_secondary,
+                 style={"font": {"letterSpacing": 0.12}}),
+            Text(str(counter.value), key="counter_value", size=44,
+                 weight=700, color=Theme.text),
+            Row(key="counter_actions", spacing=Spacing.SM,
+                horizontal_alignment="center",
+                vertical_alignment="center", children=[
+                    Button("−1", key="dec_btn", icon=Icons.REMOVE,
+                           variant="tonal", size="md").on_click(add(-1)),
+                    Button("+1", key="inc_btn", icon=Icons.ADD,
+                           size="md").on_click(add(+1)),
+                    Button("Reset", key="reset_btn", icon=Icons.REFRESH,
+                           variant="outlined", size="md").on_click(reset),
+                ]),
+            Text("State lives in app/state.py and survives navigation "
+                 "and hot reload.", key="state_hint", size=12,
+                 color=Theme.text_secondary, text_align="center"),
+        ]),
+    )
+
+
+# ── Navigation ──────────────────────────────────────────────────────────────
+
+
+def navigation_card(page):
+    """Push a second screen; back (hardware or app bar) pops it."""
+    return Card(key="nav_card", padding=0, child=Column(
+        key="nav_body", children=[
+            ListTile("Open the details screen", key="open_details",
+                     subtitle="router.push('details') — back pops it",
+                     leading=Icons.ROCKET, trailing=Icons.CHEVRON_RIGHT,
+                     on_click=lambda _e: router.push("details")),
+        ]),
+    )

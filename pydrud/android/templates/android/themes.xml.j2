@@ -34,6 +34,15 @@
         <item name="android:textColorHint">{{ colors.hint }}</item>
         <item name="android:windowLightStatusBar">{{ "false" if night else "true" }}</item>
 
+        <!-- Splash screen (Android 12+): a clean, customisable surface that
+             follows the app theme instead of stamping the launcher icon in
+             the middle of the screen. Change the colour below (or re-seed
+             the theme and run `pydrud sync`) to brand it; swap the
+             transparent icon for a drawable if you *want* artwork there. -->
+        <item name="android:windowSplashScreenBackground">{{ colors.background }}</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@android:color/transparent</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@android:color/transparent</item>
+
         <!-- Edge-to-edge: Pydrud paints the bars itself and insets the UI. -->
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>

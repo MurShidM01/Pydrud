@@ -3,6 +3,12 @@
 A native Android app written in Python with
 [Pydrud](https://github.com/MurShidM01/Pydrud) {{ pydrud_version }}.
 
+The starter app is the **Pydrud Native Playground** — a single, polished
+screen of small working demos (native Toasts, Snackbars, dialogs, haptics,
+clipboard, share, permissions; Material components; reactive state; stack
+navigation) so you can see everything Pydrud does the moment the app
+launches. Open `src/app/screens/playground.py` and start editing.
+
 ## Run it
 
 ```bash
@@ -25,12 +31,14 @@ pydrud test             # run the tests in tests/
     ├── pydrud_config.py    runtime configuration for the device
     └── app/
         ├── main.py         route registration + start-up entry point
-        ├── config.py       routes, navigation destinations, design presets
+        ├── config.py       app name, tagline, accent colour
         ├── state.py        the State objects every screen shares
         ├── runtime.py      the router and the live App handle (`refresh()`)
         ├── jobs.py         background work (WorkManager)
-        ├── ui/             page shell + reusable components
+        ├── ui.py           small reusable helpers (sections, demo buttons)
         └── screens/        one module per screen
+            ├── playground.py   the Pydrud Native Playground
+            └── details.py      the pushed screen (navigation demo)
 ```
 
 ## Add a screen
@@ -38,8 +46,7 @@ pydrud test             # run the tests in tests/
 1. Create `src/app/screens/profile.py` with a `profile_screen(page)` function.
 2. Export it from `src/app/screens/__init__.py`.
 3. Register it in `src/app/main.py`: `router.define("profile", profile_screen)`.
-4. Add a `NavItem` to `DESTINATIONS` in `src/app/config.py` if it belongs in
-   the navigation bar.
+4. Navigate to it from any handler with `router.push("profile")`.
 
 ## Android configuration
 

@@ -483,19 +483,24 @@ def keygen(alias, password, validity, dname):
 @main.command()
 @click.option("--source", default=None,
               help="Source image (1024x1024 PNG recommended).")
-@click.option("--background", default="#FF6366F1", help="Splash/adaptive background.")
-@click.option("--splash-text", default=None, help="Text shown on the splash screen.")
-def icons(source, background, splash_text):
-    """Generate launcher icons and a splash screen from one image."""
+@click.option("--background", default=None,
+              help="Adaptive icon background colour (default: sampled "
+                   "from the source art).")
+def icons(source, background):
+    """Generate launcher, round and adaptive icons from one image.
+
+    The splash screen is not touched: it is a customisable screen that
+    follows the app theme (see the generated themes.xml), not a surface
+    for the launcher icon.
+    """
     from pydrud.commands.release import generate_icons
 
     root = _project_or_exit()
     _show_header("icons", "Generate Android app artwork",
-                 "Creating launcher, adaptive and splash resources",
+                 "Creating launcher, round and adaptive icon resources",
                  details=(("Source", source or "generated lettermark"),
-                          ("Background", background)))
-    written = generate_icons(root, source=source, background=background,
-                             splash_text=splash_text)
+                          ("Background", background or "auto (from source)")))
+    written = generate_icons(root, source=source, background=background)
     click.echo(tui.render_summary(
         f"{len(written)} resource file(s) written",
         (("Output", "android/app/src/main/res"),),

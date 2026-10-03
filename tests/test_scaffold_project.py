@@ -231,8 +231,8 @@ class TestGeneratedProject(unittest.TestCase):
                 for w in widgets
                 if w._widget_type == "Text"
             ]
-            self.assertIn("TAPS TODAY", texts)
-            self.assertIn("To-do", texts)
+            self.assertIn("Pydrud Native Playground", texts)
+            self.assertIn("Native Android, powered by Python", texts)
         finally:
             sys.path.remove(self.path("src"))
             for mod in [m for m in list(sys.modules) if m.startswith("app")]:
@@ -285,7 +285,7 @@ class TestGeneratedProject(unittest.TestCase):
             from app.main import main
 
             tester = AppTester(main, title="demo_app").start()
-            print("RENDERS:", tester.shows("TAPS TODAY"))
+            print("RENDERS:", tester.shows("Pydrud Native Playground"))
             tester.stop()
         """)
         env = dict(os.environ, PYTHONPATH=src, PYTHONDONTWRITEBYTECODE="1")

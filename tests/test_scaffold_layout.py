@@ -29,13 +29,10 @@ EXPECTED_FILES = (
     "src/app/state.py",
     "src/app/runtime.py",
     "src/app/jobs.py",
-    "src/app/ui/__init__.py",
-    "src/app/ui/shell.py",
-    "src/app/ui/components.py",
+    "src/app/ui.py",
     "src/app/screens/__init__.py",
-    "src/app/screens/home.py",
-    "src/app/screens/settings.py",
-    "src/app/screens/gallery.py",
+    "src/app/screens/playground.py",
+    "src/app/screens/details.py",
 )
 
 
@@ -119,14 +116,13 @@ class TestGeneratedAppStructure(unittest.TestCase):
         shutil.rmtree(cls.tmp, ignore_errors=True)
 
     def test_routes_match_the_registered_screens(self):
-        from app.config import DESTINATIONS, ROUTES
         from app.main import router
 
-        self.assertEqual(ROUTES, ("home", "showcase", "settings"))
-        self.assertEqual([d.route for d in DESTINATIONS], list(ROUTES))
-        for route in ROUTES:
+        for route in ("playground", "details"):
             with self.subTest(route=route):
                 self.assertIn(route, router.routes)
+        # The playground is the start destination.
+        self.assertEqual(router.current_route, "playground")
 
     def test_runtime_exposes_the_app_handle(self):
         from app import runtime

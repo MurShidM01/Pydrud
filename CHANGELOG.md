@@ -4,7 +4,47 @@ All notable changes to Pydrud are documented here.
 
 ## [Unreleased]
 
+### Changed — the starter app is now the Pydrud Native Playground
+* **`pydrud init` generates a focused, single-screen playground** instead of
+  the three-destination counter/to-do app. The screen is organised into
+  clearly branded cards — a hero header (“Pydrud Native Playground — Native
+  Android, powered by Python”), **Native Android** (Toast, Snackbar, dialog,
+  vibrate/haptics, clipboard, share sheet, device info and a runtime
+  permission request — each one a working, one-tap demo of a real Android
+  API), **Components** (TextField with a live greeting, a Switch that
+  re-themes the app natively, Checkbox, Slider driving a ProgressBar),
+  **State & interaction** (a reactive counter with snackbar undo) and
+  **Navigation** (push a details screen; the app-bar arrow, an in-page
+  button and the hardware back gesture all pop it). The generated package is
+  smaller and simpler — `config.py`, `state.py`, `runtime.py`, `ui.py`,
+  `jobs.py` and two screen modules — while keeping the same architecture and
+  Java entry points (`app.main.start_app`, `app.main.run_background_job`).
+  The layout stays responsive: phones use the full width, tablets centre the
+  content at a readable width.
+
 ### Fixed
+* **Generated apps now get the current branded launcher icon.** `pydrud
+  init` copies icons from the package's `android/templates/res/`, which had
+  fallen out of sync with the repository's updated `res/` artwork — so new
+  projects kept installing with the old icon. Both locations now carry the
+  same branded adaptive icon.
+* **`pydrud icons` no longer produces a solid-colour tile.** It used to
+  force a hard-coded indigo `@color/ic_launcher_background` behind a padded
+  foreground. It now writes the same adaptive structure the scaffold uses
+  (`ic_launcher_adaptive_back` + `ic_launcher_adaptive_fore`), samples the
+  background colour from the edges of your source art when `--background`
+  is not given, keeps the art inside the adaptive safe zone, and flattens
+  the legacy `ic_launcher.png` onto that background so transparent logos
+  never land on a black square. Stale `drawable/splash.xml`,
+  `values/ic_launcher_background.xml` and `ic_launcher_foreground.png`
+  files from older runs are cleaned up.
+* **The splash screen is a customisable screen, not an icon.** `pydrud
+  icons` no longer stamps the launcher icon into a splash drawable (the
+  `--splash-text` flag is gone), and the generated `themes.xml` now styles
+  the Android 12+ system splash: it follows the app theme's background
+  colour and hides the centred launcher icon, with a comment showing where
+  to customise it.
+
 * **The bundled-runtime size budget failed on Windows checkouts.** With
   `core.autocrlf` on, Git rewrites the ~17 000 lines of vendored runtime with
   CRLF, adding one byte per line: the identical bundle measured 584 KB on
