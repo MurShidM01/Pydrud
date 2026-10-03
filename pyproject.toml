@@ -33,10 +33,12 @@ dependencies = [
     "click>=8.0",
     "Jinja2>=3.0",
     "Pillow>=10.0",
-    "qrcode>=7.4",
 ]
 
 [project.optional-dependencies]
+# Optional third-party QR encoder. Pydrud ships its own pure-Python encoder,
+# so this is only needed to reproduce the exact output of older releases.
+qr = ["qrcode>=7.4"]
 # Faster, event-driven file watching for hot reload / watch mode.
 watch = ["watchdog>=3.0"]
 # Everything needed to run the test suite.

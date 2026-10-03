@@ -248,7 +248,7 @@ class TestGeneratedProject(unittest.TestCase):
         for name in ("packages.py", "compatibility.py"):
             self.assertFalse(os.path.isfile(os.path.join(bundle, name)),
                              f"build-time-only module '{name}' was bundled")
-        for name in ("preview.py", "preview_server.py"):
+        for name in ("preview.py", "preview_server.py", "qr.py"):
             self.assertFalse(os.path.isfile(os.path.join(bundle, "core", name)),
                              f"host-only preview module '{name}' was bundled")
 
