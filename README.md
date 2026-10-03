@@ -353,6 +353,7 @@ Button("Save", variant="tonal", pill=True, full_width=True)
 TextField(hint="Email", variant="outlined", icon=Icons.EMAIL)
 Card(child=..., on_click=open_item)  # flat + outlined by default
 AppBar(title="Home")                 # themed 56dp bar with a hairline
+AppBar(title="Search", density="compact")  # per-screen compact / normal / comfortable
 Divider(indent=56)                   # inset rule, theme coloured
 ```
 
@@ -380,7 +381,7 @@ the release plumbing you need to put an app on the Play Store.
 | **Navigation** | Pattern routes (`/items/:id`, `/files/*rest`), query strings, guards and redirects, nested navigators, deep links and 7 screen transitions |
 | **PyPI packages** | `pydrud pip add yt-dlp` — 119 verified Android-compatible packages wired into Chaquopy automatically |
 | **Background** | WorkManager jobs with constraints, foreground services with progress, FCM push and notification routing |
-| **Hardware** | Camera preview + capture + torch/zoom/video/barcode scanning, Bluetooth LE, NFC, sensors, biometrics, audio record/play, speech-to-text and TTS — every documented native command has a handler |
+| **Hardware** | Permission-aware `CameraPreview`, `QRScanner`, capture + torch/zoom/video/barcode scanning, Bluetooth LE, NFC, sensors, biometrics, audio record/play, speech-to-text and TTS — every documented native command has a handler |
 | **Security** | `page.secure` — EncryptedSharedPreferences-backed keystore storage |
 | **Graphics** | `Canvas` with paths, gradients, transforms, sparklines and pies; `AnimationController` + `Tween` + `Sequence_` for explicit animations |
 | **Widgets** | `CameraPreview`, `MapView`, `RichText`, `Markdown`, `ReorderableList`, virtualising `InfiniteList` |
@@ -937,7 +938,23 @@ page.storage.get("profile", default={}).then(render_profile)
 
 # Declare first: `pydrud permissions add camera` then `pydrud sync`.
 page.permissions.request("camera").then(lambda granted: ...)
+page.permissions.status("camera").then(print)  # granted / denied / permanently_denied
 page.files.pick_image(camera=True).then(upload)
+
+# Native Results are also awaitable in async UI callbacks.
+async def ask_camera(event):
+    grants = await page.permissions.request("camera")
+    if grants["android.permission.CAMERA"]:
+        page.add(QRScanner(on_scan=lambda code: print(code.value)))
+```
+
+Use `CameraPreview(fallback=..., auto_request_permission=True)` when you want
+a custom no-camera state. `Image("assets/mark.svg")` and `SvgPicture("assets/mark.svg")`
+render vector SVGs directly. On Android 12+, call `Theme.system()` before the
+first frame (or follow it with `app.apply_theme()`) to use the wallpaper-derived
+Material You palette.
+
+```python
 page.clipboard.copy("pydrud.dev")
 page.share.text("Built with Pydrud!")
 page.notifications.show("Done", "Your export is ready", route="/exports")
@@ -1476,8 +1493,11 @@ pydrud doctor
 # Python >= 3.10       -- 3.12.3
 # Java 17+             -- OpenJDK 17
 # Android SDK          -- /path/to/sdk (API 35)
+# Android NDK          -- 27.x
+# CMake                -- cmake version 3.x
 # Gradle               -- gradlew wrapper found
 # ADB                  -- Android Debug Bridge 2.x
+# (inside a project, Chaquopy and YAML ↔ manifest permissions are checked too)
 ```
 
 ---

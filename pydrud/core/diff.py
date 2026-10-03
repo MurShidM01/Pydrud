@@ -10,6 +10,7 @@ patches that item instead of re-creating everything after it.
 """
 
 from __future__ import annotations
+import hashlib
 import json
 from typing import Any, Optional
 
@@ -162,6 +163,7 @@ def _diff_children(
     """
     old_list = [w.unwrap() for w in old_list]
     new_list = [w.unwrap() for w in new_list]
+    _preserve_keyless_identities(old_list, new_list, parent_key)
     old_by_key = _index_unique(old_list, parent_key)
     new_by_key = _index_unique(new_list, parent_key)
 
@@ -194,6 +196,80 @@ def _diff_children(
         # ``replace`` keeps the view at its current position, so the move
         # above must happen first — hence diffing the node last.
         _diff_node(old_w, new_w, patches, parent_key=parent_key, index=index)
+
+
+def _preserve_keyless_identities(
+    old_list: list[Widget], new_list: list[Widget], parent_key: str,
+) -> None:
+    """Give recognisable keyless survivors their previous native identity.
+
+    ``assign_stable_keys`` correctly makes a static keyless layout stable, but
+    its structural keys cannot tell that ``Text("B")`` moved from position 1
+    to position 0.  On a reorder that used to turn a focused field or a
+    scrolled native widget into a replacement.  Explicit user keys always win;
+    only auto-generated siblings with a unique rendered fingerprint are
+    remapped. Ambiguous duplicates deliberately keep positional semantics.
+    """
+    old_candidates: dict[str, list[Widget]] = {}
+    new_candidates: dict[str, list[Widget]] = {}
+    for widget in old_list:
+        if getattr(widget, "_auto_key", False):
+            old_candidates.setdefault(_keyless_fingerprint(widget), []).append(widget)
+    for widget in new_list:
+        if getattr(widget, "_auto_key", False):
+            new_candidates.setdefault(_keyless_fingerprint(widget), []).append(widget)
+
+    used: set[str] = set()
+    matched: set[int] = set()
+    for fingerprint, fresh in new_candidates.items():
+        previous = old_candidates.get(fingerprint, [])
+        # A 1:1 signature is safe. With duplicate cards/rows there is no
+        # reliable identity without an explicit key, so positional matching is
+        # less surprising than moving an arbitrary duplicate.
+        if len(previous) == len(fresh) == 1:
+            fresh[0].key = previous[0].key
+            used.add(previous[0].key)
+            matched.add(id(fresh[0]))
+
+    occupied = {w.key for w in new_list if not getattr(w, "_auto_key", False)} | used
+    for ordinal, widget in enumerate(new_list):
+        if (not getattr(widget, "_auto_key", False)
+                or id(widget) in matched
+                or widget.key not in occupied):
+            occupied.add(widget.key)
+            continue
+        # An inserted keyless child can retain a structural key already given
+        # to a matched survivor. Allocate a deterministic temporary identity;
+        # on a later rebuild its fingerprint will match and recover this key.
+        digest = hashlib.sha1(
+            f"{parent_key}|{_keyless_fingerprint(widget)}|{ordinal}".encode("utf-8")
+        ).hexdigest()[:10]
+        base = f"{parent_key or 'root'}._auto_{digest}_{widget._widget_type}"
+        key, suffix = base, 2
+        while key in occupied:
+            key = f"{base}_{suffix}"
+            suffix += 1
+        widget.key = key
+        occupied.add(key)
+
+
+def _keyless_fingerprint(widget: Widget) -> str:
+    """A conservative content signature used only for keyless matching."""
+    try:
+        payload = {
+            "type": widget._widget_type,
+            "props": widget._serialise_props(),
+            "style": widget.style,
+            "expand": widget.expand,
+            "visible": widget.visible,
+            "tooltip": widget.tooltip,
+        }
+        return json.dumps(payload, sort_keys=True, default=str,
+                          separators=(",", ":"))
+    except Exception:
+        # Never let an exotic custom prop make reconciliation fail. A unique
+        # value means it simply falls back to the existing structural key.
+        return f"{widget._widget_type}:{id(widget)}"
 
 
 def _changed_props(old: Widget, new: Widget) -> dict:

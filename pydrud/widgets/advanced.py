@@ -35,7 +35,10 @@ class CameraPreview(Widget):
 
         page.camera.capture(key="cam").then(lambda path: upload(path))
 
-    Requires the ``camera`` permission — request it before mounting.
+    By default Pydrud requests the ``camera`` permission when the preview is
+    mounted. Set ``auto_request_permission=False`` to own that flow yourself;
+    supply ``fallback=...`` for a denial/unavailable state. CameraX failures
+    (including a busy or missing camera) arrive at ``on_error``.
     """
 
     _widget_type = "CameraPreview"
@@ -52,6 +55,10 @@ class CameraPreview(Widget):
         scan: bool = False,
         scan_formats: Optional[Sequence[str]] = None,
         aspect_ratio: Optional[str] = None,
+        auto_request_permission: bool = True,
+        fallback: Optional[Widget] = None,
+        scan_overlay: bool = False,
+        height: Union[int, float] = 320,
         on_scan: Optional[Callable] = None,
         on_ready: Optional[Callable] = None,
         on_error: Optional[Callable] = None,
@@ -64,6 +71,8 @@ class CameraPreview(Widget):
             raise ValueError(f"fit must be one of {self.FITS}")
         if flash not in ("on", "off", "auto", "torch"):
             raise ValueError("flash must be on/off/auto/torch")
+        if fallback is not None and not isinstance(fallback, Widget):
+            raise TypeError("fallback must be a Widget or None")
         super().__init__(key=key, on_scan=on_scan, on_ready=on_ready,
                          on_error=on_error, **kwargs)
         self.facing = facing
@@ -71,10 +80,17 @@ class CameraPreview(Widget):
         self.flash = flash
         self.torch = bool(torch)
         self.scan = bool(scan) or on_scan is not None
-        self.scan_formats = [str(f) for f in (scan_formats or [])]
+        self.scan_formats = [str(f).upper() for f in (scan_formats or [])]
         self.aspect_ratio = aspect_ratio
+        self.auto_request_permission = bool(auto_request_permission)
+        self.fallback = fallback
+        self.scan_overlay = bool(scan_overlay)
+        # The Android factory mounts this child above the PreviewView only
+        # when the camera is unavailable. Keeping it a normal child means its
+        # events still reach Python and it can be patched independently.
+        self.children = [fallback] if fallback is not None else []
         self.style.setdefault("width", "match")
-        self.style.setdefault("height", kwargs.pop("height", 320))
+        self.style.setdefault("height", height)
 
     def _serialise_props(self) -> dict:
         props = dict(self._extra)
@@ -86,8 +102,45 @@ class CameraPreview(Widget):
             "scan": self.scan or None,
             "scanFormats": self.scan_formats or None,
             "aspectRatio": self.aspect_ratio,
+            "autoRequestPermission": self.auto_request_permission,
+            "fallbackKey": self.fallback.key if self.fallback is not None else None,
+            "scanOverlay": self.scan_overlay or None,
         }))
         return props
+
+
+class QRScanner(CameraPreview):
+    """CameraX + ML Kit QR scanner with a native focus-frame overlay.
+
+    This is the small, production-ready convenience layer over
+    :class:`CameraPreview`: it enables camera permission handling, QR-only
+    decoding and the visual scanner frame while retaining ``on_ready`` and
+    ``on_error`` hooks::
+
+        QRScanner(on_scan=lambda event: redeem(event.data["value"]))
+
+    Pass ``formats=["QR_CODE", "EAN_13"]`` when the scanner should accept
+    additional barcode formats.
+    """
+
+    def __init__(
+        self,
+        *,
+        formats: Optional[Sequence[str]] = None,
+        on_scan: Optional[Callable] = None,
+        **kwargs,
+    ):
+        if "scan" in kwargs:
+            raise TypeError("QRScanner always enables scanning; omit scan=")
+        if "scan_formats" in kwargs:
+            raise TypeError("Use formats= with QRScanner")
+        super().__init__(
+            scan=True,
+            scan_formats=list(formats or ["QR_CODE"]),
+            scan_overlay=True,
+            on_scan=on_scan,
+            **kwargs,
+        )
 
 
 # ──────────────────────────────────────────────────────────────────────────

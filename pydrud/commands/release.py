@@ -125,19 +125,48 @@ ICON_SIZES = {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144,
 
 
 def resolve_permission(name: str) -> str:
-    """``"camera"`` → ``"CAMERA"``; unknown names pass through upper-cased."""
-    key = str(name).strip().lower().replace("-", "_")
+    """Normalise a friendly or Android-qualified permission name.
+
+    The generated manifest owns the ``android.permission.`` prefix, so both
+    ``camera`` and ``android.permission.CAMERA`` deliberately become
+    ``CAMERA``.  This prevents the subtle doubled-prefix manifest bug that
+    made a declared permission look undeclared at runtime.
+    """
+    raw = str(name).strip()
+    if not raw:
+        raise ValueError("Permission name cannot be empty")
+    prefix = "android.permission."
+    if raw.lower().startswith(prefix):
+        raw = raw[len(prefix):]
+    key = raw.lower().replace("-", "_")
     return PERMISSIONS.get(key, key.upper())
 
 
+def permission_command_suggestion(name: str) -> str | None:
+    """Return a helpful command when a permission was used as a capability."""
+    raw = str(name).strip()
+    key = raw.lower().removeprefix("android.permission.").replace("-", "_")
+    if key in PERMISSIONS:
+        return f"Did you mean 'pydrud permissions add {key}'?"
+    # Uppercase Android constants in YAML are common too.
+    canonical = raw.upper().removeprefix("ANDROID.PERMISSION.")
+    if canonical in set(PERMISSIONS.values()):
+        friendly = next(alias for alias, value in PERMISSIONS.items()
+                        if value == canonical)
+        return f"Did you mean 'pydrud permissions add {friendly}'?"
+    return None
+
+
 def resolve_capability(name: str) -> str:
-    """Return the canonical capability name or raise ``ValueError``."""
+    """Return the canonical capability name or raise an actionable error."""
     key = str(name).strip().lower().replace("-", "_")
     resolved = CAPABILITY_ALIASES.get(key, key)
     if resolved not in KNOWN_CAPABILITIES:
-        raise ValueError(
-            f"Unknown capability {name!r}; use one of "
-            f"{', '.join(sorted(KNOWN_CAPABILITIES))}")
+        suggestion = permission_command_suggestion(name)
+        message = (suggestion or
+                   f"Unknown capability {name!r}; use one of "
+                   f"{', '.join(sorted(KNOWN_CAPABILITIES))}")
+        raise ValueError(message)
     return resolved
 
 

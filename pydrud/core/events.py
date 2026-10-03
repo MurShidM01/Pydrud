@@ -10,8 +10,9 @@ Events arrive as JSON messages from the Java bridge:
 """
 
 from __future__ import annotations
+import inspect
 import json
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from pydrud.widgets.base import Widget
 
@@ -52,11 +53,18 @@ class Event(dict):
 
 
 class EventDispatcher:
-    """Maintains a mapping of widget keys → callbacks and dispatches events."""
+    """Maintains a mapping of widget keys → callbacks and dispatches events.
 
-    def __init__(self):
+    ``schedule_awaitable`` lets the owning :class:`App` run ``async def``
+    callbacks on its coroutine runner instead of silently dropping the
+    coroutine object (the default Python behaviour when an async callback is
+    called like a normal function).
+    """
+
+    def __init__(self, schedule_awaitable: Optional[Callable[[Any], None]] = None):
         self._handlers: dict[str, dict[str, Any]] = {}
         self._controls: dict[str, Widget] = {}
+        self._schedule_awaitable = schedule_awaitable
 
     def register_tree(self, root: Widget):
         """Walk the widget tree and index all event handlers by key."""
@@ -99,6 +107,11 @@ class EventDispatcher:
         event_obj = Event(type=event_type, key=key, data=data,
                           control=self._controls.get(key))
         result = cb(event_obj)
+        if inspect.isawaitable(result) and self._schedule_awaitable is not None:
+            self._schedule_awaitable(result)
+            # The coroutine is intentionally represented as scheduled rather
+            # than returned: no caller may accidentally forget to await it.
+            return []
         return [result]
 
     def create_event_json(self, event_type: str, key: str, data: dict | None = None) -> str:

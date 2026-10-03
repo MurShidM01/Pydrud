@@ -351,6 +351,21 @@ class Image(Widget):
         return {"src": self._src}
 
 
+class SvgPicture(Image):
+    """An SVG image from assets or HTTPS.
+
+    ``Image(src="logo.svg")`` automatically takes the same vector path; this
+    named form makes a vector asset explicit and catches accidental bitmap
+    filenames before they reach Android.
+    """
+
+    def __init__(self, src: str, **kwargs):
+        clean = str(src).split("?", 1)[0].split("#", 1)[0].lower()
+        if not clean.endswith(".svg"):
+            raise ValueError("SvgPicture src must end in .svg")
+        super().__init__(src, **kwargs)
+
+
 class Icon(Widget):
     """A Material icon glyph."""
 

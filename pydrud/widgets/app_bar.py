@@ -52,6 +52,8 @@ class AppBar(Widget):
         elevation: float = 0,
         center_title: bool = False,
         height: Optional[int] = None,
+        density: str = "normal",
+        safe_area: bool = True,
         divider: bool = True,
         padding: Optional[Union[EdgeInsets, dict]] = None,
         key: Optional[str] = None,
@@ -69,16 +71,21 @@ class AppBar(Widget):
                                if bg_color else Theme.text)
         self.elevation = elevation
         self.center_title = center_title
+        if density not in ("compact", "normal", "comfortable"):
+            raise ValueError("density must be compact, normal or comfortable")
+        self.density = density
+        self.safe_area = bool(safe_area)
         self.height = height
         self.divider = divider
         if isinstance(padding, EdgeInsets):
             self.padding = padding.to_dict()
         else:
-            # 4dp horizontally when there is a leading icon button (the
-            # button supplies its own 12dp), 16dp of real gutter otherwise.
+            # Leading/action controls retain a 48dp target; density changes
+            # the bar's breathing room instead of making them hard to tap.
             left = 6 if isinstance(leading, Widget) else 16
+            vertical = {"compact": 4, "normal": 8, "comfortable": 12}[density]
             self.padding = padding or EdgeInsets(
-                left=left, top=8, right=6, bottom=8).to_dict()
+                left=left, top=vertical, right=6, bottom=vertical).to_dict()
 
         self.children = [self._build()]
 
@@ -120,14 +127,22 @@ class AppBar(Widget):
             if isinstance(action, Widget):
                 row_children.append(self._action_slot(action, f"_action{index}"))
 
+        density_height = {
+            "compact": max(48, Tokens.app_bar_height - 8),
+            "normal": Tokens.app_bar_height,
+            "comfortable": max(64, Tokens.app_bar_height + 8),
+        }[self.density]
         bar_style = {
             "bg": self.bg_color,
             "elevation": self.elevation,
             "padding": self.padding,
             "width": "match",
-            # A 56dp bar matches the platform and keeps actions on a
-            # comfortable 48dp touch grid regardless of the title length.
-            "minHeight": self.height or Tokens.app_bar_height,
+            # Each instance can opt into a density without changing the
+            # global token used by every other screen.
+            "minHeight": self.height if self.height is not None else density_height,
+            # Stand-alone app bars are edge-to-edge safe by default. Scaffold
+            # uses setdefault, so this also composes without wrapper widgets.
+            "safeAreaTop": self.safe_area,
         }
         if self.divider and not self.elevation:
             # Hairline separator instead of a shadow — the modern look.

@@ -90,14 +90,7 @@ public class ViewFactory {
 
     /** Load an asset/remote image into an ImageView (public for MaterialViews). */
     public void loadImage(ImageView view, String src) {
-        JSONObject node = new JSONObject();
-        JSONObject props = new JSONObject();
-        try {
-            props.put("src", src);
-            node.put("props", props);
-        } catch (JSONException ignored) {}
-        ImageView loaded = createImageView(node);
-        view.setImageDrawable(loaded.getDrawable());
+        loadImageInto(view, src == null ? "" : src);
     }
 
     /** Register a custom widget type rendered by user-supplied Java code. */
@@ -882,35 +875,70 @@ public class ViewFactory {
         JSONObject s = json.optJSONObject("style");
         iv.setScaleType(scaleType(s != null ? s.optString("fit", "contain") : "contain"));
         iv.setAdjustViewBounds(true);
+        loadImageInto(iv, src);
+        return iv;
+    }
 
+    /** Load bitmap and vector sources, preserving the ImageView instance. */
+    private void loadImageInto(final ImageView view, final String src) {
+        if (src == null || src.isEmpty()) {
+            view.setImageDrawable(null);
+            return;
+        }
         if (src.startsWith("http://") || src.startsWith("https://")) {
             new Thread(() -> {
+                java.net.HttpURLConnection connection = null;
                 try {
                     java.net.URL url = new java.net.URL(src);
-                    java.net.HttpURLConnection c = (java.net.HttpURLConnection) url.openConnection();
-                    c.setConnectTimeout(10000);
-                    c.setReadTimeout(15000);
-                    c.setDoInput(true);
-                    c.connect();
-                    java.io.InputStream is = c.getInputStream();
-                    final android.graphics.Bitmap bm = android.graphics.BitmapFactory.decodeStream(is);
-                    is.close();
-                    c.disconnect();
-                    if (bm != null) activity.runOnUiThread(() -> iv.setImageBitmap(bm));
+                    connection = (java.net.HttpURLConnection) url.openConnection();
+                    connection.setConnectTimeout(10000);
+                    connection.setReadTimeout(15000);
+                    connection.setDoInput(true);
+                    connection.connect();
+                    java.io.InputStream stream = connection.getInputStream();
+                    final android.graphics.drawable.Drawable drawable = isSvg(src)
+                        ? svgDrawable(stream)
+                        : new android.graphics.drawable.BitmapDrawable(
+                            activity.getResources(),
+                            android.graphics.BitmapFactory.decodeStream(stream));
+                    stream.close();
+                    if (drawable != null) activity.runOnUiThread(() -> {
+                        view.setImageDrawable(drawable);
+                        if (isSvg(src)) view.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+                    });
                 } catch (Exception e) {
                     Log.e(TAG, "Image load failed: " + src, e);
+                } finally {
+                    if (connection != null) connection.disconnect();
                 }
-            }).start();
-        } else if (!src.isEmpty()) {
-            try {
-                java.io.InputStream is = activity.getAssets().open(src);
-                iv.setImageBitmap(android.graphics.BitmapFactory.decodeStream(is));
-                is.close();
-            } catch (Exception e) {
-                Log.d(TAG, "Asset not found: " + src);
-            }
+            }, "pydrud-image").start();
+            return;
         }
-        return iv;
+        try {
+            java.io.InputStream stream = activity.getAssets().open(src);
+            if (isSvg(src)) {
+                view.setImageDrawable(svgDrawable(stream));
+                view.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+            } else {
+                view.setImageBitmap(android.graphics.BitmapFactory.decodeStream(stream));
+            }
+            stream.close();
+        } catch (Exception e) {
+            Log.d(TAG, "Asset not found or invalid image: " + src);
+        }
+    }
+
+    private static boolean isSvg(String src) {
+        String clean = src == null ? "" : src.split("[?#]", 2)[0];
+        return clean.toLowerCase(java.util.Locale.US).endsWith(".svg");
+    }
+
+    private android.graphics.drawable.Drawable svgDrawable(java.io.InputStream stream)
+            throws Exception {
+        com.caverock.androidsvg.SVG svg = com.caverock.androidsvg.SVG.getFromInputStream(stream);
+        android.graphics.drawable.PictureDrawable drawable =
+            new android.graphics.drawable.PictureDrawable(svg.renderToPicture());
+        return drawable;
     }
 
     private ImageView createIconView(JSONObject json) {
@@ -2546,14 +2574,49 @@ public class ViewFactory {
      * through PlatformServices, so here we only mount the view.
      */
     private View createCameraPreview(JSONObject json) {
+        FrameLayout holder = new FrameLayout(activity);
         androidx.camera.view.PreviewView preview =
             new androidx.camera.view.PreviewView(activity);
         JSONObject p = props(json);
         preview.setScaleType("contain".equals(p.optString("fit", "cover"))
             ? androidx.camera.view.PreviewView.ScaleType.FIT_CENTER
             : androidx.camera.view.PreviewView.ScaleType.FILL_CENTER);
-        activity.bindCameraPreview(json.optString("key", ""), preview, p);
-        return preview;
+        holder.addView(preview, new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        // A CameraPreview may carry one normal Pydrud child as a fallback.
+        // It remains part of the regular tree, preserving click handlers and
+        // patching, but the Activity toggles it only while camera startup is
+        // denied or unavailable.
+        View fallback = null;
+        JSONArray children = json.optJSONArray("children");
+        if (children != null && children.length() > 0) {
+            JSONObject fallbackJson = children.optJSONObject(0);
+            fallback = createView(fallbackJson);
+            if (fallback != null) {
+                fallback.setVisibility(View.GONE);
+                holder.addView(fallback, frameParams(fallbackJson, Gravity.CENTER));
+                String childKey = fallbackJson.optString("key", "");
+                String parentKey = json.optString("key", "");
+                if (!childKey.isEmpty() && !parentKey.isEmpty()) {
+                    parentMap.put(childKey, parentKey);
+                }
+            }
+        }
+
+        if (p.optBoolean("scanOverlay", false)) {
+            View frame = new View(activity);
+            GradientDrawable border = new GradientDrawable();
+            border.setColor(Color.TRANSPARENT);
+            border.setCornerRadius(dp(18));
+            border.setStroke(dp(2), PydrudTheme.primary);
+            frame.setBackground(border);
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(220), dp(220));
+            lp.gravity = Gravity.CENTER;
+            holder.addView(frame, lp);
+        }
+        activity.bindCameraPreview(json.optString("key", ""), preview, fallback, p);
+        return holder;
     }
 
     /** RecyclerView-backed ReorderableList / InfiniteList. */

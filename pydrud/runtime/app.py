@@ -71,7 +71,7 @@ class App:
         self.assets_dir = assets_dir
 
         self._page = _Page(self)
-        self._event_dispatcher = EventDispatcher()
+        self._event_dispatcher = EventDispatcher(self._schedule_awaitable)
         self._current_tree: Optional[Widget] = None
         #: Desired Python tree. Native confirmation advances _snapshot.
         self._desired_tree: Optional[Widget] = None
@@ -218,6 +218,7 @@ class App:
                 self._apply_metrics(dict(metrics))
             self._desired_tree = self._build_tree()
             self._send_theme()
+            self._request_system_theme()
             self._send_desired_tree(force_snapshot=True)
             self._reader_thread = threading.Thread(
                 target=self._reader_loop, args=(transport,), daemon=True,
@@ -450,11 +451,29 @@ class App:
         self._recording_handlers.append(callback)
         return self
 
+    def _schedule_awaitable(self, awaitable) -> None:
+        """Run an async UI callback without blocking the bridge event loop.
+
+        ``TaskRunner`` owns a small coroutine-capable worker pool.  Native
+        :class:`~pydrud.core.results.Result` instances are awaitable and
+        forward their completion back into this coroutine's event loop, so a
+        handler can naturally write ``await page.dialog.confirm(...)``.
+        """
+        async def run_handler():
+            return await awaitable
+
+        try:
+            self._tasks.run(run_handler)
+        except Exception as exc:
+            self._report_error(exc)
+
     def _dispatch(self, handlers: list, payload) -> None:
         """Call every handler, isolating failures from the event loop."""
         for cb in list(handlers):
             try:
-                cb(payload)
+                result = cb(payload)
+                if hasattr(result, "__await__"):
+                    self._schedule_awaitable(result)
             except Exception as exc:
                 self._report_error(exc)
 
@@ -1150,6 +1169,25 @@ class App:
             return
         self._send(json.dumps({"cmd": "theme", **payload}) + "\n")
 
+    def _request_system_theme(self) -> None:
+        """Fetch Android 12+ dynamic colours when ``Theme.system()`` opted in."""
+        try:
+            from pydrud.widgets.theme import Theme as _Theme
+            if not _Theme._uses_system() or not self._connected:
+                return
+            self.invoke("system_colors").then(self._apply_system_theme)
+        except Exception as exc:  # A static palette remains a safe fallback.
+            self._report_error(exc)
+
+    def _apply_system_theme(self, palette) -> None:
+        try:
+            from pydrud.widgets.theme import Theme as _Theme
+            if _Theme._apply_system_palette(palette):
+                self._send_theme()
+                self.render()
+        except Exception as exc:
+            self._report_error(exc)
+
     def apply_theme(self) -> None:
         """Re-send the palette and repaint after changing :class:`Theme`.
 
@@ -1159,6 +1197,7 @@ class App:
             app.apply_theme()
         """
         self._send_theme()
+        self._request_system_theme()
         self.render()
 
     def _reader_loop(self, sock):
