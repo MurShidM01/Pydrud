@@ -41,16 +41,46 @@ def _write_template(template_name: str, dest: str, ctx: dict):
         f.write(content)
 
 
+# Everything that only ever runs on the developer's machine. None of it is
+# reachable from ``import pydrud`` on a device, so shipping it would just make
+# every APK heavier. ``tests/test_scaffold_project.py`` pins this list and
+# proves the bundle never imports its way back into one of these.
+BUNDLE_EXCLUDES = (
+    "__pycache__", "*.pyc", "*.pyo", ".git", "tests",
+    "android",      # Jinja templates + launcher icons (build-time only)
+    "commands",     # the CLI (build-time only)
+    "utils",        # terminal colours/TUI — imported only by the CLI
+    "packages.py",  # deprecated shim for pydrud.commands.packages (CLI only)
+)
+
+
+def bundled_runtime_size_kb(bundle_dir: str) -> float:
+    """Size of a vendored runtime in KB, independent of line endings.
+
+    ``\\r\\n`` counts as one byte so the number is identical on a Windows
+    checkout and a Unix one — otherwise the same bundle measures ~3% larger
+    on Windows purely because of CRLF, which is not a real APK cost.
+    """
+    total = 0
+    for root, dirs, files in os.walk(bundle_dir):
+        dirs[:] = [d for d in dirs if d != "__pycache__"]  # never vendored
+        for name in files:
+            path = os.path.join(root, name)
+            with open(path, "rb") as fh:
+                data = fh.read()
+            total += len(data) - data.count(b"\r\n")
+    return total / 1024
+
+
 def _bundle_pydrud_source(project_dir: str):
     """Copy the Pydrud *runtime* into the generated project's ``src/``.
 
     Chaquopy imports the framework from the APK, so it has to be vendored.
-    Only the runtime packages are copied — the CLI, the project templates and
-    the launcher icons are build-time only and would otherwise add megabytes
-    of dead weight to every APK.
+    Only the runtime packages are copied: everything in ``BUNDLE_EXCLUDES``
+    — the CLI and its terminal UI, the project templates, the launcher icons
+    — is build-time only and would otherwise add megabytes of dead weight to
+    every APK.
     """
-    import shutil
-
     src_dir = os.path.join(project_dir, "src")
     pydrud_src = os.path.normpath(os.path.dirname(os.path.dirname(__file__)))
     dst = os.path.join(src_dir, "pydrud")
@@ -61,19 +91,11 @@ def _bundle_pydrud_source(project_dir: str):
     if os.path.isdir(dst):
         shutil.rmtree(dst)
 
-    ignore = shutil.ignore_patterns(
-        "__pycache__", "*.pyc", "*.pyo", ".git",
-        "android",     # Jinja templates + launcher icons (build-time only)
-        "commands",    # the CLI (build-time only)
-        "tests",
-    )
-    shutil.copytree(pydrud_src, dst, ignore=ignore)
+    shutil.copytree(pydrud_src, dst,
+                    ignore=shutil.ignore_patterns(*BUNDLE_EXCLUDES))
 
     files = sum(len(f) for _, _, f in os.walk(dst))
-    size_kb = sum(
-        os.path.getsize(os.path.join(root, f))
-        for root, _d, fs in os.walk(dst) for f in fs
-    ) / 1024
+    size_kb = bundled_runtime_size_kb(dst)
     print(info(f"Bundled pydrud runtime ({files} files, {size_kb:.0f} KB)"))
 
 
