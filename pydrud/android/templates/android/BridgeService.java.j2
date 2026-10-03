@@ -182,7 +182,7 @@ public class BridgeService {
         try {
             JSONObject data = collectMetrics();
             data.put("protocol_version", PROTOCOL_VERSION);
-            data.put("renderer_version", "{{ pydrud_runtime_version | default('2.0.0') }}");
+            data.put("renderer_version", "{{ pydrud_runtime_version | default('2.0.1') }}");
             JSONObject capabilities = new JSONObject();
             capabilities.put("transactional_render", true);
             capabilities.put("revisioned_render", true);
@@ -412,6 +412,18 @@ public class BridgeService {
             data.put("request_id", requestId);
             data.put("ok", true);
             data.put("value", true);
+        } catch (Exception ignored) { }
+        sendEvent("result", "", data);
+    }
+
+    private void replyError(JSONObject json, String error) {
+        String requestId = json.optString("request_id", "");
+        if (requestId.isEmpty()) return;
+        JSONObject data = new JSONObject();
+        try {
+            data.put("request_id", requestId);
+            data.put("ok", false);
+            data.put("error", error);
         } catch (Exception ignored) { }
         sendEvent("result", "", data);
     }
@@ -663,15 +675,40 @@ public class BridgeService {
         try {
             android.os.Vibrator vibrator =
                 (android.os.Vibrator) activity.getSystemService(android.content.Context.VIBRATOR_SERVICE);
-            if (vibrator == null || !vibrator.hasVibrator()) return;
-            if (android.os.Build.VERSION.SDK_INT >= 26) {
+            if (vibrator == null || !vibrator.hasVibrator()) {
+                replyError(json, "vibrator unavailable on this device");
+                return;
+            }
+
+            org.json.JSONArray pattern = json.optJSONArray("pattern");
+            if (pattern != null && pattern.length() > 0) {
+                long[] timings = new long[pattern.length()];
+                for (int i = 0; i < pattern.length(); i++) {
+                    timings[i] = Math.max(0, pattern.optLong(i, 0));
+                }
+                int repeat = json.optInt("repeat", -1);
+                if (android.os.Build.VERSION.SDK_INT >= 26) {
+                    vibrator.vibrate(android.os.VibrationEffect
+                        .createWaveform(timings, repeat));
+                } else {
+                    vibrator.vibrate(timings, repeat);
+                }
+            } else if (android.os.Build.VERSION.SDK_INT >= 26) {
                 vibrator.vibrate(android.os.VibrationEffect.createOneShot(
                     duration, android.os.VibrationEffect.DEFAULT_AMPLITUDE));
             } else {
                 vibrator.vibrate(duration);
             }
+            replyOk(json);
+        } catch (SecurityException e) {
+            Log.d(TAG, "Vibrate unavailable: VIBRATE permission missing");
+            replyError(json,
+                "VIBRATE permission missing. Run `pydrud capabilities add haptics` "
+                + "or add VIBRATE to pydrud.yaml, then `pydrud sync`.");
         } catch (Exception e) {
-            Log.d(TAG, "Vibrate unavailable (missing permission?)");
+            Log.d(TAG, "Vibrate unavailable", e);
+            replyError(json, "vibrate failed: "
+                + (e.getMessage() == null ? "unknown error" : e.getMessage()));
         }
     }
 

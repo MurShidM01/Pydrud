@@ -599,24 +599,17 @@ def _sync_context(project_dir: str, found: dict) -> dict:
         not in {"INTERNET", "ACCESS_NETWORK_STATE"}
     ))
 
-    capability_names = set(_config_list(config, "capabilities"))
-    known_capabilities = {
-        "foreground_service", "boot_receiver", "wake_lock", "haptics",
-        "notifications",
-    }
-    unknown = capability_names - known_capabilities
-    if unknown:
-        raise ProjectConfigError(
-            "Unknown capabilities: " + ", ".join(sorted(unknown)))
-    capability_permissions = {
-        "foreground_service": {"FOREGROUND_SERVICE", "FOREGROUND_SERVICE_DATA_SYNC"},
-        "boot_receiver": {"RECEIVE_BOOT_COMPLETED"},
-        "wake_lock": {"WAKE_LOCK"},
-        "haptics": {"VIBRATE"},
-        "notifications": {"POST_NOTIFICATIONS"},
-    }
+    from pydrud.commands.release import (
+        CAPABILITY_PERMISSIONS, KNOWN_CAPABILITIES, resolve_capability,
+    )
+    try:
+        capability_names = {resolve_capability(name)
+                            for name in _config_list(config, "capabilities")}
+    except ValueError as exc:
+        raise ProjectConfigError(str(exc)) from exc
+    known_capabilities = set(KNOWN_CAPABILITIES)
     generated_permissions = set().union(*(
-        capability_permissions[name] for name in capability_names
+        CAPABILITY_PERMISSIONS[name] for name in capability_names
     )) if capability_names else set()
     permissions = [name for name in permissions if name not in generated_permissions]
 
@@ -765,6 +758,7 @@ def create_project(
     from pydrud.widgets.theme import Colors as _Colors
 
     seed_color = _normalise_color(accent) or _Colors.PRIMARY
+    default_capabilities = ["haptics", "notifications"]
     ctx = {
         "project_name": name,
         "app_name": android_app_name,
@@ -793,8 +787,14 @@ def create_project(
         "version_code": 1,
         "version_name": "1.0.0",
         "permissions": list(permissions or []),
-        "capabilities_list": [],
-        "capabilities": {"foreground_service": False, "boot_receiver": False, "wake_lock": False, "haptics": False, "notifications": False},
+        "capabilities_list": default_capabilities,
+        "capabilities": {
+            "foreground_service": False,
+            "boot_receiver": False,
+            "wake_lock": False,
+            "haptics": True,
+            "notifications": True,
+        },
         # ABIs shipped in the APK. 32-bit arm is still common on budget
         # devices; x86_64 keeps the emulator working.
         "abi_filters_list": ["arm64-v8a", "armeabi-v7a", "x86_64"],

@@ -9,6 +9,8 @@ PACKAGE = "{{ package }}"
 VERSION = "{{ version_name | default("1.0.0") }}"
 VERSION_CODE = {{ version_code | default(1) }}
 ASSETS_DIR = "{{ assets_dir | default("assets") }}"
+PERMISSIONS = [{% for permission in permissions | default([]) %}"{{ permission }}"{% if not loop.last %}, {% endif %}{% endfor %}]
+CAPABILITIES = [{% for capability in capabilities_list | default([]) %}"{{ capability }}"{% if not loop.last %}, {% endif %}{% endfor %}]
 
 # ── Android SDK ──────────────────────────────────────────────────────────────
 MIN_SDK = {{ min_sdk }}

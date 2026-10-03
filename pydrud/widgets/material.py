@@ -201,6 +201,38 @@ class Chip(Widget):
         return props
 
 
+class AssistChip(Chip):
+    """Convenience chip for lightweight actions."""
+
+    def __init__(self, label: str = "", **kwargs):
+        kwargs.setdefault("variant", "assist")
+        super().__init__(label, **kwargs)
+
+
+class FilterChip(Chip):
+    """Selectable chip that emits ``change`` when toggled."""
+
+    def __init__(self, label: str = "", **kwargs):
+        kwargs.setdefault("variant", "filter")
+        super().__init__(label, **kwargs)
+
+
+class InputChip(Chip):
+    """Chip used for chosen user input, optionally deletable."""
+
+    def __init__(self, label: str = "", **kwargs):
+        kwargs.setdefault("variant", "input")
+        super().__init__(label, **kwargs)
+
+
+class SuggestionChip(Chip):
+    """Suggestion chip preset."""
+
+    def __init__(self, label: str = "", **kwargs):
+        kwargs.setdefault("variant", "suggestion")
+        super().__init__(label, **kwargs)
+
+
 class Badge(Widget):
     """A small count/dot overlaid on the top-right of its child."""
 

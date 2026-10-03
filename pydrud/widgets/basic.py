@@ -134,6 +134,55 @@ class Button(Widget):
         return {"text": self._text}
 
 
+class FilledButton(Button):
+    """Convenience alias for ``Button(..., variant="filled")``."""
+
+    def __init__(self, text: str = "", **kwargs):
+        kwargs.setdefault("variant", "filled")
+        super().__init__(text, **kwargs)
+
+
+class TonalButton(Button):
+    """Soft filled Material button."""
+
+    def __init__(self, text: str = "", **kwargs):
+        kwargs.setdefault("variant", "tonal")
+        super().__init__(text, **kwargs)
+
+
+class OutlinedButton(Button):
+    """Hairline-outline Material button."""
+
+    def __init__(self, text: str = "", **kwargs):
+        kwargs.setdefault("variant", "outlined")
+        super().__init__(text, **kwargs)
+
+
+class TextButton(Button):
+    """Text-only Material button."""
+
+    def __init__(self, text: str = "", **kwargs):
+        kwargs.setdefault("variant", "text")
+        super().__init__(text, **kwargs)
+
+
+class ElevatedButton(Button):
+    """Filled button with native elevation."""
+
+    def __init__(self, text: str = "", **kwargs):
+        kwargs.setdefault("variant", "elevated")
+        super().__init__(text, **kwargs)
+
+
+class IconButton(Button):
+    """Compact button that shows an icon and optional accessible label."""
+
+    def __init__(self, icon: str = "star", text: str = "", **kwargs):
+        kwargs.setdefault("variant", "text")
+        kwargs.setdefault("icon", icon)
+        super().__init__(text, **kwargs)
+
+
 class TextField(Widget):
     """Single- or multi-line text input.
 
@@ -204,6 +253,60 @@ class TextField(Widget):
         if self._label:
             d["label"] = self._label
         return d
+
+
+class SearchField(TextField):
+    """Text field preset for search bars and filters."""
+
+    def __init__(self, value: str = "", **kwargs):
+        kwargs.setdefault("hint", "Search")
+        kwargs.setdefault("keyboard", "text")
+        kwargs.setdefault("icon", "search")
+        super().__init__(value, **kwargs)
+
+
+class EmailField(TextField):
+    """Text field with the email keyboard and mail icon."""
+
+    def __init__(self, value: str = "", **kwargs):
+        kwargs.setdefault("keyboard", "email")
+        kwargs.setdefault("icon", "email")
+        super().__init__(value, **kwargs)
+
+
+class PasswordField(TextField):
+    """Password field with obscured input."""
+
+    def __init__(self, value: str = "", **kwargs):
+        kwargs.setdefault("password", True)
+        kwargs.setdefault("icon", "lock")
+        super().__init__(value, **kwargs)
+
+
+class NumberField(TextField):
+    """Text field using Android's numeric keyboard."""
+
+    def __init__(self, value: str = "", **kwargs):
+        kwargs.setdefault("keyboard", "number")
+        super().__init__(value, **kwargs)
+
+
+class PhoneField(TextField):
+    """Text field using Android's phone keypad."""
+
+    def __init__(self, value: str = "", **kwargs):
+        kwargs.setdefault("keyboard", "phone")
+        kwargs.setdefault("icon", "call")
+        super().__init__(value, **kwargs)
+
+
+class UrlField(TextField):
+    """Text field using Android's URL keyboard."""
+
+    def __init__(self, value: str = "", **kwargs):
+        kwargs.setdefault("keyboard", "url")
+        kwargs.setdefault("icon", "link")
+        super().__init__(value, **kwargs)
 
 
 class Image(Widget):
@@ -390,6 +493,10 @@ class ProgressBar(Widget):
 
     def _serialise_props(self) -> dict:
         return {"value": self._value, "indeterminate": self._indeterminate}
+
+
+class LinearProgress(ProgressBar):
+    """Alias for :class:`ProgressBar` with Material naming."""
 
 
 class Slider(Widget):

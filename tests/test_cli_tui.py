@@ -6,6 +6,7 @@ import unittest
 
 from click.testing import CliRunner
 
+from pydrud import __version__
 from pydrud.commands.analyzer import format_report
 from pydrud.commands.cli import main
 from pydrud.utils import tui
@@ -65,7 +66,7 @@ class TestCliHelpTui(unittest.TestCase):
     def test_root_help_has_brand_banner(self):
         result = self.runner.invoke(main, ["--help"], color=False)
         self.assertEqual(result.exit_code, 0, result.output)
-        self.assertIn("PYDRUD 2.0.0", result.output)
+        self.assertIn(f"PYDRUD {__version__}", result.output)
         self.assertIn("Native Android. Python powered.", result.output)
         self.assertIn("Commands:", result.output)
 

@@ -52,9 +52,14 @@ pydrud test             # run the tests in tests/
 
 `pydrud.yaml` is the source of truth for the generated Android project:
 app/package identity, release version, SDK/NDK/toolchain versions, ABIs,
-assets, permissions and deep links. Edit it and run `pydrud sync`. Keep Python
-packages and the theme seed in `pydrud.toml`; app code under `src/app/` is
-never overwritten by sync.
+assets, permissions, capabilities and deep links. Edit it and run
+`pydrud sync`. Keep Python packages and the theme seed in `pydrud.toml`; app
+code under `src/app/` is never overwritten by sync.
+
+The playground enables `haptics` and `notifications` in `pydrud.yaml` so the
+Vibrate and Permission buttons work immediately. For your own features, prefer
+Python-first commands such as `pydrud capabilities add haptics` and
+`pydrud permissions add camera`; never hand-edit generated Android files.
 
 ## Useful commands
 
@@ -67,5 +72,6 @@ status badges, summaries and next-step hints.
 | `pydrud analyze` | static checks on your Python UI code |
 | `pydrud pip add requests` | bundle a Python package into the APK |
 | `pydrud permissions add camera` | add a permission to the manifest |
+| `pydrud capabilities add haptics` | enable generated feature bundles |
 | `pydrud build --release` | signed release build |
 | `pydrud doctor` | check your toolchain |

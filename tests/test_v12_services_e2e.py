@@ -104,6 +104,19 @@ class TestNativeServices(unittest.TestCase):
             app.tap("buzz")
             self.assertEqual(app.requested("vibrate")["duration"], 50)
 
+    def test_push_permission_uses_runtime_permission_request_shape(self):
+        def main(page):
+            page.add(Button("Notify", key="notify",
+                            on_click=lambda e: page.push.permission()))
+
+        with AppTester(main) as app:
+            app.answer("permission_request", {
+                "android.permission.POST_NOTIFICATIONS": True,
+            })
+            app.tap("notify")
+            self.assertEqual(app.requested("permission_request")["permissions"],
+                             ["android.permission.POST_NOTIFICATIONS"])
+
     def test_share_helpers_build_intents(self):
         def main(page):
             page.add(Button("Call", key="call",

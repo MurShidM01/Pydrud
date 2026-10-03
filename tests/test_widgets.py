@@ -5,8 +5,9 @@ Unit tests for the Pydrud widget system.
 import json
 import unittest
 from pydrud.widgets import (
-    Widget, Text, Button, Container, Column, Row, Center, Spacer,
-    TextField, Image, Icon, Checkbox, Switch, EdgeInsets,
+    Widget, Text, Button, OutlinedButton, IconButton, SearchField,
+    PasswordField, AssistChip, FilterChip, Container, Column, Row, Center,
+    Spacer, TextField, Image, Icon, Checkbox, Switch, EdgeInsets,
 )
 
 
@@ -76,6 +77,29 @@ class TestButtonWidget(unittest.TestCase):
         self.assertIn("click", btn.event_handlers)
         btn.event_handlers["click"]({})
         self.assertEqual(len(calls), 1)
+
+    def test_button_convenience_widgets_reuse_native_button(self):
+        outlined = OutlinedButton("More")
+        icon = IconButton("settings", key="settings")
+        self.assertEqual(outlined._widget_type, "Button")
+        self.assertEqual(outlined.style["variant"], "outlined")
+        self.assertEqual(icon._widget_type, "Button")
+        self.assertEqual(icon.style["icon"], "settings")
+
+    def test_text_field_presets_reuse_native_text_field(self):
+        search = SearchField()
+        password = PasswordField()
+        self.assertEqual(search._widget_type, "TextField")
+        self.assertEqual(search.style["icon"], "search")
+        self.assertEqual(password.style["password"], True)
+
+    def test_chip_presets_reuse_native_chip(self):
+        assist = AssistChip("Help")
+        filtr = FilterChip("Unread", selected=True)
+        self.assertEqual(assist._widget_type, "Chip")
+        self.assertEqual(assist._serialise_props()["variant"], "assist")
+        self.assertEqual(filtr._serialise_props()["variant"], "filter")
+        self.assertTrue(filtr._serialise_props()["selected"])
 
 
 class TestLayoutWidgets(unittest.TestCase):

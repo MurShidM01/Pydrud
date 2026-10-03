@@ -1631,7 +1631,7 @@ class _Page:
         self._send("set_title", title=title)
 
     def vibrate(self, duration_ms: int = 40) -> None:
-        """Short haptic feedback (requires the VIBRATE permission)."""
+        """Short haptic feedback (enable the ``haptics`` capability)."""
         self._send("vibrate", duration=int(duration_ms))
 
     def close(self) -> None:
