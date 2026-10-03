@@ -21,7 +21,7 @@ from pydrud.widgets.layout import (
 from pydrud.widgets.material import (
     AssistChip, Avatar, CircularProgress, FilterChip, ListTile,
 )
-from pydrud.widgets.styling import Border, EdgeInsets
+from pydrud.widgets.styling import Border
 from pydrud.widgets.theme import Colors, Icons, Theme
 from pydrud.widgets.tokens import Tokens
 
