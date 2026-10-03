@@ -27,11 +27,15 @@ _SEVERITY_ERROR = "error"
 _WIDGET_CLASSES = {
     "Container", "Column", "Row", "Center", "Spacer", "Divider",
     "Stack", "Positioned", "SizedBox", "Padding", "Card", "ListView", "GridView",
-    "Text", "Button", "TextField", "Image", "Icon", "Checkbox", "Switch",
-    "ProgressBar", "Slider", "Dropdown", "Radio",
+    "Text", "Button", "FilledButton", "TonalButton", "OutlinedButton",
+    "TextButton", "ElevatedButton", "IconButton", "TextField",
+    "SearchField", "EmailField", "PasswordField", "NumberField",
+    "PhoneField", "UrlField", "Image", "Icon", "Checkbox", "Switch",
+    "ProgressBar", "LinearProgress", "Slider", "Dropdown", "Radio",
     "AppBar", "Scaffold", "FloatingActionButton",
     # v1.2 — Material components
-    "ListTile", "ExpansionTile", "Chip", "Badge", "Avatar", "Banner",
+    "ListTile", "ExpansionTile", "Chip", "AssistChip", "FilterChip",
+    "InputChip", "SuggestionChip", "Badge", "Avatar", "Banner",
     "Tooltip", "Tabs", "BottomNavigationBar", "NavigationRail", "Drawer",
     "SegmentedButton", "SearchBar", "Rating", "CircularProgress", "Skeleton",
     "RefreshIndicator", "Stepper", "WebView", "VideoPlayer", "Chart",

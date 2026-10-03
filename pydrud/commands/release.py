@@ -18,36 +18,104 @@ from typing import Iterable, Optional
 
 from pydrud.utils import tui
 
-#: Friendly names → the real Android permission constants.
+#: Friendly names → the real Android permission constants. Keep this in
+#: sync with :class:`pydrud.services.native.Permissions` so command-line and
+#: runtime code understand the same human names.
 PERMISSIONS = {
     "camera": "CAMERA",
     "microphone": "RECORD_AUDIO",
+    "mic": "RECORD_AUDIO",
     "record_audio": "RECORD_AUDIO",
+    "audio": "RECORD_AUDIO",
     "location": "ACCESS_FINE_LOCATION",
+    "fine_location": "ACCESS_FINE_LOCATION",
+    "location_fine": "ACCESS_FINE_LOCATION",
+    "coarse_location": "ACCESS_COARSE_LOCATION",
     "location_coarse": "ACCESS_COARSE_LOCATION",
+    "background_location": "ACCESS_BACKGROUND_LOCATION",
     "location_background": "ACCESS_BACKGROUND_LOCATION",
     "notifications": "POST_NOTIFICATIONS",
+    "notification": "POST_NOTIFICATIONS",
+    "post_notifications": "POST_NOTIFICATIONS",
     "vibrate": "VIBRATE",
+    "haptics": "VIBRATE",
+    "haptic": "VIBRATE",
     "internet": "INTERNET",
+    "network": "ACCESS_NETWORK_STATE",
     "storage": "READ_MEDIA_IMAGES",
+    "photos": "READ_MEDIA_IMAGES",
+    "images": "READ_MEDIA_IMAGES",
+    "media_images": "READ_MEDIA_IMAGES",
+    "videos": "READ_MEDIA_VIDEO",
+    "video": "READ_MEDIA_VIDEO",
     "storage_video": "READ_MEDIA_VIDEO",
+    "media_video": "READ_MEDIA_VIDEO",
+    "music": "READ_MEDIA_AUDIO",
+    "audio_files": "READ_MEDIA_AUDIO",
     "storage_audio": "READ_MEDIA_AUDIO",
+    "media_audio": "READ_MEDIA_AUDIO",
+    "read_storage": "READ_EXTERNAL_STORAGE",
+    "write_storage": "WRITE_EXTERNAL_STORAGE",
     "contacts": "READ_CONTACTS",
+    "contacts_write": "WRITE_CONTACTS",
+    "write_contacts": "WRITE_CONTACTS",
     "calendar": "READ_CALENDAR",
+    "calendar_write": "WRITE_CALENDAR",
+    "write_calendar": "WRITE_CALENDAR",
     "phone": "READ_PHONE_STATE",
+    "phone_state": "READ_PHONE_STATE",
+    "read_phone_state": "READ_PHONE_STATE",
+    "call_phone": "CALL_PHONE",
     "sms": "RECEIVE_SMS",
+    "send_sms": "SEND_SMS",
     "bluetooth": "BLUETOOTH_CONNECT",
+    "nearby_devices": "BLUETOOTH_CONNECT",
+    "bluetooth_connect": "BLUETOOTH_CONNECT",
     "bluetooth_scan": "BLUETOOTH_SCAN",
     "bluetooth_advertise": "BLUETOOTH_ADVERTISE",
     "bluetooth_legacy": "BLUETOOTH",
     "bluetooth_admin": "BLUETOOTH_ADMIN",
     "nfc": "NFC",
     "biometric": "USE_BIOMETRIC",
+    "fingerprint": "USE_BIOMETRIC",
     "activity": "ACTIVITY_RECOGNITION",
+    "activity_recognition": "ACTIVITY_RECOGNITION",
     "boot": "RECEIVE_BOOT_COMPLETED",
+    "boot_completed": "RECEIVE_BOOT_COMPLETED",
     "foreground_service": "FOREGROUND_SERVICE",
+    "foreground_data_sync": "FOREGROUND_SERVICE_DATA_SYNC",
     "wake_lock": "WAKE_LOCK",
+    "alarms": "SCHEDULE_EXACT_ALARM",
+    "exact_alarm": "SCHEDULE_EXACT_ALARM",
 }
+
+#: Build-time features generated from ``pydrud.yaml``. Capabilities are a
+#: friendlier, production-safe layer over common permission bundles.
+CAPABILITY_ALIASES = {
+    "haptic": "haptics",
+    "haptics": "haptics",
+    "vibrate": "haptics",
+    "notification": "notifications",
+    "notifications": "notifications",
+    "push": "notifications",
+    "foreground": "foreground_service",
+    "foreground_service": "foreground_service",
+    "service": "foreground_service",
+    "boot": "boot_receiver",
+    "boot_receiver": "boot_receiver",
+    "wake": "wake_lock",
+    "wake_lock": "wake_lock",
+}
+
+CAPABILITY_PERMISSIONS = {
+    "foreground_service": {"FOREGROUND_SERVICE", "FOREGROUND_SERVICE_DATA_SYNC"},
+    "boot_receiver": {"RECEIVE_BOOT_COMPLETED"},
+    "wake_lock": {"WAKE_LOCK"},
+    "haptics": {"VIBRATE"},
+    "notifications": {"POST_NOTIFICATIONS"},
+}
+
+KNOWN_CAPABILITIES = frozenset(CAPABILITY_PERMISSIONS)
 
 ANDROID_NS = "http://schemas.android.com/apk/res/android"
 
@@ -58,8 +126,19 @@ ICON_SIZES = {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144,
 
 def resolve_permission(name: str) -> str:
     """``"camera"`` → ``"CAMERA"``; unknown names pass through upper-cased."""
-    key = str(name).strip().lower()
+    key = str(name).strip().lower().replace("-", "_")
     return PERMISSIONS.get(key, key.upper())
+
+
+def resolve_capability(name: str) -> str:
+    """Return the canonical capability name or raise ``ValueError``."""
+    key = str(name).strip().lower().replace("-", "_")
+    resolved = CAPABILITY_ALIASES.get(key, key)
+    if resolved not in KNOWN_CAPABILITIES:
+        raise ValueError(
+            f"Unknown capability {name!r}; use one of "
+            f"{', '.join(sorted(KNOWN_CAPABILITIES))}")
+    return resolved
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -338,59 +417,95 @@ def _rgba(color: str) -> tuple:
 
 
 # ──────────────────────────────────────────────────────────────────────────
-# Permissions
+# Permissions and capabilities
 # ──────────────────────────────────────────────────────────────────────────
+
+
+def _manifest_path(project_dir: str) -> str:
+    return os.path.join(project_dir, "android", "app", "src", "main",
+                        "AndroidManifest.xml")
+
+
+def _load_manifest(project_dir: str):
+    manifest_path = _manifest_path(project_dir)
+    if not os.path.exists(manifest_path):
+        print(tui.error_badge(
+            "AndroidManifest.xml not found — run 'pydrud sync' first."))
+        return None, None, None
+    ET.register_namespace("android", ANDROID_NS)
+    tree = ET.parse(manifest_path)
+    return manifest_path, tree, tree.getroot()
+
+
+def _write_manifest(path: str, tree) -> None:
+    ET.indent(tree, space="    ")
+    tree.write(path, encoding="utf-8", xml_declaration=True)
+
+
+def _manifest_permissions(root) -> set[str]:
+    attribute = f"{{{ANDROID_NS}}}name"
+    return {node.get(attribute, "") for node in root.findall("uses-permission")}
+
+
+def _add_manifest_permission(root, permission: str) -> bool:
+    attribute = f"{{{ANDROID_NS}}}name"
+    full = f"android.permission.{permission}"
+    if full in _manifest_permissions(root):
+        return False
+    node = ET.SubElement(root, "uses-permission")
+    node.set(attribute, full)
+    return True
+
+
+def _remove_manifest_permission(root, permission: str) -> bool:
+    attribute = f"{{{ANDROID_NS}}}name"
+    full = f"android.permission.{permission}"
+    removed = False
+    for node in list(root.findall("uses-permission")):
+        if node.get(attribute) == full:
+            root.remove(node)
+            removed = True
+    return removed
+
+
+def _config_list(project_dir: str, key: str) -> list[str]:
+    from pydrud.commands.project_config import load_project_config
+
+    configured = load_project_config(project_dir).get(key, [])
+    if isinstance(configured, list):
+        return [str(item) for item in configured]
+    return [part.strip() for part in str(configured).split(",") if part.strip()]
 
 
 def update_permissions(project_dir: str, *, add: Optional[Iterable[str]] = None,
                        remove: Optional[Iterable[str]] = None) -> list[str]:
     """Add or remove ``<uses-permission>`` entries in the manifest."""
-    manifest_path = os.path.join(project_dir, "android", "app", "src", "main",
-                                 "AndroidManifest.xml")
-    if not os.path.exists(manifest_path):
-        print(tui.error_badge(
-            "AndroidManifest.xml not found — run 'pydrud sync' first."))
+    manifest_path, tree, root = _load_manifest(project_dir)
+    if root is None:
         return []
-
-    ET.register_namespace("android", ANDROID_NS)
-    tree = ET.parse(manifest_path)
-    root = tree.getroot()
-    attribute = f"{{{ANDROID_NS}}}name"
-    existing = {node.get(attribute) for node in root.findall("uses-permission")}
 
     changed: list[str] = []
     for name in add or []:
-        full = f"android.permission.{resolve_permission(name)}"
-        if full in existing:
-            continue
-        node = ET.SubElement(root, "uses-permission")
-        node.set(attribute, full)
-        existing.add(full)
-        changed.append(resolve_permission(name))
+        resolved = resolve_permission(name)
+        if _add_manifest_permission(root, resolved):
+            changed.append(resolved)
 
     for name in remove or []:
-        full = f"android.permission.{resolve_permission(name)}"
-        for node in root.findall("uses-permission"):
-            if node.get(attribute) == full:
-                root.remove(node)
-                changed.append(resolve_permission(name))
+        resolved = resolve_permission(name)
+        if _remove_manifest_permission(root, resolved):
+            changed.append(resolved)
 
     if changed:
-        ET.indent(tree, space="    ")
-        tree.write(manifest_path, encoding="utf-8", xml_declaration=True)
+        _write_manifest(manifest_path, tree)
 
     # The manifest is generated by `pydrud sync`, so persist the requested
     # permissions in its system-level source of truth as well. This keeps a
     # later package/toolchain sync from silently discarding CLI changes.
     try:
-        from pydrud.commands.project_config import load_project_config, set_list
+        from pydrud.commands.project_config import set_list
 
-        config = load_project_config(project_dir)
-        configured = config.get("permissions", [])
-        if not isinstance(configured, list):
-            configured = [part.strip() for part in str(configured).split(",")
-                          if part.strip()]
-        configured = [resolve_permission(name) for name in configured]
+        configured = [resolve_permission(name)
+                      for name in _config_list(project_dir, "permissions")]
         for name in add or []:
             resolved = resolve_permission(name)
             if resolved not in configured:
@@ -405,12 +520,60 @@ def update_permissions(project_dir: str, *, add: Optional[Iterable[str]] = None,
     return changed
 
 
+def update_capabilities(project_dir: str, *, add: Optional[Iterable[str]] = None,
+                        remove: Optional[Iterable[str]] = None) -> list[str]:
+    """Add/remove generated Android capabilities in YAML and manifest.
+
+    Capabilities are higher-level switches such as ``haptics`` and
+    ``notifications``. They keep normal permissions out of the hand-maintained
+    ``permissions:`` list while still surviving every future ``pydrud sync``.
+    """
+    manifest_path, tree, root = _load_manifest(project_dir)
+    if root is None:
+        return []
+
+    try:
+        from pydrud.commands.project_config import set_list
+
+        configured = [resolve_capability(name)
+                      for name in _config_list(project_dir, "capabilities")]
+        changed: list[str] = []
+        for name in add or []:
+            capability = resolve_capability(name)
+            if capability not in configured:
+                configured.append(capability)
+                changed.append(capability)
+        removed = {resolve_capability(name) for name in remove or []}
+        for capability in list(configured):
+            if capability in removed:
+                configured.remove(capability)
+                changed.append(capability)
+        set_list(project_dir, "capabilities", sorted(configured))
+    except OSError:
+        return []
+
+    manifest_changed = False
+    for capability in add or []:
+        for permission in CAPABILITY_PERMISSIONS[resolve_capability(capability)]:
+            manifest_changed = _add_manifest_permission(root, permission) or manifest_changed
+    for capability in remove or []:
+        for permission in CAPABILITY_PERMISSIONS[resolve_capability(capability)]:
+            manifest_changed = _remove_manifest_permission(root, permission) or manifest_changed
+    if manifest_changed:
+        _write_manifest(manifest_path, tree)
+    return changed
+
+
 def list_permissions(project_dir: str) -> list[str]:
-    manifest_path = os.path.join(project_dir, "android", "app", "src", "main",
-                                 "AndroidManifest.xml")
+    manifest_path = _manifest_path(project_dir)
     if not os.path.exists(manifest_path):
         return []
     tree = ET.parse(manifest_path)
     attribute = f"{{{ANDROID_NS}}}name"
     return sorted(node.get(attribute, "").rsplit(".", 1)[-1]
                   for node in tree.getroot().findall("uses-permission"))
+
+
+def list_capabilities(project_dir: str) -> list[str]:
+    return sorted(resolve_capability(name)
+                  for name in _config_list(project_dir, "capabilities"))

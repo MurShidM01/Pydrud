@@ -47,6 +47,7 @@ public class NativeServices {
     /** request_id of in-flight activity results, keyed by request code. */
     private final Map<Integer, String> pendingActivity = new HashMap<>();
     private final Map<Integer, String> pendingPermission = new HashMap<>();
+    private final Map<Integer, JSONObject> pendingPermissionValue = new HashMap<>();
     private int requestCode = 9000;
     private ProgressDialog progressDialog;
 
@@ -414,8 +415,7 @@ public class NativeServices {
 
     private void permissionCheck(String requestId, JSONObject msg) {
         String permission = msg.optString("permission", "");
-        boolean granted = ContextCompat.checkSelfPermission(activity, permission)
-            == PackageManager.PERMISSION_GRANTED;
+        boolean granted = isEffectivelyGranted(permission);
         reply(requestId, granted);
     }
 
@@ -426,16 +426,98 @@ public class NativeServices {
             fail(requestId, "no permissions requested");
             return;
         }
+
+        java.util.ArrayList<String> undeclared = new java.util.ArrayList<>();
+        java.util.ArrayList<String> runtime = new java.util.ArrayList<>();
+        JSONObject already = new JSONObject();
+        try {
+            for (String permission : permissions) {
+                if (permission == null || permission.isEmpty()) continue;
+                if (!isPermissionDeclared(permission)
+                        && requiresManifestDeclaration(permission)) {
+                    undeclared.add(permission);
+                    continue;
+                }
+                if (isEffectivelyGranted(permission) || !needsRuntimePrompt(permission)) {
+                    already.put(permission, isEffectivelyGranted(permission));
+                } else {
+                    runtime.add(permission);
+                }
+            }
+        } catch (Exception ignored) { }
+
+        if (!undeclared.isEmpty()) {
+            fail(requestId, "permission not declared in AndroidManifest: "
+                + undeclared.get(0)
+                + ". Add it with `pydrud permissions add ...` or enable the "
+                + "matching capability, then run `pydrud sync`.");
+            return;
+        }
+        if (runtime.isEmpty()) {
+            reply(requestId, already);
+            return;
+        }
         int code = ++requestCode;
         pendingPermission.put(code, requestId);
-        ActivityCompat.requestPermissions(activity, permissions, code);
+        pendingPermissionValue.put(code, already);
+        ActivityCompat.requestPermissions(activity,
+            runtime.toArray(new String[0]), code);
+    }
+
+    private boolean isEffectivelyGranted(String permission) {
+        if (permission == null || permission.isEmpty()) return false;
+        if ("android.permission.POST_NOTIFICATIONS".equals(permission)
+                && Build.VERSION.SDK_INT < 33) {
+            return true;
+        }
+        return ContextCompat.checkSelfPermission(activity, permission)
+            == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean needsRuntimePrompt(String permission) {
+        if (Build.VERSION.SDK_INT < 23) return false;
+        if ("android.permission.POST_NOTIFICATIONS".equals(permission)) {
+            return Build.VERSION.SDK_INT >= 33;
+        }
+        // Normal/install-time permissions never show a runtime dialog; asking
+        // for them should still settle the Result immediately.
+        return !("android.permission.VIBRATE".equals(permission)
+            || "android.permission.INTERNET".equals(permission)
+            || "android.permission.ACCESS_NETWORK_STATE".equals(permission)
+            || "android.permission.WAKE_LOCK".equals(permission)
+            || "android.permission.NFC".equals(permission)
+            || "android.permission.FOREGROUND_SERVICE".equals(permission)
+            || "android.permission.FOREGROUND_SERVICE_DATA_SYNC".equals(permission)
+            || "android.permission.RECEIVE_BOOT_COMPLETED".equals(permission));
+    }
+
+    private boolean requiresManifestDeclaration(String permission) {
+        if ("android.permission.POST_NOTIFICATIONS".equals(permission)
+                && Build.VERSION.SDK_INT < 33) {
+            return false;
+        }
+        return permission != null && permission.startsWith("android.permission.");
+    }
+
+    private boolean isPermissionDeclared(String permission) {
+        try {
+            android.content.pm.PackageInfo info = activity.getPackageManager()
+                .getPackageInfo(activity.getPackageName(),
+                    PackageManager.GET_PERMISSIONS);
+            if (info.requestedPermissions == null) return false;
+            for (String requested : info.requestedPermissions) {
+                if (permission.equals(requested)) return true;
+            }
+        } catch (Exception ignored) { }
+        return false;
     }
 
     /** Called by the Activity from onRequestPermissionsResult. */
     public boolean onPermissionResult(int code, String[] permissions, int[] results) {
         String requestId = pendingPermission.remove(code);
         if (requestId == null) return false;
-        JSONObject value = new JSONObject();
+        JSONObject value = pendingPermissionValue.remove(code);
+        if (value == null) value = new JSONObject();
         try {
             for (int i = 0; i < permissions.length; i++) {
                 value.put(permissions[i],

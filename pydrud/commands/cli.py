@@ -553,6 +553,69 @@ def permissions_remove(names):
     ))
 
 
+@main.group()
+def capabilities():
+    """Manage generated Android capabilities in pydrud.yaml."""
+
+
+@capabilities.command("add")
+@click.argument("names", nargs=-1, required=True)
+def capabilities_add(names):
+    """Enable capabilities, e.g. ``pydrud capabilities add haptics``."""
+    from pydrud.commands.release import update_capabilities
+
+    root = _project_or_exit()
+    _show_header("capabilities add", "Enable Android capabilities",
+                 "Updating pydrud.yaml and generated manifest permissions",
+                 details=(("Project", os.path.basename(root)),))
+    added = update_capabilities(root, add=list(names))
+    for name in added:
+        click.echo(tui.add_badge(name))
+    if not added:
+        click.echo(tui.neutral_badge("All requested capabilities were already enabled."))
+    click.echo(tui.render_summary(
+        f"Enabled {len(added)} capability/capabilities",
+        (("Source", "pydrud.yaml"), ("Next", "pydrud sync after manual YAML edits")),
+    ))
+
+
+@capabilities.command("remove")
+@click.argument("names", nargs=-1, required=True)
+def capabilities_remove(names):
+    """Disable generated capabilities."""
+    from pydrud.commands.release import update_capabilities
+
+    root = _project_or_exit()
+    _show_header("capabilities remove", "Disable Android capabilities",
+                 "Updating pydrud.yaml and generated manifest permissions",
+                 details=(("Project", os.path.basename(root)),))
+    removed = update_capabilities(root, remove=list(names))
+    for name in removed:
+        click.echo(tui.remove_badge(name))
+    if not removed:
+        click.echo(tui.neutral_badge("None of the requested capabilities were enabled."))
+    click.echo(tui.render_summary(
+        f"Disabled {len(removed)} capability/capabilities",
+        (("Source", "pydrud.yaml"),),
+    ))
+
+
+@capabilities.command("list")
+def capabilities_list():
+    """List capabilities enabled for this project."""
+    from pydrud.commands.release import list_capabilities
+
+    root = _project_or_exit()
+    enabled = list_capabilities(root)
+    _show_header("capabilities list", "Enabled Android capabilities",
+                 details=(("Project", os.path.basename(root)),))
+    if enabled:
+        for name in enabled:
+            click.echo(tui.neutral_badge(name))
+    else:
+        click.echo(tui.neutral_badge("No optional capabilities enabled."))
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # Developer experience
 # ──────────────────────────────────────────────────────────────────────────

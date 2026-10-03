@@ -52,6 +52,14 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). In short: runtime code in
 * **Line endings are LF.** `.gitattributes` enforces it; on Windows,
   `git config core.autocrlf` should not override it, or every source file
   gains a byte per line and the APK size budget drifts.
-* **Update `CHANGELOG.md`** in the same commit, and bump the version in
-  `pydrud/__init__.py`, `pydrud/compatibility.py` and `pyproject.toml`
-  together — a test checks they agree.
+* **Version numbers are release-manager owned.** Do not invent `2.0.2`,
+  `2.5.0`, `3.0.0` or any other SDK version in a feature PR. The v2 line
+  advances deliberately (`2.0.1`, `2.0.2`, `2.1.0`, …) only when the
+  maintainer/release issue says so. No v3 naming, protocol reset or breaking
+  version jump belongs in routine contributions.
+* **If a PR is explicitly part of a release bump, update every versioned
+  surface together:** `pydrud/__init__.py`, `pydrud/compatibility.py`,
+  `pyproject.toml`, generated-template defaults, `README.md` examples and
+  `CHANGELOG.md`. Never bump one file to silence a test.
+* **Update `CHANGELOG.md`** in the same commit for every user-visible change,
+  even when the SDK version itself is not changing.

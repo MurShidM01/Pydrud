@@ -15,7 +15,7 @@ Tap anything — every control answers back.
 """
 
 from pydrud import (
-    AppBar, Button, Card, Checkbox, Colors, Column, Container, Divider,
+    AppBar, Button, Card, Checkbox, Chip, Colors, Column, Container, Divider,
     Elevation, Icon, Icons, ListTile, ProgressBar, Radius, ResponsiveGrid,
     Row, Scaffold, SizedBox, Slider, Spacing, Switch, Text, TextField, Theme,
 )
@@ -84,6 +84,12 @@ def hero():
             Text("Every control on this screen drives a real Android API "
                  "from Python.", key="hero_hint", size=12,
                  color=Colors.with_opacity(Colors.WHITE, 0.7)),
+            Row(key="hero_chips", spacing=Spacing.XS, children=[
+                Chip("100% Python UI", key="chip_python", icon=Icons.CODE,
+                     color=Colors.with_opacity(Colors.WHITE, 0.20)),
+                Chip("Hot Reload", key="chip_reload", icon=Icons.SYNC,
+                     color=Colors.with_opacity(Colors.WHITE, 0.20)),
+            ]),
         ]),
     )
 
@@ -102,8 +108,11 @@ def native_card(page):
                                       else "Dialog closed"))
 
     def buzz(_event):
-        page.haptics.impact("medium")
-        page.toast("Bzzt — did you feel that?")
+        page.haptics.impact("medium") \
+            .then(lambda _ok: page.toast("Bzzt — did you feel that?")) \
+            .catch(lambda error: page.toast(
+                "Haptics need the haptics capability" if "VIBRATE" in error
+                else f"Haptics unavailable: {error}"))
 
     def copy_text(_event):
         page.clipboard.copy(f"{APP_NAME} — built with Pydrud")
@@ -126,7 +135,11 @@ def native_card(page):
                        else bool(result))
             page.toast("Permission granted" if granted
                        else "Permission denied")
-        page.permissions.request("notifications").then(report)
+        page.permissions.request("notifications") \
+            .then(report) \
+            .catch(lambda error: page.toast(
+                "Permission not declared — run pydrud capabilities add notifications"
+                if "not declared" in error else f"Permission error: {error}"))
 
     return Card(key="native_card", padding=Spacing.LG, child=Column(
         key="native_body", spacing=Spacing.MD, children=[

@@ -9,7 +9,7 @@ import unittest
 
 from pydrud.commands.project import create_project, sync_project
 from pydrud.commands.project_config import load_project_config
-from pydrud.commands.release import update_permissions
+from pydrud.commands.release import update_capabilities, update_permissions
 
 
 class TestYamlControlledAndroidSync(unittest.TestCase):
@@ -34,6 +34,14 @@ class TestYamlControlledAndroidSync(unittest.TestCase):
         with open(os.path.join(self.project, *relative.split("/")), "w",
                   encoding="utf-8") as handle:
             handle.write(text)
+
+    def test_new_projects_enable_starter_native_capabilities(self):
+        config = load_project_config(self.project)
+        self.assertIn("haptics", config["capabilities"])
+        self.assertIn("notifications", config["capabilities"])
+        manifest = self.read("android/app/src/main/AndroidManifest.xml")
+        self.assertIn("android.permission.VIBRATE", manifest)
+        self.assertIn("android.permission.POST_NOTIFICATIONS", manifest)
 
     def test_sync_applies_identity_sdk_toolchain_and_manifest_settings(self):
         # This intentionally replaces the generated file: sync must use YAML,
@@ -176,6 +184,22 @@ assets_dir: "assets"
         self.assertIn("CAMERA", config["permissions"])
         self.assertTrue(sync_project(self.project, update_runtime=False))
         self.assertIn("android.permission.CAMERA",
+                      self.read("android/app/src/main/AndroidManifest.xml"))
+
+    def test_capability_cli_updates_yaml_manifest_and_survives_sync(self):
+        update_capabilities(self.project, remove=["haptics"])
+        config = load_project_config(self.project)
+        self.assertNotIn("haptics", config["capabilities"])
+        self.assertNotIn("android.permission.VIBRATE",
+                         self.read("android/app/src/main/AndroidManifest.xml"))
+
+        update_capabilities(self.project, add=["haptic"])
+        config = load_project_config(self.project)
+        self.assertIn("haptics", config["capabilities"])
+        self.assertIn("android.permission.VIBRATE",
+                      self.read("android/app/src/main/AndroidManifest.xml"))
+        self.assertTrue(sync_project(self.project, update_runtime=False))
+        self.assertIn("android.permission.VIBRATE",
                       self.read("android/app/src/main/AndroidManifest.xml"))
 
 

@@ -4,6 +4,42 @@ All notable changes to Pydrud are documented here.
 
 ## [Unreleased]
 
+No unreleased changes yet.
+
+## [2.0.1] — Starter capability and UI hardening
+
+### Fixed
+* **Vibration now works in newly generated starter apps.** `pydrud init`
+  enables the `haptics` capability by default, so the generated manifest
+  declares `android.permission.VIBRATE`. The Android bridge also replies to
+  request/response haptic calls, supports vibration patterns, and reports an
+  actionable error when the permission or device vibrator is unavailable
+  instead of only logging `Vibrate unavailable (missing permission?)`.
+* **The starter permission demo is declared before it is requested.** New
+  projects enable the `notifications` capability by default, so
+  `page.permissions.request("notifications")` can show Android's runtime
+  dialog on Android 13+. Permission requests now fail with a clear message
+  when a requested permission is missing from `AndroidManifest.xml`.
+* **`page.push.permission()` sends the correct bridge payload.** It now uses
+  the same `permissions=["android.permission.POST_NOTIFICATIONS"]` shape as
+  `page.permissions.request(...)`.
+
+### Added
+* **`pydrud capabilities` CLI.** `pydrud capabilities add/remove/list`
+  manages generated feature bundles (`haptics`, `notifications`,
+  `foreground_service`, `boot_receiver`, `wake_lock`) in `pydrud.yaml` and
+  updates the generated manifest so apps do not need hand edits under
+  `android/`.
+* **More Python widget presets.** Added `FilledButton`, `TonalButton`,
+  `OutlinedButton`, `TextButton`, `ElevatedButton`, `IconButton`,
+  `SearchField`, `EmailField`, `PasswordField`, `NumberField`, `PhoneField`,
+  `UrlField`, `LinearProgress`, `AssistChip`, `FilterChip`, `InputChip` and
+  `SuggestionChip`. They reuse the existing native Android renderers, so they
+  are convenience APIs rather than web fallbacks.
+* **More icon aliases.** The `Icons` catalogue and native icon resolver now
+  cover additional app, commerce, media, security, navigation and developer
+  names.
+
 ### Changed — the starter app is now the Pydrud Native Playground
 * **`pydrud init` generates a focused, single-screen playground** instead of
   the three-destination counter/to-do app. The screen is organised into

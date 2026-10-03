@@ -33,7 +33,43 @@ pydrud run                            # Build, install, launch
 
 ---
 
-## Upcoming — Runtime 2.0 / production hardening
+## New in v2.0.1 — starter app fixes, capabilities and more UI presets
+
+v2.0.1 is a production-hardening patch for the v2 line. It fixes the two
+issues most visible in a brand-new `pydrud init` app:
+
+* **Vibration works out of the box.** New projects enable the `haptics`
+  capability, so the generated manifest includes `android.permission.VIBRATE`.
+  `page.haptics.*` results now settle successfully or fail with an actionable
+  message instead of only logging `Vibrate unavailable`.
+* **Runtime permission demos work out of the box.** New projects enable the
+  `notifications` capability, so `page.permissions.request("notifications")`
+  is declared before Android is asked for it. The native bridge now reports a
+  clear error when a requested permission is missing from the manifest.
+* **No hand edits in `android/` are required.** Use
+  `pydrud capabilities add haptics notifications` or
+  `pydrud permissions add camera location`, then `pydrud sync`; YAML remains
+  the source of truth.
+* **More Python UI building blocks.** v2.0.1 adds convenience widgets such as
+  `OutlinedButton`, `TextButton`, `ElevatedButton`, `IconButton`,
+  `SearchField`, `PasswordField`, `EmailField`, `PhoneField`,
+  `AssistChip`, `FilterChip`, `InputChip`, `SuggestionChip` and
+  `LinearProgress`, all backed by the same native Android renderers.
+* **More icon names.** The `Icons` catalogue now includes additional app,
+  commerce, media, navigation, security and developer aliases so common app
+  UIs can stay expressive from Python.
+
+Existing projects can opt in without recreating the app:
+
+```bash
+pydrud capabilities add haptics notifications
+pydrud sync
+pydrud run
+```
+
+---
+
+## Runtime 2.x / production hardening
 
 The current development line adds a stronger runtime contract between
 Python's declarative widget tree and the generated Android renderer.
@@ -131,11 +167,11 @@ should be treated as a fully certified production matrix.
 
 | Feature | Description |
 |---------|-------------|
-| Declarative UI | 50+ widgets: layout, Material 3 components, charts, media, gestures, animations |
+| Declarative UI | 90+ widgets and presets: layout, Material 3 components, form fields, chips, charts, media, gestures, animations |
 | Reactive State | `State<T>` auto-triggers UI re-renders on value change |
 | Full Styling | Colors, padding, margin, borders, fonts, elevation, alignment |
 | Native Rendering | Every widget becomes a real Android View — not a WebView or canvas |
-| CLI Toolchain | `init` / `run` / `sync` / `build` / `watch` / `analyze` / `doctor` / `clean` / `pip` / `icons` / `keygen` / `permissions` / `docs` / `inspect` |
+| CLI Toolchain | `init` / `run` / `sync` / `build` / `watch` / `analyze` / `doctor` / `clean` / `pip` / `icons` / `keygen` / `permissions` / `capabilities` / `docs` / `inspect` |
 | No XML, no Java | Even `themes.xml` is generated from the Python palette — `pydrud init --accent "#FF0EA5E9"` |
 | Data Layer | SQLite `Database`, `Model` ORM with migrations, and a TTL `Cache` |
 | PyPI on Android | 119 verified packages installable with `pydrud pip add` |
@@ -377,8 +413,9 @@ are rejected with an explanation; anything else can still be forced with
 ### Release workflow
 
 ```bash
-pydrud permissions add camera location   # friendly names -> manifest entries
-pydrud icons --source logo.png           # every density, round + adaptive icons
+pydrud capabilities add haptics notifications  # normal generated capabilities
+pydrud permissions add camera location         # dangerous permissions you use
+pydrud icons --source logo.png                 # every density, round + adaptive icons
 pydrud keygen                            # upload keystore + keystore.properties
 pydrud build --release                   # signed, R8-shrunk APK
 ```
@@ -801,6 +838,7 @@ page.dialog.bottom_sheet(["Camera", "Gallery"]).then(pick_source)
 page.storage.set("profile", {"name": "Ada"})
 page.storage.get("profile", default={}).then(render_profile)
 
+# Declare first: `pydrud permissions add camera` then `pydrud sync`.
 page.permissions.request("camera").then(lambda granted: ...)
 page.files.pick_image(camera=True).then(upload)
 page.clipboard.copy("pydrud.dev")
@@ -865,7 +903,7 @@ Theme.apply(primary="#FF0EA5E9")
 page.toast("Saved!")
 page.snack_bar("Deleted", action="UNDO")
 page.set_title("Inbox")
-page.vibrate(30)                       # needs the VIBRATE permission
+page.vibrate(30)                       # enable with `pydrud capabilities add haptics`
 page.set_system_ui(status_bar_color="#FF6366F1", icon_brightness="light")
 page.close()                           # finish the activity
 ```
@@ -1264,16 +1302,24 @@ app_links_host: ""
 permissions:
   - "CAMERA"
 capabilities:
+  - "haptics"
   - "notifications"
 firebase: false
 shrink: false
 python_version: "3.11"
-framework_version: "2.0.0"
+framework_version: "2.0.1"
 protocol_version: 2
 chaquopy_version: "17.0.0"
 agp_version: "8.13.2"
 gradle_version: "8.14.4"
 ```
+
+`capabilities:` is for generated feature bundles (`haptics`, `notifications`,
+`foreground_service`, `boot_receiver`, `wake_lock`). `permissions:` is for
+app-specific Android permissions such as `CAMERA`, `RECORD_AUDIO` or
+`ACCESS_FINE_LOCATION`. The CLI updates both YAML and the generated manifest:
+`pydrud capabilities add haptics` or `pydrud permissions add camera`, then
+`pydrud sync`.
 
 `pydrud.toml` continues to own `[python.packages]` and `[theme]`. Its legacy
 `[app]` identity fields are kept in sync with YAML for compatibility; when
@@ -1316,6 +1362,7 @@ as `pydrud analyze --json` remains plain JSON.
 | `pydrud pip search <term>` | Search the supported-package registry |
 | `pydrud pip sync` | Re-apply `pydrud.toml` packages to `build.gradle.kts` |
 | `pydrud permissions add\|remove <name>...` | Update YAML and the Android manifest by friendly name |
+| `pydrud capabilities add\|remove <name>...` | Enable generated feature bundles such as haptics or notifications |
 | `pydrud icons [--source logo.png]` | Launcher, round and adaptive icons (splash stays theme-driven) |
 | `pydrud keygen` | Create the Play Store upload keystore |
 | `pydrud docs [--serve]` | Offline HTML API reference |
@@ -1342,7 +1389,7 @@ pydrud doctor
 
 | Tool | Version | Notes |
 |------|---------|-------|
-| Python | >= 3.10, <= 3.12 | 3.12 recommended for Chaquopy compatibility |
+| Python | >= 3.10, <= 3.12 | 3.11 recommended for Chaquopy `.pyc` pre-compilation; 3.12 works but first start is slower |
 | Java (JDK) | 17+ | OpenJDK 17 LTS recommended |
 | Android SDK | API 33+ | Set `ANDROID_HOME` or `ANDROID_SDK_ROOT` |
 | Android NDK | r29+ | Required for Chaquopy native libraries |

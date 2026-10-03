@@ -228,25 +228,66 @@ class Permissions(_Service):
     ALIASES = {
         "camera": "android.permission.CAMERA",
         "microphone": "android.permission.RECORD_AUDIO",
+        "mic": "android.permission.RECORD_AUDIO",
+        "record_audio": "android.permission.RECORD_AUDIO",
+        "audio": "android.permission.RECORD_AUDIO",
         "location": "android.permission.ACCESS_FINE_LOCATION",
+        "fine_location": "android.permission.ACCESS_FINE_LOCATION",
         "coarse_location": "android.permission.ACCESS_COARSE_LOCATION",
+        "background_location": "android.permission.ACCESS_BACKGROUND_LOCATION",
         "contacts": "android.permission.READ_CONTACTS",
+        "contacts_write": "android.permission.WRITE_CONTACTS",
+        "write_contacts": "android.permission.WRITE_CONTACTS",
         "storage": "android.permission.READ_EXTERNAL_STORAGE",
         "photos": "android.permission.READ_MEDIA_IMAGES",
+        "images": "android.permission.READ_MEDIA_IMAGES",
+        "media_images": "android.permission.READ_MEDIA_IMAGES",
+        "videos": "android.permission.READ_MEDIA_VIDEO",
+        "video": "android.permission.READ_MEDIA_VIDEO",
+        "media_video": "android.permission.READ_MEDIA_VIDEO",
+        "music": "android.permission.READ_MEDIA_AUDIO",
+        "audio_files": "android.permission.READ_MEDIA_AUDIO",
+        "media_audio": "android.permission.READ_MEDIA_AUDIO",
+        "read_storage": "android.permission.READ_EXTERNAL_STORAGE",
+        "write_storage": "android.permission.WRITE_EXTERNAL_STORAGE",
         "notifications": "android.permission.POST_NOTIFICATIONS",
+        "notification": "android.permission.POST_NOTIFICATIONS",
+        "post_notifications": "android.permission.POST_NOTIFICATIONS",
+        "internet": "android.permission.INTERNET",
+        "network": "android.permission.ACCESS_NETWORK_STATE",
         "calendar": "android.permission.READ_CALENDAR",
+        "calendar_write": "android.permission.WRITE_CALENDAR",
+        "write_calendar": "android.permission.WRITE_CALENDAR",
         "bluetooth": "android.permission.BLUETOOTH_CONNECT",
+        "nearby_devices": "android.permission.BLUETOOTH_CONNECT",
+        "bluetooth_connect": "android.permission.BLUETOOTH_CONNECT",
         "bluetooth_scan": "android.permission.BLUETOOTH_SCAN",
         "bluetooth_advertise": "android.permission.BLUETOOTH_ADVERTISE",
-        "background_location": "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "nfc": "android.permission.NFC",
+        "biometric": "android.permission.USE_BIOMETRIC",
+        "fingerprint": "android.permission.USE_BIOMETRIC",
+        "vibrate": "android.permission.VIBRATE",
+        "haptics": "android.permission.VIBRATE",
         "activity": "android.permission.ACTIVITY_RECOGNITION",
+        "activity_recognition": "android.permission.ACTIVITY_RECOGNITION",
         "phone": "android.permission.CALL_PHONE",
+        "phone_state": "android.permission.READ_PHONE_STATE",
+        "read_phone_state": "android.permission.READ_PHONE_STATE",
         "sms": "android.permission.SEND_SMS",
+        "send_sms": "android.permission.SEND_SMS",
+        "receive_sms": "android.permission.RECEIVE_SMS",
+        "wake_lock": "android.permission.WAKE_LOCK",
+        "boot": "android.permission.RECEIVE_BOOT_COMPLETED",
+        "boot_completed": "android.permission.RECEIVE_BOOT_COMPLETED",
+        "foreground_service": "android.permission.FOREGROUND_SERVICE",
+        "foreground_data_sync": "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+        "alarms": "android.permission.SCHEDULE_EXACT_ALARM",
+        "exact_alarm": "android.permission.SCHEDULE_EXACT_ALARM",
     }
 
     def resolve(self, name: str) -> str:
         """Map a short name to the full permission string."""
-        key = str(name).lower()
+        key = str(name).strip().lower().replace("-", "_")
         if key in self.ALIASES:
             return self.ALIASES[key]
         if "." in name:
@@ -535,7 +576,10 @@ class Push(_Service):
 
     def permission(self) -> Result:
         """Request the Android 13+ POST_NOTIFICATIONS permission."""
-        return self._invoke("permission_request", names=["notifications"])
+        return self._invoke(
+            "permission_request",
+            permissions=[Permissions.ALIASES["notifications"]],
+        )
 
 
 class Shortcuts(_Service):
