@@ -52,7 +52,7 @@ NATIVE_IGNORED_PROPS: dict[str, tuple[str, ...]] = {
     "Chart": ("labels", "showValues"),
     "CircularProgress": ("stroke",),
     "Form": ("fields", "submitted", "valid"),
-    "InfiniteList": ("total", "virtualized", "window"),
+    "InfiniteList": ("total", "window"),
     "MapView": ("interactive", "mapType", "provider"),
     "Markdown": ("linkColor",),
     "Rating": ("half",),

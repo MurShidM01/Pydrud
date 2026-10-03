@@ -87,8 +87,18 @@ def test_all_android_drawable_references_are_public():
     assert not bad, "Non-public android.R.drawable references:\n" + "\n".join(bad)
 
 
-def test_icon_map_has_folder_icon():
+def test_icons_are_vector_only_no_legacy_drawable_map():
+    """Icons render from PydrudIcons vector paths — never from the dated
+    Gingerbread-era android.R.drawable bitmaps (chevron → media rewind,
+    qr_code → crop tool and friends)."""
     vf = TEMPLATES_DIR / "templates" / "android" / "ViewFactory.java.j2"
     text = vf.read_text(encoding="utf-8")
-    assert 'case "folder":' in text
-    assert "ic_menu_archive" not in text
+    assert "getIconRes" not in text
+    assert "iconResource" not in text
+    code_lines = [
+        line for line in text.splitlines()
+        if not line.lstrip().startswith(("*", "//"))
+    ]
+    assert not any("android.R.drawable" in line for line in code_lines)
+    # The vector path is the one icon entry point other templates can call.
+    assert "PydrudIcons.drawable" in text

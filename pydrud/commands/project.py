@@ -695,6 +695,7 @@ def _sync_context(project_dir: str, found: dict) -> dict:
         "version_name": version_name,
         "scheme": scheme,
         "app_links_host": _config_string(config, "app_links_host"),
+        "cleartext_traffic": _config_bool(config, "cleartext_traffic", True),
         "abi_filters_list": abi_filters_list,
         "abi_filters": ", ".join(f'"{abi}"' for abi in abi_filters_list),
         "permissions": permissions,
@@ -836,6 +837,7 @@ def create_project(
             f'"{abi}"' for abi in ("arm64-v8a", "armeabi-v7a", "x86_64")),
         "scheme": pydrud_app_name.replace("_", ""),
         "app_links_host": "",
+        "cleartext_traffic": True,
         "assets_dir": "assets",
     }
 

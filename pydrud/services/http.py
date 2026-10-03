@@ -27,6 +27,15 @@ from pydrud.core.results import Result
 DEFAULT_TIMEOUT = 20.0
 
 
+def user_agent() -> str:
+    """Versioned client identity — never a stale hardcoded string."""
+    try:
+        from pydrud import __version__
+        return f"Pydrud/{__version__} (Android)"
+    except Exception:  # frozen/minimal environments without package metadata
+        return "Pydrud/2 (Android)"
+
+
 class HttpResponse:
     """A completed HTTP response."""
 
@@ -159,7 +168,7 @@ class Http:
             else:
                 payload = bytes(data)
         merged.setdefault("Accept", "application/json, text/plain, */*")
-        merged.setdefault("User-Agent", "Pydrud/1.2 (Android)")
+        merged.setdefault("User-Agent", user_agent())
 
         result = Result(f"{method} {full_url}", "http")
         effective_timeout = self.timeout if timeout is None else float(timeout)

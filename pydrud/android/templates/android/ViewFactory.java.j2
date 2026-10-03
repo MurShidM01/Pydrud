@@ -75,14 +75,14 @@ public class ViewFactory {
         gestures.setEventDispatcher(d);
     }
 
-    /** Resolve a Pydrud icon name to a drawable resource (legacy fallback). */
-    public int iconResource(String name) { return getIconRes(name); }
-
     /**
      * A crisp, tinted vector icon at an exact pixel size.
      *
-     * <p>Preferred over {@link #iconResource(String)} — the framework
-     * bitmaps it returns are low-resolution and visually dated.
+     * <p>Icons are rasterised from {@link PydrudIcons} 24x24 vector path
+     * data, so they stay sharp on any density. The old Gingerbread-era
+     * {@code android.R.drawable} mapping (which rendered chevrons as media
+     * rewind buttons, qr_code as a crop icon, sparkle as a sun, …) was
+     * removed; this vector path is now the only icon source.
      */
     public android.graphics.drawable.Drawable icon(String name, int color, int sizePx) {
         return PydrudIcons.drawable(name, color, sizePx);
@@ -181,6 +181,14 @@ public class ViewFactory {
                 View v = viewMap.get(key);
                 ViewGroup parent = containerFor(parentKey);
                 if (v != null && parent != null && index >= 0) {
+                    if (parent instanceof androidx.recyclerview.widget.RecyclerView
+                            && ((androidx.recyclerview.widget.RecyclerView) parent).getAdapter()
+                                    instanceof AdvancedViews.ViewAdapter) {
+                        final androidx.recyclerview.widget.RecyclerView list =
+                            (androidx.recyclerview.widget.RecyclerView) parent;
+                        list.post(() -> rebuildListRows(list));
+                        break;
+                    }
                     ViewGroup.LayoutParams lp = v.getLayoutParams();
                     if (v.getParent() == parent) parent.removeView(v);
                     parent.addView(v, Math.min(index, parent.getChildCount()), lp);
@@ -197,6 +205,17 @@ public class ViewFactory {
                 forgetChild(parentMap.get(key), key);
                 removeViewTree(key);
                 applySpacing(parent);
+                // A row deleted from a virtualised list lived inside an
+                // adapter holder — refresh the adapter from the patched node.
+                ViewGroup owner = parent != null && parent.getParent() instanceof ViewGroup
+                    ? (ViewGroup) parent.getParent() : null;
+                if (owner instanceof androidx.recyclerview.widget.RecyclerView
+                        && ((androidx.recyclerview.widget.RecyclerView) owner).getAdapter()
+                                instanceof AdvancedViews.ViewAdapter) {
+                    final androidx.recyclerview.widget.RecyclerView list =
+                        (androidx.recyclerview.widget.RecyclerView) owner;
+                    list.post(() -> rebuildListRows(list));
+                }
                 break;
             }
             case "replace": {
@@ -304,8 +323,9 @@ public class ViewFactory {
                 case "Stack":
                     view = createBox(json); break;
                 case "Column":
-                case "ListView":
                     view = createLinear(json, LinearLayout.VERTICAL); break;
+                case "ListView":
+                    view = createListView(json); break;
                 case "Row":
                     view = createLinear(json, LinearLayout.HORIZONTAL); break;
                 case "GridView":
@@ -467,7 +487,56 @@ public class ViewFactory {
         PydrudTheme.elevate(view, elevation);
     }
 
-    /** Create a LinearLayout (Column, Row, ListView), optionally scrollable. */
+    // Rows beyond this count switch ListView to a RecyclerView: a plain
+    // LinearLayout instantiates every child eagerly, which janks and spikes
+    // memory on long lists.
+    private static final int VIRTUALIZE_THRESHOLD = 24;
+
+    /**
+     * Standard Pydrud ListView.
+     *
+     * <p>Short lists stay a plain LinearLayout so child insert/remove/move
+     * patches can address rows by logical index. Long lists — or
+     * ``ListView(style={"virtualized": True})`` — are backed by a
+     * RecyclerView with view-holder recycling, so scrolling 500 rows is as
+     * cheap as scrolling 5. Structural patches against a virtualised list
+     * rebuild its rows from the updated node (see {@link #addChild}).
+     */
+    private View createListView(JSONObject json) throws JSONException {
+        JSONArray children = json != null ? json.optJSONArray("children") : null;
+        JSONObject style = json != null ? json.optJSONObject("style") : null;
+        boolean virtualized = style != null && style.optBoolean("virtualized", false);
+        virtualized = virtualized || (children != null && children.length() >= VIRTUALIZE_THRESHOLD);
+        if (!virtualized) return createLinear(json, LinearLayout.VERTICAL);
+
+        androidx.recyclerview.widget.RecyclerView list =
+            advanced.createList(json.optString("key", ""), props(json), false);
+        advanced.setListViews(list, buildRows(children));
+        return list;
+    }
+
+    private java.util.List<View> buildRows(JSONArray children) throws JSONException {
+        java.util.List<View> rows = new java.util.ArrayList<>();
+        for (int i = 0; children != null && i < children.length(); i++) {
+            View row = createView(children.optJSONObject(i));
+            if (row != null) rows.add(row);
+        }
+        return rows;
+    }
+
+    /** Rebuild a virtualised list's rows from its (already patched) node. */
+    private void rebuildListRows(androidx.recyclerview.widget.RecyclerView list) {
+        Object tag = list.getTag();
+        JSONObject node = tag instanceof String ? nodeMap.get((String) tag) : null;
+        try {
+            advanced.setListViews(list,
+                buildRows(node != null ? node.optJSONArray("children") : null));
+        } catch (JSONException e) {
+            Log.w(TAG, "virtualised list rebuild failed", e);
+        }
+    }
+
+    /** Create a LinearLayout (Column, Row), optionally scrollable. */
     private View createLinear(JSONObject json, int orientation) throws JSONException {
         LinearLayout ll = new LinearLayout(activity);
         ll.setOrientation(orientation);
@@ -808,11 +877,30 @@ public class ViewFactory {
             }
         }
         et.setInputType(inputType);
-        if (s != null && s.optBoolean("multiline", false)) {
+        boolean multiline = s != null && s.optBoolean("multiline", false);
+        if (multiline) {
             et.setGravity(Gravity.TOP | Gravity.START);
             et.setMinHeight(PydrudTheme.adaptive(96));
         }
+        // Keyboard action button: TextField(ime_action="search") etc. The
+        // matching "submit" event fires from EventDispatcher's editor
+        // listener. Multiline fields keep the newline key.
+        String ime = s != null ? s.optString("ime", "") : "";
+        if (!ime.isEmpty() && !multiline) et.setImeOptions(imeAction(ime));
         return et;
+    }
+
+    /** Map a Pydrud ime_action name to an EditorInfo constant. */
+    private static int imeAction(String name) {
+        switch (name) {
+            case "done":     return android.view.inputmethod.EditorInfo.IME_ACTION_DONE;
+            case "search":   return android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH;
+            case "send":     return android.view.inputmethod.EditorInfo.IME_ACTION_SEND;
+            case "go":       return android.view.inputmethod.EditorInfo.IME_ACTION_GO;
+            case "next":     return android.view.inputmethod.EditorInfo.IME_ACTION_NEXT;
+            case "previous": return android.view.inputmethod.EditorInfo.IME_ACTION_PREVIOUS;
+            default:         return android.view.inputmethod.EditorInfo.IME_ACTION_UNSPECIFIED;
+        }
     }
 
     /**
@@ -868,6 +956,32 @@ public class ViewFactory {
         } catch (Throwable ignored) {}
     }
 
+    // ── Managed image pipeline ─────────────────────────────────────────────
+    //
+    // One shared, bounded thread pool instead of a raw Thread per image, an
+    // in-memory Bitmap cache keyed by URL/asset path, decode-time
+    // downsampling so camera/large photos cannot OOM the app, and tag-based
+    // cancellation so a recycled ImageView never shows a stale bitmap.
+
+    /** Shared decode/download pool (unbounded raw threads used to OOM apps). */
+    private static final java.util.concurrent.ExecutorService IMAGE_EXECUTOR =
+        java.util.concurrent.Executors.newFixedThreadPool(3, runnable -> {
+            Thread t = new Thread(runnable, "pydrud-image");
+            t.setDaemon(true);
+            t.setPriority(Thread.MIN_PRIORITY + 1);
+            return t;
+        });
+
+    /** Process-wide Bitmap memory cache — 1/8th of the heap, like Glide's. */
+    private static final android.util.LruCache<String, android.graphics.Bitmap> IMAGE_CACHE =
+        new android.util.LruCache<String, android.graphics.Bitmap>(
+            (int) (Runtime.getRuntime().maxMemory() / 1024 / 8)) {
+            @Override
+            protected int sizeOf(String key, android.graphics.Bitmap value) {
+                return value.getByteCount() / 1024;
+            }
+        };
+
     private ImageView createImageView(JSONObject json) {
         ImageView iv = new ImageView(activity);
         JSONObject ip = json.optJSONObject("props");
@@ -875,57 +989,151 @@ public class ViewFactory {
         JSONObject s = json.optJSONObject("style");
         iv.setScaleType(scaleType(s != null ? s.optString("fit", "contain") : "contain"));
         iv.setAdjustViewBounds(true);
-        loadImageInto(iv, src);
+        loadImageInto(iv, src, s);
         return iv;
     }
 
     /** Load bitmap and vector sources, preserving the ImageView instance. */
     private void loadImageInto(final ImageView view, final String src) {
+        loadImageInto(view, src, null);
+    }
+
+    private void loadImageInto(final ImageView view, final String src,
+                               final JSONObject style) {
+        // Cancellation token: when a recycled view gets a new src, any older
+        // in-flight load sees the tag changed and drops its result.
+        view.setTag(R.id.pydrud_tag_image, src == null ? "" : src);
         if (src == null || src.isEmpty()) {
             view.setImageDrawable(null);
             return;
         }
-        if (src.startsWith("http://") || src.startsWith("https://")) {
-            new Thread(() -> {
-                java.net.HttpURLConnection connection = null;
-                try {
-                    java.net.URL url = new java.net.URL(src);
-                    connection = (java.net.HttpURLConnection) url.openConnection();
+
+        // Instant cache hit (covers every ListView scroll-back).
+        android.graphics.Bitmap cached = isSvg(src) ? null : IMAGE_CACHE.get(src);
+        if (cached != null) {
+            view.setImageBitmap(cached);
+            return;
+        }
+
+        // Optional placeholders from style: placeholder / error_image.
+        final String placeholder = style != null ? style.optString("placeholder", "") : "";
+        final String errorAsset = style != null ? style.optString("error_image", "") : "";
+        if (!placeholder.isEmpty()) {
+            try {
+                java.io.InputStream ph = activity.getAssets().open(placeholder);
+                view.setImageDrawable(android.graphics.drawable.Drawable.createFromStream(ph, src));
+                ph.close();
+            } catch (Exception ignored) { }
+        }
+
+        final boolean remote = src.startsWith("http://") || src.startsWith("https://");
+        final int maxDim = decodeTarget(view);
+
+        Runnable work = () -> {
+            android.graphics.drawable.Drawable drawable = null;
+            java.net.HttpURLConnection connection = null;
+            try {
+                java.io.InputStream stream;
+                if (remote) {
+                    connection = (java.net.HttpURLConnection)
+                        new java.net.URL(src).openConnection();
                     connection.setConnectTimeout(10000);
                     connection.setReadTimeout(15000);
                     connection.setDoInput(true);
                     connection.connect();
-                    java.io.InputStream stream = connection.getInputStream();
-                    final android.graphics.drawable.Drawable drawable = isSvg(src)
-                        ? svgDrawable(stream)
-                        : new android.graphics.drawable.BitmapDrawable(
-                            activity.getResources(),
-                            android.graphics.BitmapFactory.decodeStream(stream));
-                    stream.close();
-                    if (drawable != null) activity.runOnUiThread(() -> {
-                        view.setImageDrawable(drawable);
-                        if (isSvg(src)) view.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
-                    });
-                } catch (Exception e) {
-                    Log.e(TAG, "Image load failed: " + src, e);
-                } finally {
-                    if (connection != null) connection.disconnect();
+                    stream = connection.getInputStream();
+                } else {
+                    stream = activity.getAssets().open(src);
                 }
-            }, "pydrud-image").start();
-            return;
-        }
-        try {
-            java.io.InputStream stream = activity.getAssets().open(src);
-            if (isSvg(src)) {
-                view.setImageDrawable(svgDrawable(stream));
-                view.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
-            } else {
-                view.setImageBitmap(android.graphics.BitmapFactory.decodeStream(stream));
+                if (isSvg(src)) {
+                    drawable = svgDrawable(stream);
+                    stream.close();
+                } else {
+                    android.graphics.Bitmap bitmap = decodeSampled(readAll(stream), maxDim);
+                    stream.close();
+                    if (bitmap != null) {
+                        IMAGE_CACHE.put(src, bitmap);
+                        drawable = new android.graphics.drawable.BitmapDrawable(
+                            activity.getResources(), bitmap);
+                    }
+                }
+            } catch (Exception e) {
+                if (remote) Log.e(TAG, "Image load failed: " + src, e);
+                else Log.d(TAG, "Asset not found or invalid image: " + src);
+            } finally {
+                if (connection != null) connection.disconnect();
             }
-            stream.close();
-        } catch (Exception e) {
-            Log.d(TAG, "Asset not found or invalid image: " + src);
+
+            final android.graphics.drawable.Drawable result = drawable;
+            activity.runOnUiThread(() -> {
+                // Stale-result guard: view was rebound while we loaded.
+                Object wanted = view.getTag(R.id.pydrud_tag_image);
+                if (!src.equals(wanted)) return;
+                if (result != null) {
+                    view.setImageDrawable(result);
+                    if (isSvg(src)) view.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+                    else fadeIn(view);
+                } else if (!errorAsset.isEmpty()) {
+                    try {
+                        java.io.InputStream er = activity.getAssets().open(errorAsset);
+                        view.setImageDrawable(
+                            android.graphics.drawable.Drawable.createFromStream(er, src));
+                        er.close();
+                    } catch (Exception ignored) { }
+                }
+            });
+        };
+
+        if (remote) {
+            IMAGE_EXECUTOR.execute(work);   // pooled — never a raw Thread
+        } else if (isSvg(src)) {
+            IMAGE_EXECUTOR.execute(work);   // SVGs parse off the UI thread
+        } else {
+            // Small local bitmaps decode fast and must not queue behind
+            // network fetches, but big ones still get downsampled.
+            work.run();
         }
+    }
+
+    /** Fade a freshly-set bitmap in — cheap polish for remote images. */
+    private static void fadeIn(ImageView view) {
+        view.setAlpha(0f);
+        view.animate().alpha(1f).setDuration(180).start();
+    }
+
+    /** Largest decode resolution worth keeping for this view. */
+    private int decodeTarget(ImageView view) {
+        int w = view.getWidth();
+        if (w > 0) return Math.max(1, w * 2);
+        android.util.DisplayMetrics dm = activity.getResources().getDisplayMetrics();
+        return Math.max(dm.widthPixels, 540);
+    }
+
+    private static byte[] readAll(java.io.InputStream in) throws java.io.IOException {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        byte[] buffer = new byte[16 * 1024];
+        int read;
+        while ((read = in.read(buffer)) != -1) out.write(buffer, 0, read);
+        return out.toByteArray();
+    }
+
+    /**
+     * Decode with BitmapFactory downsampling — a 4K photo becomes roughly
+     * screen-sized instead of a 25 MB ARGB_8888 allocation, which is what
+     * used to crash apps with OutOfMemoryError.
+     */
+    private static android.graphics.Bitmap decodeSampled(byte[] data, int maxDim) {
+        android.graphics.BitmapFactory.Options bounds =
+            new android.graphics.BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        android.graphics.BitmapFactory.decodeByteArray(data, 0, data.length, bounds);
+        android.graphics.BitmapFactory.Options opts =
+            new android.graphics.BitmapFactory.Options();
+        int sample = 1;
+        while (bounds.outWidth / (sample * 2) >= maxDim
+                || bounds.outHeight / (sample * 2) >= maxDim) sample *= 2;
+        opts.inSampleSize = sample;
+        return android.graphics.BitmapFactory.decodeByteArray(data, 0, data.length, opts);
     }
 
     private static boolean isSvg(String src) {
@@ -1245,9 +1453,16 @@ public class ViewFactory {
                 et.setOnEditorActionListener((v, actionId, event) -> {
                     if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE
                         || actionId == android.view.inputmethod.EditorInfo.IME_ACTION_GO
-                        || actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEND) {
+                        || actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEND
+                        || actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) {
                         eventDispatcher.dispatch("submit", key,
                             data("value", et.getText().toString()));
+                        // Close the keyboard on submit, consistent with the
+                        // tap-outside dismissal in MainActivity.
+                        android.view.inputmethod.InputMethodManager imm =
+                            (android.view.inputmethod.InputMethodManager)
+                                activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE);
+                        if (imm != null) imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
                         return true;
                     }
                     return false;
@@ -1617,6 +1832,42 @@ public class ViewFactory {
 
     /** Attach a freshly created view to a parent with correct layout params. */
     private void addChild(ViewGroup parent, View child, JSONObject json, int index) {
+        // A RecyclerView-backed (virtualised) ListView owns its rows through
+        // the adapter — RecyclerView.addView would throw and the node tree
+        // is patched *after* this call. Defer a full row rebuild until the
+        // patch has been applied to the node map.
+        if (parent instanceof androidx.recyclerview.widget.RecyclerView
+                && ((androidx.recyclerview.widget.RecyclerView) parent).getAdapter()
+                        instanceof AdvancedViews.ViewAdapter) {
+            final androidx.recyclerview.widget.RecyclerView list =
+                (androidx.recyclerview.widget.RecyclerView) parent;
+            list.post(() -> rebuildListRows(list));
+            return;
+        }
+        // Replacement rows land inside an adapter holder wrapper — swap the
+        // adapter's backing view so the recycled cell never resurrects the
+        // pre-replace view on rebind.
+        ViewGroup grand = parent.getParent() instanceof ViewGroup
+            ? (ViewGroup) parent.getParent() : null;
+        if (grand instanceof androidx.recyclerview.widget.RecyclerView
+                && ((androidx.recyclerview.widget.RecyclerView) grand).getAdapter()
+                        instanceof AdvancedViews.ViewAdapter) {
+            androidx.recyclerview.widget.RecyclerView list =
+                (androidx.recyclerview.widget.RecyclerView) grand;
+            int pos = list.getChildAdapterPosition(parent);
+            if (pos != androidx.recyclerview.widget.RecyclerView.NO_POSITION) {
+                AdvancedViews.ViewAdapter adapter =
+                    (AdvancedViews.ViewAdapter) list.getAdapter();
+                if (pos < adapter.views.size()) {
+                    adapter.views.set(pos, child);
+                    adapter.notifyItemChanged(pos);
+                } else {
+                    adapter.views.add(child);
+                    adapter.notifyItemInserted(adapter.views.size() - 1);
+                }
+                return;
+            }
+        }
         ViewGroup.LayoutParams lp;
         if (parent instanceof LinearLayout) {
             lp = linearParams(json, ((LinearLayout) parent).getOrientation());
@@ -1856,9 +2107,7 @@ public class ViewFactory {
                     int weight = f.optInt("weight", 400);
                     boolean italic = f.optBoolean("italic", false);
                     String family = f.optString("family", "");
-                    tv.setTypeface(family.isEmpty()
-                        ? PydrudTheme.typeface(weight, italic)
-                        : PydrudTheme.typeface(family, weight, italic));
+                    tv.setTypeface(resolveTypeface(family, weight, italic));
                     if (f.has("size") || f.has("weight")) {
                         tv.setLetterSpacing(PydrudTheme.letterSpacingFor(size, weight));
                         tv.setLineSpacing(0f, size >= PydrudTheme.textHeadline
@@ -2170,6 +2419,43 @@ public class ViewFactory {
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
+    /**
+     * Custom fonts: ``font_family="inter"`` (or "fonts/inter.ttf") resolves
+     * to the .ttf/.otf the build copied into assets/fonts/. Misses fall back
+     * to the framework typeface, and results are cached per family.
+     */
+    private static final java.util.Map<String, android.graphics.Typeface> FONT_CACHE =
+        new java.util.HashMap<>();
+
+    private android.graphics.Typeface resolveTypeface(String family, int weight,
+                                                      boolean italic) {
+        if (family == null || family.isEmpty()) {
+            return PydrudTheme.typeface(weight, italic);
+        }
+        String cacheKey = family.toLowerCase(java.util.Locale.US).trim();
+        if (FONT_CACHE.containsKey(cacheKey)) {
+            android.graphics.Typeface cached = FONT_CACHE.get(cacheKey);
+            if (cached != null) return cached;
+        } else {
+            android.graphics.Typeface custom = null;
+            String base = cacheKey.endsWith(".ttf") || cacheKey.endsWith(".otf")
+                ? family : null;
+            String[] candidates = base != null
+                ? new String[]{ family, "fonts/" + family }
+                : new String[]{ "fonts/" + family + ".ttf", "fonts/" + family + ".otf" };
+            for (String path : candidates) {
+                try {
+                    custom = android.graphics.Typeface.createFromAsset(
+                        activity.getAssets(), path);
+                    break;
+                } catch (Exception ignored) { }
+            }
+            FONT_CACHE.put(cacheKey, custom);
+            if (custom != null) return custom;
+        }
+        return PydrudTheme.typeface(family, weight, italic);
+    }
+
     private int dp(int value) {
         return PydrudTheme.dp(value);
     }
@@ -2452,116 +2738,8 @@ public class ViewFactory {
         }
     }
 
-    private int getIconRes(String name) {
-        switch (name) {
-            case "star":     return android.R.drawable.star_on;
-            case "home":     return android.R.drawable.ic_menu_myplaces;
-            case "search":   return android.R.drawable.ic_menu_search;
-            case "settings": return android.R.drawable.ic_menu_preferences;
-            case "info":     return android.R.drawable.ic_menu_info_details;
-            case "edit":     return android.R.drawable.ic_menu_edit;
-            case "delete":   return android.R.drawable.ic_menu_delete;
-            case "add":      return android.R.drawable.ic_menu_add;
-            case "share":    return android.R.drawable.ic_menu_share;
-            case "email":    return android.R.drawable.ic_menu_send;
-            case "call":     return android.R.drawable.ic_menu_call;
-            case "menu":     return android.R.drawable.ic_menu_more;
-            case "close":    return android.R.drawable.ic_menu_close_clear_cancel;
-            case "back":     return android.R.drawable.ic_menu_revert;
-            case "forward":  return android.R.drawable.ic_menu_directions;
-            case "refresh":  return android.R.drawable.ic_menu_rotate;
-            case "save":     return android.R.drawable.ic_menu_save;
-            case "upload":   return android.R.drawable.ic_menu_upload;
-            case "camera":   return android.R.drawable.ic_menu_camera;
-            case "gallery":  return android.R.drawable.ic_menu_gallery;
-            case "lock":     return android.R.drawable.ic_lock_lock;
-            case "person":   return android.R.drawable.ic_menu_myplaces;
-            case "agenda":   return android.R.drawable.ic_menu_agenda;
-            case "sort":     return android.R.drawable.ic_menu_sort_by_size;
-            case "favorite": return android.R.drawable.btn_star_big_on;
-            case "favorite_border": return android.R.drawable.btn_star_big_off;
-            case "bookmark": return android.R.drawable.ic_menu_agenda;
-            case "notifications": return android.R.drawable.ic_popup_reminder;
-            case "check":    case "check_circle": return android.R.drawable.checkbox_on_background;
-            case "cancel":   return android.R.drawable.ic_delete;
-            case "warning":  return android.R.drawable.ic_dialog_alert;
-            case "error":    return android.R.drawable.stat_notify_error;
-            case "download": return android.R.drawable.stat_sys_download;
-            case "folder":   return android.R.drawable.ic_menu_save;
-            case "file":     case "list": return android.R.drawable.ic_menu_agenda;
-            case "image":    return android.R.drawable.ic_menu_gallery;
-            case "video":    return android.R.drawable.ic_media_play;
-            case "music":    return android.R.drawable.ic_media_play;
-            case "mic":      return android.R.drawable.ic_btn_speak_now;
-            case "play":     return android.R.drawable.ic_media_play;
-            case "pause":    return android.R.drawable.ic_media_pause;
-            case "stop":     return android.R.drawable.ic_media_pause;
-            case "skip_next":     return android.R.drawable.ic_media_next;
-            case "skip_previous": return android.R.drawable.ic_media_previous;
-            case "volume":   return android.R.drawable.ic_lock_silent_mode_off;
-            case "location": case "map": return android.R.drawable.ic_menu_mylocation;
-            case "calendar": return android.R.drawable.ic_menu_my_calendar;
-            case "clock":    return android.R.drawable.ic_menu_recent_history;
-            case "filter":   return android.R.drawable.ic_menu_sort_alphabetically;
-            case "more_vert": case "more_horiz": return android.R.drawable.ic_menu_more;
-            case "expand_more":    return android.R.drawable.arrow_down_float;
-            case "expand_less":    return android.R.drawable.arrow_up_float;
-            case "chevron_right":  return android.R.drawable.ic_media_ff;
-            case "chevron_left":   return android.R.drawable.ic_media_rew;
-            case "logout":   case "login": return android.R.drawable.ic_lock_power_off;
-            case "cart":     case "payment": return android.R.drawable.ic_menu_agenda;
-            case "wifi":     return android.R.drawable.stat_sys_download_done;
-            case "bluetooth": return android.R.drawable.stat_sys_data_bluetooth;
-            case "battery":  return android.R.drawable.ic_lock_idle_charging;
-            case "dark_mode": case "light_mode": return android.R.drawable.ic_menu_day;
-            case "visibility": case "visibility_off": return android.R.drawable.ic_menu_view;
-            case "copy":     case "paste": return android.R.drawable.ic_menu_crop;
-            case "link":     return android.R.drawable.ic_menu_set_as;
-            case "send":     case "chat": case "message": return android.R.drawable.ic_menu_send;
-            case "group":    case "account": case "profile": return android.R.drawable.ic_menu_myplaces;
-            case "dashboard": case "grid": case "apps": return android.R.drawable.ic_menu_sort_by_size;
-            case "code": case "terminal": case "api": return android.R.drawable.ic_menu_manage;
-            case "python": case "android": case "server": case "database": return android.R.drawable.ic_menu_manage;
-            case "palette": case "brush": return android.R.drawable.ic_menu_gallery;
-            case "tune": case "layers": return android.R.drawable.ic_menu_preferences;
-            case "rocket": case "flight": return android.R.drawable.ic_menu_upload;
-            case "sparkle": case "lightbulb": return android.R.drawable.ic_menu_day;
-            case "verified": case "shield": case "security": return android.R.drawable.checkbox_on_background;
-            case "key": case "lock_open": return android.R.drawable.ic_lock_lock;
-            case "drag": case "swap": return android.R.drawable.ic_menu_sort_by_size;
-            case "sync": case "history": return android.R.drawable.ic_menu_rotate;
-            case "timer": case "alarm": return android.R.drawable.ic_menu_recent_history;
-            case "flag": case "tag": case "gift": case "trophy": return android.R.drawable.ic_menu_agenda;
-            case "cloud": return android.R.drawable.stat_sys_download_done;
-            case "chart": case "analytics": case "pie_chart": return android.R.drawable.ic_menu_sort_by_size;
-            case "trending_up": case "trending_down": return android.R.drawable.ic_menu_upload;
-            case "thumb_up": case "thumb_down": return android.R.drawable.btn_star_big_on;
-            case "star_border": return android.R.drawable.btn_star_big_off;
-            case "add_circle": case "plus": return android.R.drawable.ic_input_add;
-            case "remove": case "minus": return android.R.drawable.ic_input_delete;
-            case "qr_code": case "qr": case "scan": return android.R.drawable.ic_menu_crop;
-            case "fingerprint": case "wallet": return android.R.drawable.ic_lock_lock;
-            case "open_in_new": return android.R.drawable.ic_menu_view;
-            case "fullscreen": case "zoom_in": case "zoom_out": return android.R.drawable.ic_menu_zoom;
-            case "undo": case "redo": return android.R.drawable.ic_menu_revert;
-            case "archive": case "inbox": return android.R.drawable.ic_menu_save;
-            case "globe": case "language": case "translate": return android.R.drawable.ic_menu_compass;
-            case "phone": return android.R.drawable.ic_menu_call;
-            case "attachment": return android.R.drawable.ic_menu_upload;
-            case "print": case "print_outline": return android.R.drawable.ic_menu_upload;
-            case "location_pin": case "navigation": case "compass": return android.R.drawable.ic_menu_compass;
-            case "heart": return android.R.drawable.btn_star_big_on;
-            case "heart_broken": return android.R.drawable.btn_star_big_off;
-            case "play_circle": return android.R.drawable.ic_media_play;
-            case "pause_circle": return android.R.drawable.ic_media_pause;
-            case "record": return android.R.drawable.presence_busy;
-            case "cast": return android.R.drawable.ic_menu_slideshow;
-            case "home_work": case "school": case "work": case "hotel": return android.R.drawable.ic_menu_myplaces;
-            case "shop": case "restaurant": return android.R.drawable.ic_menu_agenda;
-            case "directions_car": return android.R.drawable.ic_menu_directions;
-            default:         return android.R.drawable.ic_menu_help;
-        }
-    }
+    // Legacy android.R.drawable icon table removed: every icon now
+    // renders through the vector PydrudIcons path (see icon() above).
 
     /** Props object of a node, never null. */
     private JSONObject props(JSONObject json) {
