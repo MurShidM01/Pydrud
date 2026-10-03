@@ -30,7 +30,7 @@ _WIDGET_CLASSES = {
     "Text", "Button", "FilledButton", "TonalButton", "OutlinedButton",
     "TextButton", "ElevatedButton", "IconButton", "TextField",
     "SearchField", "EmailField", "PasswordField", "NumberField",
-    "PhoneField", "UrlField", "Image", "Icon", "Checkbox", "Switch",
+    "PhoneField", "UrlField", "Image", "SvgPicture", "Icon", "Checkbox", "Switch",
     "ProgressBar", "LinearProgress", "Slider", "Dropdown", "Radio",
     "AppBar", "Scaffold", "FloatingActionButton",
     # v1.2 — Material components
@@ -42,7 +42,7 @@ _WIDGET_CLASSES = {
     # v1.2 — gestures, animation and forms
     "GestureDetector", "InkWell", "Dismissible", "Draggable",
     # v1.3 — painting, hardware, maps, rich text, big lists
-    "Canvas", "CameraPreview", "MapView", "RichText", "Markdown",
+    "Canvas", "CameraPreview", "QRScanner", "MapView", "RichText", "Markdown",
     "ReorderableList", "InfiniteList",
     "AnimatedContainer", "AnimatedOpacity", "AnimatedScale",
     "AnimatedRotation", "AnimatedSwitcher", "FadeIn", "SlideIn", "ScaleIn",

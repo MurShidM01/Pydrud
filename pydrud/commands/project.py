@@ -3,8 +3,10 @@ Pydrud project scaffold — generates a complete Android + Python project tree.
 """
 
 from __future__ import annotations
+import io
 import os
 import re
+import tokenize
 import unicodedata
 import shutil
 import sys
@@ -75,6 +77,34 @@ def bundled_runtime_size_kb(bundle_dir: str) -> float:
     return total / 1024
 
 
+def _strip_runtime_comments(bundle_dir: str) -> None:
+    """Remove comments from vendored Python without changing executable code.
+
+    Pydrud deliberately ships readable source in the repository, while an APK
+    benefits from not carrying its many implementation comments. Tokenisation
+    keeps line breaks intact (tracebacks still point at useful source lines)
+    and is safer than a text-based ``#`` replacement inside string literals.
+    """
+    for root, _dirs, files in os.walk(bundle_dir):
+        for filename in files:
+            if not filename.endswith(".py"):
+                continue
+            path = os.path.join(root, filename)
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    source = handle.read()
+                tokens = tokenize.generate_tokens(io.StringIO(source).readline)
+                compact = tokenize.untokenize(
+                    token for token in tokens if token.type != tokenize.COMMENT)
+                with open(path, "w", encoding="utf-8", newline="\n") as handle:
+                    handle.write(compact)
+            except (OSError, tokenize.TokenError):
+                # A source file that cannot be compacted is still safe to
+                # ship verbatim; import correctness is more important than a
+                # few bytes in a generated project.
+                continue
+
+
 def _bundle_pydrud_source(project_dir: str):
     """Copy the Pydrud *runtime* into the generated project's ``src/``.
 
@@ -96,6 +126,7 @@ def _bundle_pydrud_source(project_dir: str):
 
     shutil.copytree(pydrud_src, dst,
                     ignore=shutil.ignore_patterns(*BUNDLE_EXCLUDES))
+    _strip_runtime_comments(dst)
 
     files = sum(len(f) for _, _, f in os.walk(dst))
     size_kb = bundled_runtime_size_kb(dst)

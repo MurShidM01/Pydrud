@@ -207,6 +207,50 @@ public final class PydrudTheme {
 
     private static boolean explicitMode = false;
 
+    /**
+     * Read Android 12+ wallpaper-derived Material You roles. The JSON shape
+     * deliberately matches Python's ``Theme.payload()`` so it can make one
+     * authoritative round trip through the bridge before views are rendered.
+     */
+    public static JSONObject systemColors(Context context) {
+        JSONObject result = new JSONObject();
+        try {
+            if (context == null || Build.VERSION.SDK_INT < 31) {
+                result.put("available", false);
+                return result;
+            }
+            boolean night = (context.getResources().getConfiguration().uiMode
+                & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+            int primaryRole = night ? android.R.color.system_accent1_200
+                                    : android.R.color.system_accent1_600;
+            int secondaryRole = night ? android.R.color.system_accent2_200
+                                      : android.R.color.system_accent2_600;
+            int surfaceRole = night ? android.R.color.system_neutral1_900
+                                    : android.R.color.system_neutral1_10;
+            int variantRole = night ? android.R.color.system_neutral2_800
+                                    : android.R.color.system_neutral2_50;
+            int outlineRole = night ? android.R.color.system_neutral2_600
+                                    : android.R.color.system_neutral2_400;
+            result.put("available", true);
+            result.put("primary", hex(context.getColor(primaryRole)));
+            result.put("secondary", hex(context.getColor(secondaryRole)));
+            result.put("background", hex(context.getColor(surfaceRole)));
+            result.put("surface", hex(context.getColor(surfaceRole)));
+            result.put("surface_variant", hex(context.getColor(variantRole)));
+            result.put("outline", hex(context.getColor(outlineRole)));
+            result.put("on_surface", hex(onColorFor(context.getColor(surfaceRole))));
+            result.put("on_primary", hex(onColorFor(context.getColor(primaryRole))));
+            result.put("dark", night);
+        } catch (Exception ignored) {
+            try { result.put("available", false); } catch (Exception ignoredAgain) { }
+        }
+        return result;
+    }
+
+    private static String hex(int color) {
+        return String.format(java.util.Locale.US, "#%08X", color);
+    }
+
     /** Adopt a palette pushed from Python. Missing roles are derived. */
     public static void apply(JSONObject scheme) {
         if (scheme == null) return;

@@ -297,8 +297,21 @@ class Permissions(_Service):
             f"{sorted(self.ALIASES)} or a full android.permission.* string")
 
     def check(self, name: str) -> Result:
-        """Resolves with True when already granted."""
+        """Resolves with ``True`` when *name* is already granted.
+
+        Prefer :meth:`status` when the distinction between an ordinary denial
+        and a permanent denial matters.
+        """
         return self._invoke("permission_check", permission=self.resolve(name))
+
+    def status(self, name: str) -> Result:
+        """Query permission state without opening a system prompt.
+
+        Resolves with one of ``"granted"``, ``"denied"`` or
+        ``"permanently_denied"``. Android only exposes permanent denial after
+        an earlier request, which Pydrud records for the app automatically.
+        """
+        return self._invoke("permission_status", permission=self.resolve(name))
 
     def request(self, *names: str) -> Result:
         """Ask the user. Resolves with ``{permission: granted}``."""

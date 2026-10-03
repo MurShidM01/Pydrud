@@ -422,17 +422,55 @@ class Theme:
             cls.dark_mode = dark_mode
 
     @classmethod
+    def system(cls) -> None:
+        """Use Android 12+ wallpaper-derived Material You colours.
+
+        The actual palette lives on the device, so this marks the next
+        connected :class:`~pydrud.App` theme push for a native query. On older
+        Android versions the current Python palette remains the graceful
+        fallback. Call ``app.apply_theme()`` when switching after startup.
+        """
+        cls._system_requested = True
+
+    @classmethod
+    def _uses_system(cls) -> bool:
+        return bool(getattr(cls, "_system_requested", False))
+
+    @classmethod
+    def _apply_system_palette(cls, palette: dict) -> bool:
+        """Adopt a palette returned by the Android Material You service."""
+        if not isinstance(palette, dict) or not palette.get("available"):
+            return False
+        roles = {
+            "primary": "primary", "secondary": "secondary",
+            "background": "background", "surface": "surface",
+            "on_surface": "text", "surface_variant": "surface_variant",
+            "outline": "outline", "on_primary": "on_primary",
+        }
+        for native_name, python_name in roles.items():
+            value = palette.get(native_name)
+            if isinstance(value, str) and value:
+                setattr(cls, python_name, value)
+        cls.dark_mode = bool(palette.get("dark", cls.dark_mode))
+        # The system palette is complete enough that it should take precedence
+        # over a stale generated seed scheme in payload().
+        cls.scheme = None
+        return True
+
+    @classmethod
     def dark(cls) -> None:
         """Switch to a sensible dark palette derived from the current seed.
 
         The primary colour is lifted so it keeps its contrast on a dark
         surface — the same correction Material You applies.
         """
+        cls._system_requested = False
         cls.use(ColorScheme.from_seed(cls._seed(), dark=True))
 
     @classmethod
     def light(cls) -> None:
         """Switch back to the light palette for the current seed."""
+        cls._system_requested = False
         cls.use(ColorScheme.from_seed(cls._seed(), dark=False))
 
     @classmethod
@@ -444,6 +482,7 @@ class Theme:
             Theme.seed(Colors.TEAL)          # light palette
             Theme.dark()                     # same brand, dark surfaces
         """
+        cls._system_requested = False
         cls._seed_color = color
         cls.use(ColorScheme.from_seed(color, dark=cls.dark_mode))
 

@@ -9,7 +9,7 @@ from pydrud.widgets.layout import (
 from pydrud.widgets.basic import (
     Text, Button, FilledButton, TonalButton, OutlinedButton, TextButton,
     ElevatedButton, IconButton, TextField, SearchField, EmailField,
-    PasswordField, NumberField, PhoneField, UrlField, Image, Icon, Checkbox,
+    PasswordField, NumberField, PhoneField, UrlField, Image, SvgPicture, Icon, Checkbox,
     Switch, ProgressBar, LinearProgress, Slider, Dropdown, Radio,
 )
 from pydrud.widgets.theme import (Colors, Icons, Theme, ColorScheme, Typography,
@@ -34,8 +34,8 @@ from pydrud.widgets.forms import (
 )
 from pydrud.widgets.canvas import Canvas, Paint, Path, radial_point
 from pydrud.widgets.advanced import (
-    CameraPreview, InfiniteList, MapView, Markdown, Marker, ReorderableList,
-    RichText, Span,
+    CameraPreview, QRScanner, InfiniteList, MapView, Markdown, Marker,
+    ReorderableList, RichText, Span,
 )
 from pydrud.widgets.app_bar import AppBar
 from pydrud.widgets.scaffold import Scaffold
@@ -88,6 +88,7 @@ __all__ = [
     "PhoneField",
     "UrlField",
     "Image",
+    "SvgPicture",
     "Icon",
     "Checkbox",
     "Switch",
@@ -185,6 +186,7 @@ __all__ = [
     "Path",
     "radial_point",
     "CameraPreview",
+    "QRScanner",
     "MapView",
     "Marker",
     "RichText",

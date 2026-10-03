@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 
 from pydrud.utils.colors import fail, warn
 from pydrud.utils import tui
@@ -33,14 +34,22 @@ def run_doctor():
     all_ok &= _check_java()
     # 3. Android SDK
     all_ok &= _check_android_sdk()
-    # 4. Gradle
+    # 4. Android-native build pieces.
+    all_ok &= _check_ndk()
+    all_ok &= _check_cmake()
+    # 5. Gradle / device bridge.
     all_ok &= _check_gradle()
-    # 5. ADB
     all_ok &= _check_adb()
-    # 6. Jinja2
+    # 6. Python packages used to generate the project.
     all_ok &= _check_package("jinja2", "Jinja2")
-    # 7. Click
     all_ok &= _check_package("click", "click")
+    # 7. A generated project receives consistency checks as well. These catch
+    # the manifest mismatch before a camera/file-picker call does at runtime.
+    project = _find_project(os.getcwd())
+    if project:
+        print(tui.render_section("Project"))
+        all_ok &= _check_chaquopy(project)
+        all_ok &= _check_manifest_permissions(project)
 
     print(tui.render_summary(
         "Environment is ready" if all_ok else "Environment needs attention",
@@ -113,6 +122,99 @@ def _check_android_sdk() -> bool:
     latest = versions[-1] if versions else "none"
     _print_check("Android SDK", f"{sdk} (API {latest})", True)
     return True
+
+
+def _android_sdk_dir() -> str:
+    """Return the configured SDK directory, or an empty string."""
+    sdk = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or ""
+    if sdk and os.path.isdir(sdk):
+        return sdk
+    candidates = ([os.path.expanduser("~\\AppData\\Local\\Android\\Sdk"), "C:\\Android\\Sdk"]
+                  if sys.platform == "win32" else
+                  ([os.path.expanduser("~/Library/Android/sdk"), os.path.expanduser("~/Android/Sdk")]
+                   if sys.platform == "darwin" else
+                   ["/root/android-sdk", os.path.expanduser("~/Android/Sdk")]))
+    return next((path for path in candidates if os.path.isdir(path)), "")
+
+
+def _check_ndk() -> bool:
+    sdk = _android_sdk_dir()
+    roots = [] if not sdk else [os.path.join(sdk, "ndk"), os.path.join(sdk, "ndk-bundle")]
+    versions = []
+    for root in roots:
+        if os.path.basename(root) == "ndk-bundle" and os.path.isdir(root):
+            versions.append("ndk-bundle")
+        elif os.path.isdir(root):
+            versions.extend(sorted(name for name in os.listdir(root)
+                                   if os.path.isdir(os.path.join(root, name))))
+    ok_ = bool(versions)
+    _print_check("Android NDK", ", ".join(versions[-2:]) if versions else "not found", ok_)
+    return ok_
+
+
+def _check_cmake() -> bool:
+    cmake = shutil.which("cmake")
+    if not cmake:
+        _print_check("CMake", "not found", False)
+        return False
+    result = subprocess.run([cmake, "--version"], capture_output=True, text=True)
+    version = (result.stdout or result.stderr).splitlines()[0] if result.returncode == 0 else "unavailable"
+    _print_check("CMake", version, result.returncode == 0)
+    return result.returncode == 0
+
+
+def _find_project(start: str) -> str | None:
+    current = os.path.abspath(start)
+    while True:
+        if os.path.isfile(os.path.join(current, "pydrud.yaml")):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+
+
+def _check_chaquopy(project_dir: str) -> bool:
+    gradle = os.path.join(project_dir, "android", "app", "build.gradle.kts")
+    try:
+        with open(gradle, encoding="utf-8") as handle:
+            configured = "com.chaquo.python" in handle.read()
+    except OSError:
+        configured = False
+    _print_check("Chaquopy", "configured" if configured else "missing from Android Gradle", configured)
+    return configured
+
+
+def _check_manifest_permissions(project_dir: str) -> bool:
+    """Compare the YAML source of truth with generated manifest declarations."""
+    try:
+        from pydrud.commands.project_config import load_project_config
+        from pydrud.commands.release import (CAPABILITY_PERMISSIONS,
+                                             resolve_capability, resolve_permission)
+        config = load_project_config(project_dir)
+        configured = config.get("permissions", [])
+        if not isinstance(configured, list):
+            configured = [item.strip() for item in str(configured).split(",") if item.strip()]
+        expected = {resolve_permission(name) for name in configured}
+        capabilities = config.get("capabilities", [])
+        if not isinstance(capabilities, list):
+            capabilities = [item.strip() for item in str(capabilities).split(",") if item.strip()]
+        for capability in capabilities:
+            expected.update(CAPABILITY_PERMISSIONS[resolve_capability(capability)])
+        manifest = os.path.join(project_dir, "android", "app", "src", "main",
+                                "AndroidManifest.xml")
+        root = ET.parse(manifest).getroot()
+        attr = "{http://schemas.android.com/apk/res/android}name"
+        declared = {node.get(attr, "").rsplit(".", 1)[-1]
+                    for node in root.findall("uses-permission")}
+        missing = sorted(expected - declared)
+        ok_ = not missing
+        detail = "YAML and manifest agree" if ok_ else "missing: " + ", ".join(missing)
+        _print_check("Manifest permissions", detail, ok_)
+        return ok_
+    except Exception as exc:
+        _print_check("Manifest permissions", f"could not verify ({exc})", False)
+        return False
 
 
 def _check_gradle() -> bool:

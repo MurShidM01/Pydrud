@@ -79,7 +79,9 @@ public class NativeServices {
                 case "open_url":         openUrl(requestId, msg); return true;
                 case "open_app_settings": openAppSettings(requestId); return true;
                 case "permission_check": permissionCheck(requestId, msg); return true;
+                case "permission_status": permissionStatus(requestId, msg); return true;
                 case "permission_request": permissionRequest(requestId, msg); return true;
+                case "system_colors":    systemColors(requestId); return true;
                 case "pick_file":        pickFile(requestId, msg); return true;
                 case "pick_image":       pickImage(requestId, msg); return true;
                 case "save_file":        saveFile(requestId, msg); return true;
@@ -419,6 +421,25 @@ public class NativeServices {
         reply(requestId, granted);
     }
 
+    /** Query without prompting: granted, denied, or permanently_denied. */
+    private void permissionStatus(String requestId, JSONObject msg) {
+        String permission = msg.optString("permission", "");
+        String status = "denied";
+        if (isEffectivelyGranted(permission)) {
+            status = "granted";
+        } else if (wasPermissionRequested(permission)
+                && !androidx.core.app.ActivityCompat
+                    .shouldShowRequestPermissionRationale(activity, permission)) {
+            status = "permanently_denied";
+        }
+        reply(requestId, status);
+    }
+
+    /** Material You colours are available only on Android 12 / API 31+. */
+    private void systemColors(String requestId) {
+        reply(requestId, PydrudTheme.systemColors(activity));
+    }
+
     private void permissionRequest(String requestId, JSONObject msg) {
         JSONArray array = msg.optJSONArray("permissions");
         String[] permissions = toStringArray(array);
@@ -462,6 +483,18 @@ public class NativeServices {
         pendingPermissionValue.put(code, already);
         ActivityCompat.requestPermissions(activity,
             runtime.toArray(new String[0]), code);
+    }
+
+    private boolean wasPermissionRequested(String permission) {
+        if (permission == null || permission.isEmpty()) return false;
+        return activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean("permission_requested:" + permission, false);
+    }
+
+    private void markPermissionRequested(String permission) {
+        if (permission == null || permission.isEmpty()) return;
+        activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean("permission_requested:" + permission, true).apply();
     }
 
     private boolean isEffectivelyGranted(String permission) {
@@ -520,6 +553,7 @@ public class NativeServices {
         if (value == null) value = new JSONObject();
         try {
             for (int i = 0; i < permissions.length; i++) {
+                markPermissionRequested(permissions[i]);
                 value.put(permissions[i],
                     i < results.length && results[i] == PackageManager.PERMISSION_GRANTED);
             }

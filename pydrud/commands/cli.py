@@ -609,7 +609,13 @@ def capabilities_add(names):
     _show_header("capabilities add", "Enable Android capabilities",
                  "Updating pydrud.yaml and generated manifest permissions",
                  details=(("Project", os.path.basename(root)),))
-    added = update_capabilities(root, add=list(names))
+    try:
+        added = update_capabilities(root, add=list(names))
+    except ValueError as exc:
+        # Click turns this into a compact, user-facing error rather than a
+        # raw Python traceback. In particular it explains the frequent
+        # camera-vs-capability mix-up with the exact replacement command.
+        raise click.UsageError(str(exc)) from exc
     for name in added:
         click.echo(tui.add_badge(name))
     if not added:
@@ -630,7 +636,10 @@ def capabilities_remove(names):
     _show_header("capabilities remove", "Disable Android capabilities",
                  "Updating pydrud.yaml and generated manifest permissions",
                  details=(("Project", os.path.basename(root)),))
-    removed = update_capabilities(root, remove=list(names))
+    try:
+        removed = update_capabilities(root, remove=list(names))
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
     for name in removed:
         click.echo(tui.remove_badge(name))
     if not removed:
