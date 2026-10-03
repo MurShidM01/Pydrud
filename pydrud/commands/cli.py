@@ -189,6 +189,47 @@ def clean(device):
 
 
 @main.command()
+@click.argument("project_dir", default=".", type=click.Path(exists=True, file_okay=False))
+@click.option(
+    "--host", default="0.0.0.0", show_default=True,
+    help="Interface to bind. The default exposes preview on the local network.",
+)
+@click.option(
+    "--port", default=8597, show_default=True,
+    type=click.IntRange(1, 65535), help="Preview server TCP port.",
+)
+@click.option(
+    "--connect-host", default=None, metavar="HOST",
+    help="Address encoded in the QR code (useful for VPNs or multiple NICs).",
+)
+@click.option("--no-qr", is_flag=True, help="Print the connection URI without a QR code.")
+def dev(project_dir, host, port, connect_host, no_qr):
+    """Run project Python locally for a Pydash live UI preview."""
+    requested = os.path.abspath(project_dir)
+    root = requested
+    while not os.path.isfile(os.path.join(root, "pydrud.yaml")):
+        parent = os.path.dirname(root)
+        if parent == root:
+            raise click.ClickException(
+                f"Not a Pydrud project: {requested} (pydrud.yaml not found)")
+        root = parent
+    from pydrud.commands.preview import PreviewRunner
+
+    try:
+        PreviewRunner(
+            root,
+            host=host,
+            port=port,
+            connect_host=connect_host,
+            show_qr=not no_qr,
+        ).run()
+    except click.ClickException:
+        raise
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(f"Could not start preview server: {exc}") from exc
+
+
+@main.command()
 @click.option("--device", default=None, help="Target device ID (adb).")
 @click.option("--release", is_flag=True, default=False, help="Build in release mode.")
 @click.option("--no-interactive", is_flag=True, default=False, help="Disable interactive terminal shortcuts.")

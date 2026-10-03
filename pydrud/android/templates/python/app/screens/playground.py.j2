@@ -17,13 +17,14 @@ Tap anything — every control answers back.
 from pydrud import (
     AppBar, Button, Card, Checkbox, Chip, Colors, Column, Container, Divider,
     Elevation, Icon, Icons, ListTile, ProgressBar, Radius, ResponsiveGrid,
-    Row, Scaffold, SizedBox, Slider, Spacing, Switch, Text, TextField, Theme,
+    Row, Scaffold, SizedBox, Slider, Spacing, SwitchListTile, Text, TextField,
+    Theme,
 )
 
 from app.config import APP_NAME, APP_TAGLINE
 from app.runtime import refresh, router
 from app.state import amount, counter, dark_mode, liked, your_name
-from app.ui import demo_button, page_body, section
+from app.components import demo_button, page_body, section
 
 
 def playground_screen(page):
@@ -108,7 +109,9 @@ def native_card(page):
                                       else "Dialog closed"))
 
     def buzz(_event):
-        page.haptics.impact("medium") \
+        # Use an unmistakable device-tuned effect for the demo button. Smaller
+        # selection ticks remain available for routine UI feedback.
+        page.haptics.impact("heavy") \
             .then(lambda _ok: page.toast("Bzzt — did you feel that?")) \
             .catch(lambda error: page.toast(
                 "Haptics need the haptics capability" if "VIBRATE" in error
@@ -206,8 +209,10 @@ def components_card(page):
                  color=Theme.primary if your_name.value.strip()
                  else Theme.text_secondary),
             Divider(key="components_div1"),
-            Switch("Dark mode", key="dark_switch", active=dark_mode.value)
-            .on_change(toggle_dark),
+            SwitchListTile(
+                "Dark mode", key="dark_mode_tile", control_key="dark_switch",
+                value=dark_mode.value, on_change=toggle_dark,
+            ),
             Checkbox("I'm enjoying this playground", key="like_box",
                      checked=liked.value).on_change(set_liked),
             Divider(key="components_div2"),

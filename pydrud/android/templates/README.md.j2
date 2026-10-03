@@ -12,10 +12,14 @@ launches. Open `src/app/screens/playground.py` and start editing.
 ## Run it
 
 ```bash
+pydrud dev              # host Python + LAN live-preview QR (requires a Pydash client)
 pydrud run              # build, install, launch with Flutter-style Hot Reload (r/R)
 python run.py           # headless: build the widget tree on your computer
 pydrud test             # run the tests in tests/
 ```
+
+`pydrud dev` and `pydrud run` are separate workflows: preview never builds an
+APK, while `run` uses the generated Android app and embedded Python runtime.
 
 ## Project layout
 
@@ -35,7 +39,9 @@ pydrud test             # run the tests in tests/
         ├── state.py        the State objects every screen shares
         ├── runtime.py      the router and the live App handle (`refresh()`)
         ├── jobs.py         background work (WorkManager)
-        ├── ui.py           small reusable helpers (sections, demo buttons)
+        ├── ui.py           compatibility imports for older generated apps
+        ├── components/     reusable UI shared by multiple screens
+        │   └── common.py   sections, demo buttons and page layout
         └── screens/        one module per screen
             ├── playground.py   the Pydrud Native Playground
             └── details.py      the pushed screen (navigation demo)
@@ -68,6 +74,7 @@ status badges, summaries and next-step hints.
 
 | Command | What it does |
 | --- | --- |
+| `pydrud dev` | run Python locally and wait for an authenticated Pydash preview client |
 | `pydrud sync` | apply `pydrud.yaml` and regenerate managed Android files |
 | `pydrud analyze` | static checks on your Python UI code |
 | `pydrud pip add requests` | bundle a Python package into the APK |

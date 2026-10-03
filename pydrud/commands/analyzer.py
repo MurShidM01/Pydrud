@@ -50,6 +50,16 @@ _WIDGET_CLASSES = {
     # v1.5 — responsive layout
     "ResponsiveBuilder", "AdaptiveLayout", "ResponsiveGrid", "ShowWhen",
     "SafeArea", "NavigationBar", "TabBar",
+    # Flutter-style presets and common app compositions
+    "Expanded", "Flexible", "Align", "ColoredBox", "DecoratedBox",
+    "ConstrainedBox", "LimitedBox", "Gap", "VerticalDivider",
+    "SingleChildScrollView", "Wrap", "ButtonBar", "Heading", "Title",
+    "Subtitle", "Label", "Caption", "Link", "NetworkImage", "AssetImage",
+    "CircleImage", "Placeholder", "SwitchListTile", "CheckboxListTile",
+    "RadioListTile", "ActionChip", "ChoiceChip", "CircleAvatar",
+    "BackButton", "CloseButton", "MenuButton", "SectionHeader",
+    "EmptyState", "ErrorState", "LoadingState", "InfoCard", "StatCard",
+    "SettingsTile", "NavigationTile", "FormSection",
 }
 
 # Style property keys known to be valid.
@@ -72,7 +82,7 @@ _VALID_STYLE_KEYS = {
     "safeAreaTop", "safeAreaBottom", "breakpoint",
     # read by the native renderer (ViewFactory / MaterialViews)
     "gradient", "feedback", "role", "pill", "accent", "size",
-    "minItemWidth", "tabletColumns",
+    "minItemWidth", "maxColumns", "tabletColumns",
 }
 
 

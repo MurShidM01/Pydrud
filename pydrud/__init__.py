@@ -6,7 +6,7 @@ Python widget tree into native Android Views at runtime. No XML layouts,
 no Kotlin UI code — just Python.
 """
 
-__version__ = "2.0.1"
+__version__ = "2.0.2"
 __app_name__ = "Pydrud"
 
 from pydrud.runtime.app import App
@@ -146,6 +146,13 @@ from pydrud.widgets import (
     Canvas, Paint, Path, radial_point,
     CameraPreview, MapView, Marker, RichText, Span, Markdown,
     ReorderableList, InfiniteList,
+    Expanded, Flexible, Align, ColoredBox, DecoratedBox, ConstrainedBox,
+    LimitedBox, Gap, VerticalDivider, SingleChildScrollView, Wrap, ButtonBar,
+    Heading, Title, Subtitle, Label, Caption, Link, NetworkImage, AssetImage,
+    CircleImage, Placeholder, SwitchListTile, CheckboxListTile, RadioListTile,
+    ActionChip, ChoiceChip, CircleAvatar, BackButton, CloseButton, MenuButton,
+    SectionHeader, EmptyState, ErrorState, LoadingState, InfoCard, StatCard,
+    SettingsTile, NavigationTile, FormSection,
 )
 
 __all__ = [
@@ -307,6 +314,47 @@ __all__ = [
     "Markdown",
     "ReorderableList",
     "InfiniteList",
+    # Flutter-style presets and common compositions
+    "Expanded",
+    "Flexible",
+    "Align",
+    "ColoredBox",
+    "DecoratedBox",
+    "ConstrainedBox",
+    "LimitedBox",
+    "Gap",
+    "VerticalDivider",
+    "SingleChildScrollView",
+    "Wrap",
+    "ButtonBar",
+    "Heading",
+    "Title",
+    "Subtitle",
+    "Label",
+    "Caption",
+    "Link",
+    "NetworkImage",
+    "AssetImage",
+    "CircleImage",
+    "Placeholder",
+    "SwitchListTile",
+    "CheckboxListTile",
+    "RadioListTile",
+    "ActionChip",
+    "ChoiceChip",
+    "CircleAvatar",
+    "BackButton",
+    "CloseButton",
+    "MenuButton",
+    "SectionHeader",
+    "EmptyState",
+    "ErrorState",
+    "LoadingState",
+    "InfoCard",
+    "StatCard",
+    "SettingsTile",
+    "NavigationTile",
+    "FormSection",
     # v1.3 — data layer
     "Database",
     "Model",

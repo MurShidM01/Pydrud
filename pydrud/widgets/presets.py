@@ -1,0 +1,498 @@
+"""Flutter-style convenience widgets built from Pydrud's native primitives.
+
+These classes deliberately reuse renderer-backed widget types rather than
+inventing one-off protocol nodes.  For example, :class:`Expanded` serialises
+as a ``Container`` with a flex value and :class:`SwitchListTile` serialises as
+a native ``ListTile`` containing a native ``Switch``.  They are therefore
+fully compatible with diffing, testing, theming and older Android runtimes.
+"""
+
+from __future__ import annotations
+
+from typing import Callable, Optional, Union
+
+from pydrud.widgets.base import Widget
+from pydrud.widgets.basic import (
+    Button, Checkbox, Icon, IconButton, Image, Radio, Switch, Text,
+)
+from pydrud.widgets.layout import (
+    Card, Column, Container, Divider, GridView, ListView, Row, SizedBox,
+)
+from pydrud.widgets.material import (
+    AssistChip, Avatar, CircularProgress, FilterChip, ListTile,
+)
+from pydrud.widgets.styling import Border, EdgeInsets
+from pydrud.widgets.theme import Colors, Icons, Theme
+from pydrud.widgets.tokens import Tokens
+
+Size = Union[float, int, str]
+
+
+# ── Layout ──────────────────────────────────────────────────────────────────
+
+
+class Expanded(Container):
+    """Make ``child`` consume the remaining space on a Row or Column axis."""
+
+    def __init__(self, child: Optional[Widget] = None, *, flex: int = 1,
+                 **kwargs):
+        if flex < 1:
+            raise ValueError("Expanded flex must be at least 1")
+        super().__init__(child=child, expand=int(flex), **kwargs)
+
+
+class Flexible(Container):
+    """A flex child which may use the remaining Row/Column space."""
+
+    def __init__(self, child: Optional[Widget] = None, *, flex: int = 1,
+                 **kwargs):
+        if flex < 1:
+            raise ValueError("Flexible flex must be at least 1")
+        super().__init__(child=child, expand=int(flex), **kwargs)
+
+
+class Align(Container):
+    """Place a child at a named :class:`~pydrud.Alignment` position."""
+
+    def __init__(self, child: Optional[Widget] = None, *,
+                 alignment: str = "center", **kwargs):
+        super().__init__(child=child, alignment=alignment, **kwargs)
+
+
+class ColoredBox(Container):
+    """A lightweight box filled with ``color``."""
+
+    def __init__(self, color: str, *, child: Optional[Widget] = None,
+                 **kwargs):
+        super().__init__(child=child, bg=color, **kwargs)
+
+
+class DecoratedBox(Container):
+    """A box with colour, border, radius and optional elevation."""
+
+    def __init__(self, *, child: Optional[Widget] = None,
+                 color: Optional[str] = None,
+                 border: Optional[Union[Border, dict]] = None,
+                 border_radius: Optional[float] = None,
+                 elevation: Optional[float] = None, **kwargs):
+        style = dict(kwargs.pop("style", {}) or {})
+        if elevation is not None:
+            style["elevation"] = float(elevation)
+        super().__init__(child=child, bg=color, border=border,
+                         border_radius=border_radius, style=style, **kwargs)
+
+
+class ConstrainedBox(Container):
+    """Apply minimum and maximum dimensions to a child."""
+
+    def __init__(self, child: Optional[Widget] = None, *,
+                 min_width: Optional[Size] = None,
+                 max_width: Optional[Size] = None,
+                 min_height: Optional[Size] = None,
+                 max_height: Optional[Size] = None, **kwargs):
+        style = dict(kwargs.pop("style", {}) or {})
+        for name, value in (("minWidth", min_width), ("maxWidth", max_width),
+                            ("minHeight", min_height),
+                            ("maxHeight", max_height)):
+            if value is not None:
+                style[name] = value
+        super().__init__(child=child, style=style, **kwargs)
+
+
+class LimitedBox(ConstrainedBox):
+    """Convenience max-width/max-height constraint."""
+
+    def __init__(self, child: Optional[Widget] = None, *,
+                 max_width: Optional[Size] = None,
+                 max_height: Optional[Size] = None, **kwargs):
+        super().__init__(child, max_width=max_width, max_height=max_height,
+                         **kwargs)
+
+
+class Gap(SizedBox):
+    """A fixed horizontal, vertical or square layout gap."""
+
+    def __init__(self, size: float = 0, *, axis: str = "vertical", **kwargs):
+        if axis not in ("horizontal", "vertical", "both"):
+            raise ValueError("Gap axis must be horizontal, vertical or both")
+        super().__init__(width=size if axis != "vertical" else 0,
+                         height=size if axis != "horizontal" else 0, **kwargs)
+
+
+class VerticalDivider(Divider):
+    """A vertical hairline for use inside a Row."""
+
+    def __init__(self, *, color: Optional[str] = None,
+                 thickness: Optional[float] = None,
+                 height: Size = "match", **kwargs):
+        super().__init__(color=color, thickness=thickness, **kwargs)
+        width = self.style.get("thickness", 1)
+        self.style.update({"width": width, "height": height})
+
+
+class SingleChildScrollView(ListView):
+    """A one-child vertical or horizontal native scroll view."""
+
+    def __init__(self, child: Optional[Widget] = None, *,
+                 horizontal: bool = False, **kwargs):
+        super().__init__(children=[child] if child is not None else [],
+                         horizontal=horizontal, **kwargs)
+
+
+class Wrap(GridView):
+    """Responsive wrapping layout backed by Pydrud's auto-column grid."""
+
+    def __init__(self, *, children: Optional[list[Widget]] = None,
+                 min_item_width: float = 120, max_columns: int = 6,
+                 spacing: float = 8, **kwargs):
+        if min_item_width <= 0:
+            raise ValueError("Wrap min_item_width must be positive")
+        super().__init__(children=children, columns=1, spacing=spacing, **kwargs)
+        self.style["columns"] = "auto"
+        self.style["minItemWidth"] = float(min_item_width)
+        self.style["maxColumns"] = max(1, int(max_columns))
+
+
+class ButtonBar(Row):
+    """A trailing-aligned row for dialog/card actions."""
+
+    def __init__(self, *, children: Optional[list[Widget]] = None,
+                 spacing: float = 8, alignment: str = "end", **kwargs):
+        super().__init__(children=children, spacing=spacing,
+                         horizontal_alignment=alignment,
+                         vertical_alignment="center", **kwargs)
+
+
+# ── Typography and images ───────────────────────────────────────────────────
+
+
+class Heading(Text):
+    """Semantic-looking heading preset (levels 1 through 6)."""
+
+    _SIZES = {1: 32, 2: 28, 3: 24, 4: 20, 5: 18, 6: 16}
+
+    def __init__(self, value: str = "", *, level: int = 1, **kwargs):
+        if level not in self._SIZES:
+            raise ValueError("Heading level must be between 1 and 6")
+        kwargs.setdefault("size", self._SIZES[level])
+        kwargs.setdefault("weight", 700 if level <= 3 else 600)
+        kwargs.setdefault("color", Theme.text)
+        super().__init__(value, **kwargs)
+
+
+class Title(Text):
+    """20sp semibold title text."""
+
+    def __init__(self, value: str = "", **kwargs):
+        kwargs.setdefault("size", 20)
+        kwargs.setdefault("weight", 600)
+        kwargs.setdefault("color", Theme.text)
+        super().__init__(value, **kwargs)
+
+
+class Subtitle(Text):
+    """Secondary 15sp supporting text."""
+
+    def __init__(self, value: str = "", **kwargs):
+        kwargs.setdefault("size", 15)
+        kwargs.setdefault("color", Theme.text_secondary)
+        super().__init__(value, **kwargs)
+
+
+class Label(Text):
+    """Compact semibold control/field label."""
+
+    def __init__(self, value: str = "", **kwargs):
+        kwargs.setdefault("size", 13)
+        kwargs.setdefault("weight", 600)
+        kwargs.setdefault("color", Theme.text)
+        super().__init__(value, **kwargs)
+
+
+class Caption(Text):
+    """Small secondary caption text."""
+
+    def __init__(self, value: str = "", **kwargs):
+        kwargs.setdefault("size", 12)
+        kwargs.setdefault("color", Theme.text_secondary)
+        super().__init__(value, **kwargs)
+
+
+class Link(Text):
+    """Clickable text styled with the active theme colour."""
+
+    def __init__(self, value: str = "", *,
+                 on_click: Optional[Callable] = None, **kwargs):
+        kwargs.setdefault("color", Theme.primary)
+        kwargs.setdefault("weight", 600)
+        super().__init__(value, on_click=on_click, **kwargs)
+
+
+class NetworkImage(Image):
+    """An image loaded from an HTTP(S) URL."""
+
+    def __init__(self, url: str, **kwargs):
+        if url and not url.lower().startswith(("http://", "https://")):
+            raise ValueError("NetworkImage expects an http:// or https:// URL")
+        super().__init__(url, **kwargs)
+
+
+class AssetImage(Image):
+    """An image loaded from the generated project's ``assets/`` directory."""
+
+    def __init__(self, asset: str, **kwargs):
+        super().__init__(asset, **kwargs)
+
+
+class CircleImage(Image):
+    """Square image clipped to a circle."""
+
+    def __init__(self, src: str, *, size: float = 48, **kwargs):
+        kwargs.setdefault("fit", "cover")
+        kwargs.setdefault("width", size)
+        kwargs.setdefault("height", size)
+        kwargs.setdefault("border_radius", size / 2)
+        super().__init__(src, **kwargs)
+
+
+class Placeholder(Container):
+    """Themed placeholder for media or content which has not loaded yet."""
+
+    def __init__(self, label: str = "Content", *, icon: str = Icons.IMAGE,
+                 width: Size = "match", height: Size = 120, **kwargs):
+        child = Column(horizontal_alignment="center",
+                       vertical_alignment="center", spacing=8, children=[
+                           Icon(icon, size=28, color=Theme.text_secondary),
+                           Caption(label),
+                       ])
+        style = dict(kwargs.pop("style", {}) or {})
+        style.setdefault("border", Border(Theme.outline, 1).to_dict())
+        super().__init__(child=child, width=width, height=height,
+                         bg=Theme.surface_variant,
+                         border_radius=Tokens.radius_card,
+                         alignment="center", style=style, **kwargs)
+
+
+# ── Material controls ───────────────────────────────────────────────────────
+
+
+class SwitchListTile(ListTile):
+    """List tile with its label on the left and a switch on the far right."""
+
+    def __init__(self, title: str = "", *, value: bool = False,
+                 subtitle: Optional[str] = None,
+                 on_change: Optional[Callable] = None,
+                 control_key: Optional[str] = None, **kwargs):
+        control = Switch("", active=value, key=control_key, full_width=False)
+        if on_change is not None:
+            control.on_change(on_change)
+        super().__init__(title, subtitle=subtitle, trailing=control, **kwargs)
+
+
+class CheckboxListTile(ListTile):
+    """List tile with a trailing native checkbox."""
+
+    def __init__(self, title: str = "", *, value: bool = False,
+                 subtitle: Optional[str] = None,
+                 on_change: Optional[Callable] = None,
+                 control_key: Optional[str] = None, **kwargs):
+        control = Checkbox("", checked=value, key=control_key)
+        if on_change is not None:
+            control.on_change(on_change)
+        super().__init__(title, subtitle=subtitle, trailing=control, **kwargs)
+
+
+class RadioListTile(ListTile):
+    """List tile with a trailing native radio control."""
+
+    def __init__(self, title: str = "", *, value: Optional[str] = None,
+                 group: str = "default", selected: bool = False,
+                 subtitle: Optional[str] = None,
+                 on_change: Optional[Callable] = None,
+                 control_key: Optional[str] = None, **kwargs):
+        control = Radio("", value=value or title, group=group,
+                        selected=selected, key=control_key)
+        if on_change is not None:
+            control.on_change(on_change)
+        super().__init__(title, subtitle=subtitle, trailing=control, **kwargs)
+
+
+class ActionChip(AssistChip):
+    """Flutter-compatible name for an assist/action chip."""
+
+
+class ChoiceChip(FilterChip):
+    """Flutter-compatible name for a single selectable filter chip."""
+
+
+class CircleAvatar(Avatar):
+    """Flutter-compatible name for Pydrud's native circular avatar."""
+
+
+class BackButton(IconButton):
+    """Standard back icon button."""
+
+    def __init__(self, *, on_click: Optional[Callable] = None, **kwargs):
+        super().__init__(Icons.BACK, text="", on_click=on_click, **kwargs)
+
+
+class CloseButton(IconButton):
+    """Standard close icon button."""
+
+    def __init__(self, *, on_click: Optional[Callable] = None, **kwargs):
+        super().__init__(Icons.CLOSE, text="", on_click=on_click, **kwargs)
+
+
+class MenuButton(IconButton):
+    """Standard overflow/menu icon button."""
+
+    def __init__(self, *, on_click: Optional[Callable] = None, **kwargs):
+        super().__init__(Icons.MORE_VERT, text="", on_click=on_click, **kwargs)
+
+
+# ── Common app compositions ─────────────────────────────────────────────────
+
+
+class SectionHeader(Row):
+    """Section title with optional trailing action/widget."""
+
+    def __init__(self, title: str, *, action: Optional[Widget] = None,
+                 **kwargs):
+        children: list[Widget] = [
+            Text(title, size=13, weight=700, color=Theme.text_secondary,
+                 expand=1),
+        ]
+        if action is not None:
+            children.append(action)
+        super().__init__(children=children, vertical_alignment="center",
+                         **kwargs)
+
+
+class EmptyState(Column):
+    """Centered empty-content message with an optional action button."""
+
+    def __init__(self, title: str = "Nothing here yet", *,
+                 message: str = "", icon: str = Icons.INBOX,
+                 action: Optional[str] = None,
+                 on_action: Optional[Callable] = None, **kwargs):
+        children: list[Widget] = [
+            Icon(icon, size=44, color=Theme.text_secondary),
+            Title(title, text_align="center"),
+        ]
+        if message:
+            children.append(Subtitle(message, text_align="center"))
+        if action:
+            children.append(Button(action, variant="tonal",
+                                   on_click=on_action))
+        super().__init__(children=children, spacing=12,
+                         horizontal_alignment="center", **kwargs)
+
+
+class ErrorState(Column):
+    """Centered error message with an optional retry action."""
+
+    def __init__(self, title: str = "Something went wrong", *,
+                 message: str = "", retry_label: Optional[str] = "Try again",
+                 on_retry: Optional[Callable] = None, **kwargs):
+        children: list[Widget] = [
+            Icon(Icons.ERROR, size=44, color=Colors.ERROR),
+            Title(title, text_align="center"),
+        ]
+        if message:
+            children.append(Subtitle(message, text_align="center"))
+        if retry_label:
+            children.append(Button(retry_label, variant="tonal",
+                                   on_click=on_retry))
+        super().__init__(children=children, spacing=12,
+                         horizontal_alignment="center", **kwargs)
+
+
+class LoadingState(Column):
+    """Centered circular progress indicator and status label."""
+
+    def __init__(self, label: str = "Loading…", **kwargs):
+        children: list[Widget] = [CircularProgress()]
+        if label:
+            children.append(Subtitle(label, text_align="center"))
+        super().__init__(children=children, spacing=12,
+                         horizontal_alignment="center", **kwargs)
+
+
+class InfoCard(Card):
+    """Icon, title and body arranged in a themed card."""
+
+    def __init__(self, title: str, body: str = "", *,
+                 icon: str = Icons.INFO, color: Optional[str] = None,
+                 **kwargs):
+        accent = color or Theme.primary
+        content = Row(spacing=12, vertical_alignment="center", children=[
+            Icon(icon, size=24, color=accent),
+            Column(expand=1, spacing=4, children=[
+                Text(title, size=15, weight=600, color=Theme.text),
+                Text(body, size=13, color=Theme.text_secondary),
+            ]),
+        ])
+        super().__init__(child=content, **kwargs)
+
+
+class StatCard(Card):
+    """Compact dashboard metric card."""
+
+    def __init__(self, label: str, value: Union[str, int, float], *,
+                 icon: Optional[str] = None, trend: Optional[str] = None,
+                 **kwargs):
+        children: list[Widget] = []
+        if icon:
+            children.append(Icon(icon, size=22, color=Theme.primary))
+        children.extend([
+            Caption(label),
+            Text(str(value), size=28, weight=700, color=Theme.text),
+        ])
+        if trend:
+            children.append(Text(trend, size=12, weight=600,
+                                 color=Colors.SUCCESS if trend.startswith("+")
+                                 else Theme.text_secondary))
+        super().__init__(child=Column(spacing=6, children=children), **kwargs)
+
+
+class SettingsTile(ListTile):
+    """Settings row with an optional value or trailing control."""
+
+    def __init__(self, title: str, *, value: Optional[str] = None,
+                 leading: Optional[Union[str, Widget]] = Icons.SETTINGS,
+                 trailing: Optional[Widget] = None, **kwargs):
+        if trailing is None and value:
+            trailing = Caption(value)
+        super().__init__(title, leading=leading, trailing=trailing, **kwargs)
+
+
+class NavigationTile(ListTile):
+    """Tappable list row with a standard trailing chevron."""
+
+    def __init__(self, title: str, *,
+                 leading: Optional[Union[str, Widget]] = None, **kwargs):
+        super().__init__(title, leading=leading,
+                         trailing=Icons.CHEVRON_RIGHT, **kwargs)
+
+
+class FormSection(Column):
+    """Labelled vertical group for related form fields."""
+
+    def __init__(self, title: str, *, children: Optional[list[Widget]] = None,
+                 spacing: float = 12, **kwargs):
+        section_children: list[Widget] = [Label(title)]
+        section_children.extend(children or [])
+        super().__init__(children=section_children, spacing=spacing, **kwargs)
+
+
+__all__ = [
+    "Expanded", "Flexible", "Align", "ColoredBox", "DecoratedBox",
+    "ConstrainedBox", "LimitedBox", "Gap", "VerticalDivider",
+    "SingleChildScrollView", "Wrap", "ButtonBar", "Heading", "Title",
+    "Subtitle", "Label", "Caption", "Link", "NetworkImage", "AssetImage",
+    "CircleImage", "Placeholder", "SwitchListTile", "CheckboxListTile",
+    "RadioListTile", "ActionChip", "ChoiceChip", "CircleAvatar",
+    "BackButton", "CloseButton", "MenuButton", "SectionHeader",
+    "EmptyState", "ErrorState", "LoadingState", "InfoCard", "StatCard",
+    "SettingsTile", "NavigationTile", "FormSection",
+]

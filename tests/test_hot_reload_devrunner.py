@@ -9,6 +9,7 @@ import os
 import socket
 import tempfile
 import unittest
+from unittest import mock
 
 from pydrud import App, State, Text
 from pydrud.core.devserver import DevServer
@@ -227,6 +228,33 @@ class TestKeyReaderAndDevRunner(unittest.TestCase):
             self.assertEqual(runner.device, "test-device-123")
             self.assertFalse(runner.interactive)
             self.assertEqual(runner.dev_port, 8596)
+
+    def test_logcat_is_scoped_to_the_app_process(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with open(os.path.join(tmpdir, "pydrud.yaml"), "w") as fp:
+                fp.write("package: com.test.app\n")
+            runner = DevRunner(tmpdir, device="serial", interactive=False)
+            runner.package_name = "com.test.app"
+            answer = mock.Mock(returncode=0, stdout="4242\n")
+            with mock.patch("subprocess.run", return_value=answer) as run:
+                command = runner._logcat_command()
+            self.assertIn("--pid=4242", command)
+            self.assertIn("System.err:W", command)
+            self.assertEqual(runner._app_pid, "4242")
+            self.assertIn("pidof", run.call_args.args[0])
+            self.assertIn("com.test.app", run.call_args.args[0])
+
+    def test_logcat_fallback_omits_global_system_error_noise(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with open(os.path.join(tmpdir, "pydrud.yaml"), "w") as fp:
+                fp.write("package: com.test.app\n")
+            runner = DevRunner(tmpdir, interactive=False)
+            answer = mock.Mock(returncode=1, stdout="")
+            with mock.patch("subprocess.run", return_value=answer):
+                command = runner._logcat_command()
+            self.assertFalse(any(part.startswith("--pid=") for part in command))
+            self.assertNotIn("System.err:W", command)
+            self.assertNotIn("AndroidRuntime:E", command)
 
 
 if __name__ == "__main__":

@@ -26,9 +26,9 @@ class Compatibility:
 
 
 COMPATIBILITY = Compatibility(
-    framework_version="2.0.1",
+    framework_version="2.0.2",
     protocol_version=2,
-    android_runtime_version="2.0.1",
+    android_runtime_version="2.0.2",
     agp_version="8.13.2",
     gradle_version="8.14.4",
     chaquopy_version="17.0.0",

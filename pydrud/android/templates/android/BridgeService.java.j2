@@ -182,7 +182,7 @@ public class BridgeService {
         try {
             JSONObject data = collectMetrics();
             data.put("protocol_version", PROTOCOL_VERSION);
-            data.put("renderer_version", "{{ pydrud_runtime_version | default('2.0.1') }}");
+            data.put("renderer_version", "{{ pydrud_runtime_version | default('2.0.2') }}");
             JSONObject capabilities = new JSONObject();
             capabilities.put("transactional_render", true);
             capabilities.put("revisioned_render", true);
@@ -670,11 +670,49 @@ public class BridgeService {
         activity.runOnUiThread(activity::finish);
     }
 
+    /** Return the system's default vibrator on both modern and old Android. */
+    private android.os.Vibrator defaultVibrator() {
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            android.os.VibratorManager manager =
+                (android.os.VibratorManager) activity.getSystemService(
+                    android.content.Context.VIBRATOR_MANAGER_SERVICE);
+            return manager != null ? manager.getDefaultVibrator() : null;
+        }
+        return (android.os.Vibrator) activity.getSystemService(
+            android.content.Context.VIBRATOR_SERVICE);
+    }
+
+    /**
+     * Use a device-tuned haptic when Android provides one.
+     *
+     * A 25 ms DEFAULT_AMPLITUDE pulse is almost imperceptible on several
+     * budget devices. Predefined effects let each vibrator driver choose a
+     * usable duration and amplitude; older devices still get a strong,
+     * explicit one-shot fallback.
+     */
+    private int predefinedHaptic(String style) {
+        switch (style) {
+            case "selection": return android.os.VibrationEffect.EFFECT_TICK;
+            case "heavy":
+            case "error":     return android.os.VibrationEffect.EFFECT_HEAVY_CLICK;
+            case "success":
+            case "warning":   return android.os.VibrationEffect.EFFECT_DOUBLE_CLICK;
+            default:           return android.os.VibrationEffect.EFFECT_CLICK;
+        }
+    }
+
+    private int hapticAmplitude(String style) {
+        if ("selection".equals(style) || "light".equals(style)) return 140;
+        if ("medium".equals(style) || "success".equals(style)) return 200;
+        if (style != null && !style.isEmpty()) return 255;
+        return android.os.VibrationEffect.DEFAULT_AMPLITUDE;
+    }
+
     private void handleVibrate(JSONObject json) {
-        final int duration = Math.max(1, json.optInt("duration", 40));
+        final int duration = Math.max(1, Math.min(10_000,
+            json.optInt("duration", 40)));
         try {
-            android.os.Vibrator vibrator =
-                (android.os.Vibrator) activity.getSystemService(android.content.Context.VIBRATOR_SERVICE);
+            android.os.Vibrator vibrator = defaultVibrator();
             if (vibrator == null || !vibrator.hasVibrator()) {
                 replyError(json, "vibrator unavailable on this device");
                 return;
@@ -684,21 +722,44 @@ public class BridgeService {
             if (pattern != null && pattern.length() > 0) {
                 long[] timings = new long[pattern.length()];
                 for (int i = 0; i < pattern.length(); i++) {
-                    timings[i] = Math.max(0, pattern.optLong(i, 0));
+                    timings[i] = Math.max(0, Math.min(10_000,
+                        pattern.optLong(i, 0)));
                 }
                 int repeat = json.optInt("repeat", -1);
+                if (repeat < -1 || repeat >= timings.length) repeat = -1;
                 if (android.os.Build.VERSION.SDK_INT >= 26) {
-                    vibrator.vibrate(android.os.VibrationEffect
-                        .createWaveform(timings, repeat));
+                    android.os.VibrationEffect effect =
+                        android.os.VibrationEffect.createWaveform(timings, repeat);
+                    android.media.AudioAttributes attributes =
+                        new android.media.AudioAttributes.Builder()
+                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                            .build();
+                    vibrator.vibrate(effect, attributes);
                 } else {
                     vibrator.vibrate(timings, repeat);
                 }
             } else if (android.os.Build.VERSION.SDK_INT >= 26) {
-                vibrator.vibrate(android.os.VibrationEffect.createOneShot(
-                    duration, android.os.VibrationEffect.DEFAULT_AMPLITUDE));
+                String style = json.optString("style", "");
+                android.os.VibrationEffect effect;
+                if (android.os.Build.VERSION.SDK_INT >= 29 && !style.isEmpty()) {
+                    effect = android.os.VibrationEffect.createPredefined(
+                        predefinedHaptic(style));
+                } else {
+                    effect = android.os.VibrationEffect.createOneShot(
+                        duration, hapticAmplitude(style));
+                }
+                android.media.AudioAttributes attributes =
+                    new android.media.AudioAttributes.Builder()
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                        .build();
+                vibrator.vibrate(effect, attributes);
             } else {
                 vibrator.vibrate(duration);
             }
+            Log.i(TAG, "Vibration dispatched (" + duration + " ms, API "
+                + android.os.Build.VERSION.SDK_INT + ")");
             replyOk(json);
         } catch (SecurityException e) {
             Log.d(TAG, "Vibrate unavailable: VIBRATE permission missing");

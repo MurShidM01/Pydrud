@@ -331,14 +331,20 @@ class Builder:
         config = self._load_config(self.root)
 
         # buildPython: an explicit PYDRUD_PYTHON wins, otherwise pick an
-        # interpreter matching the app's Python so Chaquopy can pre-compile
-        # to .pyc instead of warning that the version "is incompatible".
+        # interpreter matching the app's Python. If only a different minor
+        # version is installed, disable source bytecode compilation instead
+        # of letting Chaquopy print an alarming (but harmless) warning.
+        from pydrud.commands.project import (
+            APP_PYTHON_VERSION, _detect_build_python, _python_version_of,
+        )
+        target = config.get("python_version", "") or APP_PYTHON_VERSION
         if not os.environ.get("PYDRUD_PYTHON"):
-            from pydrud.commands.project import (
-                APP_PYTHON_VERSION, _detect_build_python,
-            )
-            target = config.get("python_version", "") or APP_PYTHON_VERSION
             env["PYDRUD_PYTHON"] = _detect_build_python(target)
+        selected_python = env.get("PYDRUD_PYTHON", "")
+        selected_version = _python_version_of(selected_python)
+        env["PYDRUD_COMPILE_PYC"] = (
+            "true" if selected_version == target else "false"
+        )
 
         # NDK version: pydrud.yaml > SDK auto-detection > hardcoded fallback.
         ndk_version = config.get("ndk", "")

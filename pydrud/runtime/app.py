@@ -23,7 +23,7 @@ from pydrud.core.tasks import TaskRunner
 from pydrud.core.diff import TreeDiff
 from pydrud.core.events import EventDispatcher
 from pydrud.core.bridge import BridgeProtocol
-from pydrud.core.protocol import RenderTransaction
+from pydrud.core.protocol import MAX_FRAME_BYTES, RenderTransaction
 from pydrud.core.elements import ElementTree
 from pydrud.widgets import Widget, assign_stable_keys, validate_tree_keys
 
@@ -83,6 +83,7 @@ class App:
         self._inflight: dict[str, RenderTransaction] = {}
         self._inflight_trees: dict[str, Widget] = {}
         self._render_pending = False
+        self._render_pending_force_snapshot = False
         self._native_capabilities: dict = {}
         self._ui_thread_id: Optional[int] = None
         self._bridge = BridgeProtocol()
@@ -179,6 +180,60 @@ class App:
         Useful for tests and for ``pydrud analyze``.
         """
         return self._build_tree()
+
+    def serve_transport(
+        self,
+        transport: socket.socket,
+        *,
+        capabilities: Optional[dict] = None,
+        metrics: Optional[dict] = None,
+        native_revision: int = 0,
+    ) -> None:
+        """Serve one authenticated, connected renderer until it disconnects."""
+        if self._connected:
+            raise RuntimeError("a renderer transport is already connected")
+        # Finish any callback queued just behind the previous disconnect, then
+        # discard that reader's consumed-loop sentinel before reconnect.
+        self._drain_ui_queue()
+        while True:
+            try:
+                self._event_queue.get_nowait()
+            except queue.Empty:
+                break
+
+        self._running = self._connected = True
+        self._shutdown_event.clear()
+        self._transport = transport
+        self._native_capabilities = dict(capabilities or {})
+        self._confirmed_revision = max(0, int(native_revision))
+        self._desired_revision = max(self._desired_revision,
+                                     self._confirmed_revision)
+        self._snapshot = None
+        self._inflight.clear()
+        self._inflight_trees.clear()
+        self._render_pending = self._render_pending_force_snapshot = False
+
+        try:
+            if metrics:
+                self._apply_metrics(dict(metrics))
+            self._desired_tree = self._build_tree()
+            self._send_theme()
+            self._send_desired_tree(force_snapshot=True)
+            self._reader_thread = threading.Thread(
+                target=self._reader_loop, args=(transport,), daemon=True,
+                name="pydrud-preview-reader")
+            self._reader_thread.start()
+            self._event_loop()
+        finally:
+            # Between clients there is no UI actor; watcher callbacks rebuild
+            # directly and the next connection receives that desired tree.
+            self._running = self._connected = False
+            if self._transport is transport:
+                try:
+                    transport.close()
+                except OSError:
+                    pass
+                self._transport = None
 
     def update(self):
         """Rebuild and transact the desired tree.
@@ -797,30 +852,61 @@ class App:
 
     def _on_hot_reload(self, filepath: str) -> None:
         """Called by the file watcher when a source file changes."""
+        # Watchdog invokes callbacks on its own thread. Once a renderer is
+        # attached, serialize module replacement and rebuilding with native
+        # events on the normal UI actor.
+        if (self._ui_thread_id is not None
+                and self._ui_thread_id != threading.get_ident()):
+            self.run_on_ui(self._on_hot_reload, filepath)
+            return
+
         snapshot = self.capture_state() if self._preserve_state else None
         try:
+            # Validate the edited unit before mutating any loaded module. A
+            # syntax error must leave the last good preview tree and handlers
+            # in place while the developer fixes the file.
+            if filepath.endswith(".py") and os.path.isfile(filepath):
+                with open(filepath, "r", encoding="utf-8") as source_file:
+                    source = source_file.read()
+                compile(source, filepath, "exec")
+
             mod_name = _module_name_for(filepath, self._project_root)
             reloaded: dict[str, Any] = {}
 
-            # Reload all loaded user modules so dependent screens/components update
+            # Reload leaf modules before package re-exports, and the entry
+            # module last, so a rebuilt router captures the newest screens.
             user_modules = _find_user_modules(self._project_root)
             if mod_name and mod_name not in user_modules:
                 user_modules.append(mod_name)
+            user_modules.sort(key=lambda name: (
+                name in {"app.main", "main"}, -name.count("."), name,
+            ))
 
-            for name in list(user_modules):
+            reload_failed = False
+            for name in user_modules:
                 if name in sys.modules:
                     try:
                         reloaded[name] = importlib.reload(sys.modules[name])
                     except Exception as err:
                         print(f"[Pydrud] Failed to reload module {name}: {err}")
+                        traceback.print_exc()
+                        reload_failed = True
+                        break
 
-            if mod_name and mod_name in sys.modules and mod_name not in reloaded:
+            if (not reload_failed and mod_name and mod_name in sys.modules
+                    and mod_name not in reloaded):
                 try:
                     reloaded[mod_name] = importlib.reload(sys.modules[mod_name])
                 except Exception as err:
                     print(f"[Pydrud] Failed to reload module {mod_name}: {err}")
+                    traceback.print_exc()
+                    reload_failed = True
 
-            # Re-bind the target if it came from a reloaded module
+            if reload_failed:
+                print("[Pydrud] Keeping the last good preview; waiting for the next edit.")
+                return
+
+            # Re-bind the target if it came from a reloaded module.
             target_name = getattr(self.target, "__name__", None)
             target_mod = getattr(self.target, "__module__", None)
             if target_mod in reloaded:
@@ -836,6 +922,20 @@ class App:
                 if callable(new_main) and (self.target is None or target_name == "main"):
                     self.target = new_main
 
+            # Generated projects keep the router and app binding in
+            # app.runtime. Reloading that module creates a new router, so
+            # attach it before restoring the previous route.
+            runtime_mod = reloaded.get("app.runtime") or sys.modules.get("app.runtime")
+            main_mod = reloaded.get("app.main") or sys.modules.get("app.main")
+            new_router = getattr(main_mod, "router", None)
+            if new_router is None and runtime_mod is not None:
+                new_router = getattr(runtime_mod, "router", None)
+            if new_router is not None and new_router is not self._router:
+                self.attach_router(new_router)
+            bind = getattr(runtime_mod, "bind", None) if runtime_mod else None
+            if callable(bind):
+                bind(self)
+
             if snapshot is not None:
                 self.restore_state(snapshot)
             kept = len(snapshot["states"]) + len(snapshot["stores"]) \
@@ -845,6 +945,8 @@ class App:
             self.update()
         except Exception as exc:
             print(f"[Pydrud] Hot Reload error for {filepath}: {exc}")
+            traceback.print_exc()
+            print("[Pydrud] Keeping the last good preview; waiting for the next edit.")
 
     def hot_restart(self) -> None:
         """Reset all app state and re-render from scratch."""
@@ -935,7 +1037,7 @@ class App:
             except Exception as exc:
                 self._report_error(exc)
             return
-        if not self._running:
+        if not self._running or self._ui_thread_id is None:
             fn(*args, **kwargs)
             return
         try:
@@ -1062,10 +1164,9 @@ class App:
     def _reader_loop(self, sock):
         """Background thread: read NDJSON lines from the socket and enqueue them."""
         buffer = b""
-        #: One event line is a few KB at most; anything past this means the
-        #: stream desynchronised (or is hostile) and must not be buffered
-        #: until the process runs out of memory.
-        max_line = 8 * 1024 * 1024
+        #: Apply the same hard limit as every other protocol decoder so an
+        #: unauthenticated or buggy peer cannot grow this buffer indefinitely.
+        max_line = MAX_FRAME_BYTES
         try:
             while self._running and not self._shutdown_event.is_set():
                 try:
@@ -1079,12 +1180,16 @@ class App:
                 buffer += data
                 if len(buffer) > max_line and b"\n" not in buffer:
                     self._report_error(RuntimeError(
-                        "bridge stream desynchronised: dropped "
-                        f"{len(buffer)} bytes with no line break"))
-                    buffer = b""
-                    continue
+                        "bridge frame exceeds the maximum size of "
+                        f"{max_line} bytes"))
+                    break
                 while b"\n" in buffer:
                     line, buffer = buffer.split(b"\n", 1)
+                    if len(line) + 1 > max_line:
+                        self._report_error(RuntimeError(
+                            "bridge frame exceeds the maximum size of "
+                            f"{max_line} bytes"))
+                        return
                     decoded = line.decode("utf-8", errors="replace").strip()
                     if decoded:
                         self._event_queue.put(decoded)
@@ -1120,6 +1225,7 @@ class App:
                     self._transport.close()
                 except Exception:
                     pass
+            self._transport = None
 
     def _handle_raw_event(self, raw: str) -> None:
         """Decode and route a single NDJSON event line."""
@@ -1282,6 +1388,7 @@ class App:
             payload={"tree": self._desired_tree.to_dict()},
         )
         self._inflight[recovery.tx_id] = recovery
+        self._inflight_trees[recovery.tx_id] = self._desired_tree.clone()
         self._send(self._bridge.encode_transaction(recovery))
 
     def _handle_ready(self, d: dict) -> None:

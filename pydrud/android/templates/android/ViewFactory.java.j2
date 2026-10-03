@@ -631,12 +631,13 @@ public class ViewFactory {
         boolean auto = raw == null
             || (raw instanceof String && "auto".equals(raw))
             || (raw instanceof Number && ((Number) raw).intValue() <= 0);
+        int maxColumns = Math.max(1, Math.min(12, s.optInt("maxColumns", 6)));
         if (auto) {
             int minItem = (int) s.optDouble("minItemWidth", 160);
             if (minItem <= 0) minItem = 160;
-            return Math.max(1, Math.min(6, screen / minItem));
+            return Math.max(1, Math.min(maxColumns, screen / minItem));
         }
-        int columns = Math.max(1, s.optInt("columns", 2));
+        int columns = Math.max(1, Math.min(maxColumns, s.optInt("columns", 2)));
         if (s.has("tabletColumns") && screen >= 600) {
             columns = Math.max(1, s.optInt("tabletColumns", columns));
         } else if (screen >= 840) {
@@ -1756,8 +1757,10 @@ public class ViewFactory {
 
             // Minimum sizes keep rows on the 48dp touch grid even when
             // their content is short.
-            if (s.has("minHeight")) view.setMinimumHeight(dp((float) s.optDouble("minHeight", 0)));
-            if (s.has("minWidth")) view.setMinimumWidth(dp((float) s.optDouble("minWidth", 0)));
+            if (s.has("minHeight")) view.setMinimumHeight(
+                Math.max(0, dimension(s, "minHeight", 0)));
+            if (s.has("minWidth")) view.setMinimumWidth(
+                Math.max(0, dimension(s, "minWidth", 0)));
 
             // Padding
             if (s.has("padding")) {
