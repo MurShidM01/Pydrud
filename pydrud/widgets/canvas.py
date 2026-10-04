@@ -367,6 +367,20 @@ class Canvas(Widget):
                         color=self.bg or Colors.SURFACE, fill=True)
         return self
 
+    # ── draw_* aliases ───────────────────────────────────────────────────
+    draw_line = line
+    draw_rect = rect
+    draw_circle = circle
+    draw_oval = oval
+    draw_arc = arc
+    draw_path = path
+    draw_polygon = polygon
+    draw_text = text
+    draw_image = image
+    draw_grid = grid
+    draw_pie = pie
+    draw_sparkline = sparkline
+
     # ── serialisation ────────────────────────────────────────────────────
 
     def _serialise_props(self) -> dict:

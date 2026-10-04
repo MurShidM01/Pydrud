@@ -126,6 +126,30 @@ class Store(_Observable):
         """A shallow copy — mutating it will not corrupt the store."""
         return dict(self._state)
 
+    @property
+    def _data(self) -> dict:
+        """Compatibility property providing direct access to the store's state dictionary."""
+        return self._state
+
+    @_data.setter
+    def _data(self, value: dict) -> None:
+        if isinstance(value, dict):
+            self.replace(value)
+        else:
+            self._state = value
+
+    @property
+    def data(self) -> dict:
+        """Compatibility property providing direct access to the store's state dictionary."""
+        return self._state
+
+    @data.setter
+    def data(self, value: dict) -> None:
+        if isinstance(value, dict):
+            self.replace(value)
+        else:
+            self._state = value
+
     def get(self, key: str, default: Any = None) -> Any:
         return self._state.get(key, default)
 

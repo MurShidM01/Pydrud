@@ -252,3 +252,39 @@ def throttle(seconds: float):
         return wrapper
 
     return decorator
+
+
+GLOBAL_JOBS: dict[str, Callable] = {}
+
+
+def job(name_or_fn: Any = None) -> Callable:
+    """Decorator registering a background job by name or callable.
+
+    Can be used as ``@job("sync_data")`` or ``@job``.
+
+    Example::
+
+        @job("refresh")
+        def refresh_job(inputs):
+            ...
+
+        @job
+        def daily_sync():
+            ...
+    """
+    if callable(name_or_fn):
+        fn = name_or_fn
+        name = getattr(fn, "__name__", "job")
+        GLOBAL_JOBS[name] = fn
+        return fn
+
+    name = str(name_or_fn) if name_or_fn is not None else None
+
+    def decorator(fn: Callable) -> Callable:
+        if not callable(fn):
+            raise TypeError("background job must be callable")
+        job_name = name or getattr(fn, "__name__", "job")
+        GLOBAL_JOBS[job_name] = fn
+        return fn
+
+    return decorator

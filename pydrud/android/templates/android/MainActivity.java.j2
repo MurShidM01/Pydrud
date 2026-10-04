@@ -121,6 +121,13 @@ public class {{ app_name }}Activity extends AppCompatActivity {
 
         new Thread(() -> {
             try {
+                try {
+                    java.io.File cacheDir = new java.io.File(getFilesDir(), "chaquopy/AssetFinder/app");
+                    if (cacheDir.exists()) {
+                        deleteDir(cacheDir);
+                    }
+                } catch (Throwable ignored) {}
+
                 if (!Python.isStarted()) {
                     Python.start(new AndroidPlatform(this));
                 }
@@ -935,6 +942,19 @@ public class {{ app_name }}Activity extends AppCompatActivity {
                 rootView.startAnimation(anim);
             }
         });
+    }
+
+    private static void deleteDir(java.io.File file) {
+        if (file == null || !file.exists()) return;
+        if (file.isDirectory()) {
+            java.io.File[] children = file.listFiles();
+            if (children != null) {
+                for (java.io.File child : children) {
+                    deleteDir(child);
+                }
+            }
+        }
+        file.delete();
     }
 
     @Override

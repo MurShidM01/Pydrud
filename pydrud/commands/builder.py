@@ -44,6 +44,7 @@ class Builder:
         if not self._validate_environment():
             return None
 
+        self._clean_pycache()
         self._warn_if_stale()
         if not self._preflight_java():
             return None
@@ -160,6 +161,17 @@ class Builder:
         )
         runner.run()
 
+    def _clean_pycache(self) -> int:
+        """Remove Python bytecode caches before building or syncing."""
+        removed = 0
+        for root, dirs, _files in os.walk(self.root):
+            for d in dirs:
+                if d == "__pycache__":
+                    full = os.path.join(root, d)
+                    shutil.rmtree(full, ignore_errors=True)
+                    removed += 1
+        return removed
+
     def clean(self):
         """Clean Gradle build artifacts."""
         print(tui.render_command_header(
@@ -182,13 +194,7 @@ class Builder:
                 print(fail("Gradle clean failed."))
 
         # Also remove Python cache files.
-        removed = 0
-        for root, dirs, _files in os.walk(self.root):
-            for d in dirs:
-                if d == "__pycache__":
-                    full = os.path.join(root, d)
-                    shutil.rmtree(full, ignore_errors=True)
-                    removed += 1
+        removed = self._clean_pycache()
 
         print(tui.render_summary(
             "Project cleaned",
