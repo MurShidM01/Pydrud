@@ -1,5 +1,5 @@
 """
-DevRunner — interactive Flutter-like development runner for Pydrud apps.
+DevRunner -- interactive Flutter-like development runner for Pydrud apps.
 
 Provides:
   • Incremental Hot Reload (sync Python code changes in milliseconds without APK rebuilds)
@@ -267,7 +267,7 @@ class DevRunner:
 
         response = self._send_dev_command({"cmd": "hot_reload", "files": files_to_sync})
         if response is None:
-            sys.stdout.write(tui.warn_badge("DevServer not reachable — app might be busy or restarting.\n"))
+            sys.stdout.write(tui.warn_badge("DevServer not reachable -- app might be busy or restarting.\n"))
             return
 
         if response.get("status") == "ok":
@@ -321,7 +321,7 @@ class DevRunner:
 
         response = self._send_dev_command({"cmd": "hot_restart", "files": files_to_sync})
         if response is None:
-            sys.stdout.write(tui.warn_badge("DevServer not reachable — app might be restarting.\n"))
+            sys.stdout.write(tui.warn_badge("DevServer not reachable -- app might be restarting.\n"))
             return
 
         if response.get("status") == "ok":

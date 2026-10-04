@@ -31,7 +31,7 @@ def _find_project_root() -> str | None:
         pyproject = os.path.join(current, "pyproject.toml")
         if os.path.isfile(pyproject):
             try:
-                with open(pyproject) as f:
+                with open(pyproject, encoding="utf-8") as f:
                     if "[tool.pydrud]" in f.read():
                         return current
             except Exception:

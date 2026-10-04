@@ -195,7 +195,7 @@ class Cache:
 
     def _load_index(self) -> dict:
         try:
-            with open(self._index_path) as handle:
+            with open(self._index_path, encoding="utf-8") as handle:
                 data = json.load(handle)
             return data if isinstance(data, dict) else {}
         except (OSError, ValueError):
@@ -204,7 +204,7 @@ class Cache:
     def _save_index(self) -> None:
         tmp = self._index_path + ".tmp"
         try:
-            with open(tmp, "w") as handle:
+            with open(tmp, "w", encoding="utf-8") as handle:
                 json.dump(self._index, handle)
             os.replace(tmp, self._index_path)
         except OSError:

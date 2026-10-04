@@ -95,7 +95,7 @@ def _check_android_sdk() -> bool:
         if sys.platform == "win32":
             candidates = [
                 os.path.expanduser("~\\AppData\\Local\\Android\\Sdk"),
-                "C:\\Android\\Sdk",
+                os.path.join(os.path.expanduser("~"), "AppData", "Local", "Android", "Sdk"),
                 os.path.expanduser("~\\Android\\Sdk"),
             ]
         elif sys.platform == "darwin":
@@ -135,7 +135,7 @@ def _android_sdk_dir() -> str:
     sdk = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or ""
     if sdk and os.path.isdir(sdk):
         return sdk
-    candidates = ([os.path.expanduser("~\\AppData\\Local\\Android\\Sdk"), "C:\\Android\\Sdk"]
+    candidates = ([os.path.expanduser("~\\AppData\\Local\\Android\\Sdk"), os.path.join(os.path.expanduser("~"), "AppData", "Local", "Android", "Sdk")]
                   if sys.platform == "win32" else
                   ([os.path.expanduser("~/Library/Android/sdk"), os.path.expanduser("~/Android/Sdk")]
                    if sys.platform == "darwin" else

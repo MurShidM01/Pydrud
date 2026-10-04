@@ -227,7 +227,7 @@ def _detect_sdk() -> str:
     if sys.platform == "win32":
         candidates = [
             os.path.expanduser("~\\AppData\\Local\\Android\\Sdk"),
-            "C:\\Android\\Sdk",
+            os.path.join(os.path.expanduser("~"), "AppData", "Local", "Android", "Sdk"),
             os.path.expanduser("~\\Android\\Sdk"),
         ]
     elif sys.platform == "darwin":

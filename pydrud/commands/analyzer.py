@@ -114,7 +114,7 @@ def run_analysis(path: str = "src") -> list[dict]:
         for fname in sorted(files):
             if fname.endswith(".py"):
                 fpath = os.path.join(root, fname)
-                rel_path = os.path.relpath(fpath, os.getcwd())
+                rel_path = os.path.relpath(fpath, src_dir)
                 try:
                     with open(fpath, encoding="utf-8") as f:
                         source = f.read()
@@ -309,8 +309,8 @@ def _check_shadowing_issues(src_dir: str) -> list[dict]:
         py_stems = {f[:-3]: f for f in files if f.endswith(".py") and f != "__init__.py"}
         for d in dirs:
             if d in py_stems:
-                dir_path = os.path.relpath(os.path.join(root, d), os.getcwd())
-                py_path = os.path.relpath(os.path.join(root, py_stems[d]), os.getcwd())
+                dir_path = os.path.relpath(os.path.join(root, d), src_dir)
+                py_path = os.path.relpath(os.path.join(root, py_stems[d]), src_dir)
                 issues.append({
                     "file": py_path,
                     "line": 1,
