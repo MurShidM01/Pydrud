@@ -11,6 +11,7 @@ Provides one clean visual language for every Pydrud command:
 
 from __future__ import annotations
 
+import locale
 import os
 import re
 import shutil
@@ -100,6 +101,50 @@ def _visible_len(text: object) -> int:
 def strip_ansi(text: str) -> str:
     """Strip terminal colour codes (useful for logs, snapshots and tests)."""
     return _ANSI_RE.sub("", text)
+
+
+# Box drawing and status glyphs make the CLI pleasant on a UTF-8 terminal,
+# but they must not make diagnostics unusable on a legacy Windows console.
+# Keeping this at the presentation boundary means command implementations do
+# not have to wrap every individual ``print`` in an encoding try/except.
+_ASCII_FALLBACKS = str.maketrans({
+    "╭": "+", "╮": "+", "╰": "+", "╯": "+",
+    "│": "|", "─": "-",
+    "✓": "[OK]", "✗": "[FAIL]", "▲": "[WARN]", "•": "*",
+    "→": "->", "↻": "<->", "↺": "<-",
+    "…": "...", "·": "-",
+})
+
+
+def safe_text(text: object, stream=None) -> str:
+    """Return text which can be written to *stream* without encoding errors.
+
+    ``print`` encodes only when it writes, so checking a rendered string
+    before returning it is not sufficient for callers which use the TUI
+    helpers directly. We first replace decorative characters with an ASCII
+    equivalent and finally use the stream's replacement policy for an unusual
+    character supplied by a tool or a project path.
+    """
+    value = str(text)
+    target = stream if stream is not None else sys.stdout
+    encoding = getattr(target, "encoding", None) or locale.getpreferredencoding(False)
+    try:
+        value.encode(encoding)
+        return value
+    except (LookupError, UnicodeEncodeError):
+        value = value.translate(_ASCII_FALLBACKS)
+        try:
+            value.encode(encoding)
+            return value
+        except (LookupError, UnicodeEncodeError):
+            return value.encode(encoding, errors="replace").decode(encoding)
+
+
+def safe_print(*values, sep: str = " ", end: str = "\n", file=None) -> None:
+    """Print TUI values with an ASCII fallback on non-Unicode consoles."""
+    target = file if file is not None else sys.stdout
+    text = sep.join(str(value) for value in values)
+    target.write(safe_text(text, target) + end)
 
 
 def _clip(text: object, width: int) -> str:

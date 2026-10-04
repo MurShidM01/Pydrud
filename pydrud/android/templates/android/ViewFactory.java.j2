@@ -2485,9 +2485,12 @@ public class ViewFactory {
         }
         gd.setColors(colors);
         gd.setOrientation(gradientOrientation(g.optString("direction", "vertical")));
-        if ("radial".equals(g.optString("kind", "linear"))) {
+        String kind = g.optString("kind", "linear");
+        if ("radial".equals(kind)) {
             gd.setGradientType(GradientDrawable.RADIAL_GRADIENT);
             gd.setGradientRadius(dp((float) g.optDouble("radius", 160)));
+        } else if ("sweep".equals(kind)) {
+            gd.setGradientType(GradientDrawable.SWEEP_GRADIENT);
         }
         return gd;
     }

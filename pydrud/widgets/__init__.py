@@ -1,7 +1,10 @@
 """Widget system for Pydrud."""
 
 from pydrud.widgets.base import Widget, assign_stable_keys, validate_tree_keys
-from pydrud.widgets.styling import Style, EdgeInsets, Alignment, FontStyle, Border, BorderSide, BorderRadius
+from pydrud.widgets.styling import (
+    Style, EdgeInsets, Alignment, FontStyle, Border, BorderSide, BorderRadius,
+    LinearGradient, RadialGradient, SweepGradient,
+)
 from pydrud.widgets.layout import (
     Container, Column, Row, Center, Spacer, Divider,
     Stack, Positioned, SizedBox, Padding, Card, ListView, GridView,
@@ -109,6 +112,9 @@ __all__ = [
     "Border",
     "BorderSide",
     "BorderRadius",
+    "LinearGradient",
+    "RadialGradient",
+    "SweepGradient",
     "Colors",
     "Spacing",
     "Radius",

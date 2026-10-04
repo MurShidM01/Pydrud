@@ -6,7 +6,7 @@ provide a more ergonomic builder API.
 """
 
 from __future__ import annotations
-from typing import Optional, Union
+from typing import Optional, Sequence, Union
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -167,6 +167,61 @@ class BorderRadius:
         return {"radius": self.radius}
 
 
+class _Gradient:
+    """Base for serialisable native background gradients."""
+
+    kind = "linear"
+
+    def __init__(self, colors: Sequence[str]):
+        values = [str(color) for color in colors]
+        if len(values) < 2:
+            raise ValueError("a gradient needs at least two colors")
+        self.colors = values
+
+    def to_dict(self) -> dict:
+        return {"kind": self.kind, "colors": list(self.colors)}
+
+
+class LinearGradient(_Gradient):
+    """A linear background gradient understood by the Android renderer.
+
+    ``direction`` may be ``vertical``, ``horizontal``, ``diagonal``,
+    ``diagonal_up`` or ``up``. The object is also accepted by
+    :meth:`Style.gradient` and ``Container(gradient=...)``.
+    """
+
+    def __init__(self, colors: Sequence[str], direction: str = "vertical"):
+        if direction not in {"vertical", "horizontal", "diagonal",
+                             "diagonal_up", "up"}:
+            raise ValueError("unsupported linear gradient direction")
+        super().__init__(colors)
+        self.direction = direction
+
+    def to_dict(self) -> dict:
+        return {**super().to_dict(), "direction": self.direction}
+
+
+class RadialGradient(_Gradient):
+    """A radial background gradient, measured in device-independent pixels."""
+
+    kind = "radial"
+
+    def __init__(self, colors: Sequence[str], radius: float = 160):
+        super().__init__(colors)
+        if radius <= 0:
+            raise ValueError("radial gradient radius must be positive")
+        self.radius = float(radius)
+
+    def to_dict(self) -> dict:
+        return {**super().to_dict(), "radius": self.radius}
+
+
+class SweepGradient(_Gradient):
+    """A sweep gradient descriptor for renderers which support sweep fills."""
+
+    kind = "sweep"
+
+
 # ── Style builder ────────────────────────────────────────────────────────────
 
 
@@ -200,6 +255,11 @@ class Style:
     def opacity(self, value: float) -> "Style":
         """Opacity 0.0 – 1.0."""
         self._data["opacity"] = value
+        return self
+
+    def gradient(self, value: _Gradient | dict) -> "Style":
+        """Set a native background gradient."""
+        self._data["gradient"] = value.to_dict() if hasattr(value, "to_dict") else dict(value)
         return self
 
     # --- size ---

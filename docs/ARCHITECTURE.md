@@ -41,6 +41,16 @@ Application code should import from the top-level namespace
 (`from pydrud import App, Router, Column`); the layout above is for people
 working *on* Pydrud.
 
+### Generated app import boundary
+
+Generated applications keep route state in `app/runtime.py` and route
+registration in `app/main.py`. Screen modules may import the already-created
+`app.runtime.router` (and small runtime helpers), but `app/runtime.py` must
+never import `app.screens` or any module which imports a screen. This is a
+hard one-way dependency boundary: adding a screen import to `runtime.py`
+reintroduces a circular import before `router` exists. Register routes in
+`main.py` after importing both the runtime and screen builders.
+
 ## The rendering contract
 
 1. Python builds a desired tree and diffs it against the last tree the

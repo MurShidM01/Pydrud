@@ -124,6 +124,13 @@ class Storage(_Service):
     """
 
     def get(self, key: str, default: Any = None) -> Result:
+        """Request a stored value and return a :class:`~pydrud.Result`.
+
+        Native calls are asynchronous by design. Use ``.then(callback)`` in
+        an event handler or ``.wait(default=...)`` from a worker started with
+        ``page.run_task``; the ``Result`` wrapper must not be used as the
+        value itself (for example, do not call ``len(page.storage.get(...))``).
+        """
         return self._invoke("prefs_get", key=str(key), default=default)
 
     def set(self, key: str, value: Any) -> Result:

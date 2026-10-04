@@ -7,6 +7,7 @@ from typing import Optional, Union
 
 from pydrud.widgets.base import Widget
 from pydrud.widgets.styling import FontStyle
+from pydrud.widgets.theme import Icons
 
 
 class Text(Widget):
@@ -398,7 +399,7 @@ class Icon(Widget):
         **kwargs,
     ):
         super().__init__(key=key, style=style, expand=expand, visible=visible, **kwargs)
-        self._icon_name = name
+        self._icon_name = Icons.normalize(name)
         if size:
             self.style.setdefault("font", {})["size"] = size
         if color:

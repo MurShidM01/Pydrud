@@ -23,6 +23,17 @@ EVENT_NAMES = (
 )
 
 
+def _serialise_value(value):
+    """Convert style helpers and nested values into JSON-safe primitives."""
+    if hasattr(value, "to_dict") and callable(value.to_dict):
+        return _serialise_value(value.to_dict())
+    if isinstance(value, dict):
+        return {key: _serialise_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_serialise_value(item) for item in value]
+    return value
+
+
 class Widget:
     """Base class for all Pydrud widgets.
 
@@ -154,13 +165,13 @@ class Widget:
         d: dict[str, Any] = {
             "type": self._widget_type,
             "key": self.key,
-            "style": self.style,
+            "style": _serialise_value(self.style),
             "expand": self.expand,
             "visible": self.visible,
             "tooltip": self.tooltip,
             "has_events": bool(self.event_handlers),
             "events": sorted(self.event_handlers.keys()),
-            "props": self._serialise_props(),
+            "props": _serialise_value(self._serialise_props()),
         }
         if self.children:
             # Hidden children are serialised too (the renderer gives them

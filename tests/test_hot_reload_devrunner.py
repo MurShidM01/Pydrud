@@ -103,8 +103,8 @@ def broken_fn(
         resp = self._send_cmd({"cmd": "hot_restart"})
         self.assertEqual(resp["status"], "ok")
         self.assertTrue(resp["restarted"])
-        # Router must be reset to None/initial
-        self.assertIsNone(router.current_route)
+        # Router must be reset to its configured initial route.
+        self.assertEqual(router.current_route, "home")
 
     def test_dump_tree_command(self):
         resp = self._send_cmd({"cmd": "dump_tree"})
