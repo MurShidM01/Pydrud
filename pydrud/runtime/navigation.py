@@ -26,6 +26,7 @@ Usage::
 
 from __future__ import annotations
 import inspect
+import warnings
 from typing import Any, Callable, Optional
 
 
@@ -407,10 +408,25 @@ class Router:
         self._render()
 
     def reset(self, name: str | None = None, **params) -> None:
-        """Clear the history. With *name*, make it the new root screen."""
+        """Clear history and make a route the sole root screen.
+
+        Omitting *name* restores the route passed to :meth:`initial`, which
+        makes ``reset()`` a reliable "go home" operation. If no initial route
+        was configured there is no safe route to select; the stack is cleared,
+        the attached app is updated, and a warning explains the ambiguity.
+        """
         if name is None:
-            self._stack.clear()
-            return
+            if self._initial_route is None:
+                warnings.warn(
+                    "Router.reset() has no initial route; clearing the stack.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                self._stack.clear()
+                self._render()
+                return
+            name = self._initial_route
+            params = {**self._initial_params, **params}
         name, params = self._resolve(name, params)
         self._stack.reset_to(name, params)
         self._render()

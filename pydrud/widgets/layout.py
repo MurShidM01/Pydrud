@@ -3,7 +3,7 @@ Layout widgets: Container, Column, Row, Center, Spacer.
 """
 
 from __future__ import annotations
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 from pydrud.widgets.base import Widget
 from pydrud.widgets.styling import Border, EdgeInsets, Style
@@ -22,6 +22,7 @@ class Container(Widget):
         padding: Optional[Union[EdgeInsets, float, int, dict]] = None,
         margin: Optional[Union[EdgeInsets, float, int, dict]] = None,
         bg: Optional[str] = None,
+        gradient: Optional[Any] = None,
         border_radius: Optional[float] = None,
         border: Optional[Union[Border, dict]] = None,
         width: Optional[Union[float, str]] = None,
@@ -48,6 +49,8 @@ class Container(Widget):
             s.margin(margin if isinstance(margin, EdgeInsets) else EdgeInsets.all(margin) if isinstance(margin, (int, float)) else EdgeInsets(**margin))
         if bg:
             s.bg(bg)
+        if gradient is not None:
+            s.gradient(gradient)
         if border_radius is not None:
             s.border_radius(border_radius)
         if border is not None:

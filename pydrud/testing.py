@@ -395,6 +395,10 @@ class FakeDevice:
     def back(self) -> None:
         self.send_event("back", "")
 
+    def handle_back_press(self) -> None:
+        """Compatibility alias for tests that model the hardware button."""
+        self.back()
+
     def long_press(self, key: str) -> None:
         self.send_event("long_press", key)
 
@@ -654,6 +658,14 @@ class AppTester:
 
     def node(self, key: str):
         return self.device.root.find(key) if self.device.root else None
+
+    def find(self, key: str):
+        """Return the rendered node for *key*, or ``None`` if absent.
+
+        This is the key-based counterpart to :attr:`texts` and mirrors the
+        lookup helper available on ``RenderedNode``/``FakeDevice``.
+        """
+        return self.node(key)
 
     def prop(self, key: str, name: str, default=None):
         node = self.node(key)

@@ -227,8 +227,17 @@ class Canvas(Widget):
                          "paint": self._paint(paint, style)})
         return self
 
-    def oval(self, x: float, y: float, w: float, h: float, *,
+    def oval(self, x: float, y: float, w: float, h: Optional[float] = None, *,
              paint: Optional[Paint] = None, **style) -> "Canvas":
+        """Draw an oval, or a circle when only one size is supplied.
+
+        The four-argument form keeps the original top-left ``x, y, w, h``
+        semantics. For convenience, ``oval(x, y, radius)`` is accepted as a
+        circle with centre ``x, y``; this mirrors :meth:`circle` and prevents
+        a missing optional height from taking down an entire widget render.
+        """
+        if h is None:
+            return self.circle(x, y, w, paint=paint, **style)
         self.ops.append({"op": "oval", "x": float(x), "y": float(y),
                          "w": float(w), "h": float(h),
                          "paint": self._paint(paint, style)})

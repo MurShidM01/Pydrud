@@ -18,13 +18,13 @@ _MIN_SDK_VERSION = 33
 
 def run_doctor():
     """Run all environment checks and print a summary."""
-    print(tui.render_command_header(
+    tui.safe_print(tui.render_command_header(
         "doctor",
         "Development environment",
         subtitle="Checking the tools required to build and run native Android apps",
         details=(("Python", sys.executable), ("Platform", sys.platform)),
     ))
-    print(tui.render_section("Toolchain"))
+    tui.safe_print(tui.render_section("Toolchain"))
 
     all_ok = True
 
@@ -47,17 +47,18 @@ def run_doctor():
     # the manifest mismatch before a camera/file-picker call does at runtime.
     project = _find_project(os.getcwd())
     if project:
-        print(tui.render_section("Project"))
+        tui.safe_print(tui.render_section("Project"))
         all_ok &= _check_chaquopy(project)
         all_ok &= _check_manifest_permissions(project)
 
-    print(tui.render_summary(
+    tui.safe_print(tui.render_summary(
         "Environment is ready" if all_ok else "Environment needs attention",
         (("Result", "all checks passed" if all_ok else "one or more checks failed"),),
         success=all_ok,
     ))
     if not all_ok:
-        print(tui.render_next_steps((("pydrud doctor", "run again after fixing the failed tools"),)))
+        tui.safe_print(tui.render_next_steps((("pydrud doctor", "run again after fixing the failed tools"),)))
+    return all_ok
 
 
 def _check_python() -> bool:
@@ -71,10 +72,14 @@ def _check_python() -> bool:
 def _check_java() -> bool:
     java = shutil.which("java")
     if not java:
-        print(fail("Java not found in PATH."))
+        tui.safe_print(fail("Java not found in PATH."))
         return False
 
-    result = subprocess.run(["java", "-version"], capture_output=True, text=True)
+    try:
+        result = subprocess.run([java, "-version"], capture_output=True, text=True)
+    except OSError as exc:
+        _print_check("Java 17+", f"could not run ({exc})", False)
+        return False
     version_line = result.stderr.strip().split("\n")[0] if result.stderr else "?"
 
     ok_ = "17" in version_line or "17" in result.stderr
@@ -110,12 +115,12 @@ def _check_android_sdk() -> bool:
                 break
 
     if not sdk or not os.path.isdir(sdk):
-        print(fail("Android SDK not found. Set ANDROID_HOME."))
+        tui.safe_print(fail("Android SDK not found. Set ANDROID_HOME."))
         return False
 
     platforms = os.path.join(sdk, "platforms")
     if not os.path.isdir(platforms):
-        print(warn(f"Android SDK at {sdk} but no platforms directory."))
+        tui.safe_print(warn(f"Android SDK at {sdk} but no platforms directory."))
         return False
 
     versions = sorted(os.listdir(platforms))
@@ -153,14 +158,67 @@ def _check_ndk() -> bool:
 
 
 def _check_cmake() -> bool:
-    cmake = shutil.which("cmake")
-    if not cmake:
-        _print_check("CMake", "not found", False)
-        return False
-    result = subprocess.run([cmake, "--version"], capture_output=True, text=True)
-    version = (result.stdout or result.stderr).splitlines()[0] if result.returncode == 0 else "unavailable"
-    _print_check("CMake", version, result.returncode == 0)
-    return result.returncode == 0
+    """Check PATH and CMake distributions shipped with the Android SDK.
+
+    Android Studio installs CMake below ``$ANDROID_SDK_ROOT/cmake`` and a
+    standalone CMake executable is not required for a normal Android build.
+    The old PATH-only check therefore reported a false failure on otherwise
+    healthy machines.
+    """
+    candidates: list[str] = []
+    on_path = shutil.which("cmake")
+    if on_path:
+        candidates.append(on_path)
+
+    sdk = _android_sdk_dir()
+    if sdk:
+        binary_name = "cmake.exe" if sys.platform == "win32" else "cmake"
+        cmake_root = os.path.join(sdk, "cmake")
+        if os.path.isdir(cmake_root):
+            for version in sorted(os.listdir(cmake_root), reverse=True):
+                binary = os.path.join(cmake_root, version, "bin", binary_name)
+                if os.path.isfile(binary):
+                    candidates.append(binary)
+
+        # Some SDK/NDK distributions carry CMake alongside the LLVM
+        # toolchain rather than in the SDK-level cmake directory.
+        for ndk_root in (os.path.join(sdk, "ndk"),
+                         os.path.join(sdk, "ndk-bundle")):
+            if not os.path.isdir(ndk_root):
+                continue
+            if os.path.basename(ndk_root) == "ndk-bundle":
+                ndk_versions = [ndk_root]
+            else:
+                ndk_versions = [
+                    os.path.join(ndk_root, name)
+                    for name in os.listdir(ndk_root)
+                    if os.path.isdir(os.path.join(ndk_root, name))
+                ]
+            for root in sorted(ndk_versions, reverse=True):
+                prebuilt = os.path.join(root, "toolchains", "llvm", "prebuilt")
+                if not os.path.isdir(prebuilt):
+                    continue
+                for host in sorted(os.listdir(prebuilt), reverse=True):
+                    binary = os.path.join(prebuilt, host, "bin", binary_name)
+                    if os.path.isfile(binary):
+                        candidates.append(binary)
+
+    # Preserve order while avoiding duplicate PATH/SDK entries.
+    for cmake in dict.fromkeys(candidates):
+        try:
+            result = subprocess.run([cmake, "--version"], capture_output=True,
+                                    text=True)
+        except OSError:
+            continue
+        output = result.stdout or result.stderr or ""
+        version = output.splitlines()[0] if output else "unavailable"
+        if result.returncode == 0:
+            source = "" if on_path and cmake == on_path else " (Android SDK)"
+            _print_check("CMake", version + source, True)
+            return True
+
+    _print_check("CMake", "not found (checked PATH and Android SDK)", False)
+    return False
 
 
 def _find_project(start: str) -> str | None:
@@ -218,40 +276,80 @@ def _check_manifest_permissions(project_dir: str) -> bool:
 
 
 def _check_gradle() -> bool:
+    """Prefer a project Gradle wrapper, then fall back to global Gradle.
+
+    A wrapper is the source of truth for a generated project; a missing
+    standalone ``gradle`` executable is not a doctor failure. All process
+    launches are guarded because ``shutil.which`` can become stale between
+    the lookup and ``CreateProcess`` on Windows.
+    """
+    cwd = os.getcwd()
+    wrapper_names = ("gradlew.bat", "gradlew") if sys.platform == "win32" else ("gradlew",)
+    wrapper_candidates = []
+    for base in (cwd, os.path.join(cwd, "android")):
+        for name in wrapper_names:
+            path = os.path.join(base, name)
+            if os.path.isfile(path):
+                wrapper_candidates.append(path)
+
+    for wrapper in wrapper_candidates:
+        if sys.platform == "win32" and wrapper.lower().endswith((".bat", ".cmd")):
+            cmd = ["cmd.exe", "/c", wrapper, "--version"]
+        else:
+            cmd = [wrapper, "--version"]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True)
+        except OSError:
+            # A Unix checkout may not retain the executable bit. Trying via
+            # the shell keeps the check useful without making it fatal.
+            if sys.platform != "win32":
+                try:
+                    result = subprocess.run(["sh", wrapper, "--version"],
+                                            capture_output=True, text=True)
+                except OSError:
+                    continue
+            else:
+                continue
+        if result.returncode == 0:
+            output = result.stdout or result.stderr or "gradlew wrapper found"
+            _print_check("Gradle", output.strip().splitlines()[0], True)
+            return True
+
     gradle = shutil.which("gradle")
     if gradle:
-        # On Windows, gradle may be a .bat file — needs cmd.exe /c
-        if sys.platform == "win32" and gradle.endswith((".bat", ".cmd")):
-            cmd = ["cmd.exe", "/c", "gradle", "--version"]
+        if sys.platform == "win32" and gradle.lower().endswith((".bat", ".cmd")):
+            cmd = ["cmd.exe", "/c", gradle, "--version"]
         else:
-            cmd = ["gradle", "--version"]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        first_line = result.stdout.strip().split("\n")[0] if result.stdout else "?"
-        _print_check("Gradle", first_line, True)
-        return True
+            cmd = [gradle, "--version"]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True)
+        except OSError:
+            result = None
+        if result is not None and result.returncode == 0:
+            output = result.stdout or result.stderr or "gradle available"
+            _print_check("Gradle", output.strip().splitlines()[0], True)
+            return True
 
-    # Check for wrapper.
-    cwd = os.getcwd()
-    wrapper_name = "gradlew.bat" if sys.platform == "win32" else "gradlew"
-    wrapper = os.path.join(cwd, "android", wrapper_name)
-    if os.path.isfile(wrapper):
-        _print_check("Gradle", "gradlew wrapper found", True)
-        return True
-
-    print(warn("Gradle not in PATH (expected if using wrapper)."))
+    # Gradle is informational: generated projects use the wrapper and can
+    # build without a global installation.
+    tui.safe_print(warn("Gradle not found (a project wrapper is recommended)."))
     return True
 
 
 def _check_adb() -> bool:
     adb = shutil.which("adb")
     if not adb:
-        print(warn("adb not found in PATH."))
+        tui.safe_print(warn("adb not found in PATH."))
         return False
 
-    result = subprocess.run(["adb", "--version"], capture_output=True, text=True)
+    try:
+        result = subprocess.run([adb, "--version"], capture_output=True, text=True)
+    except OSError as exc:
+        _print_check("ADB", f"could not run ({exc})", False)
+        return False
     version = result.stdout.strip().split("\n")[0] if result.stdout else "?"
-    _print_check("ADB", version, True)
-    return True
+    _print_check("ADB", version, result.returncode == 0)
+    return result.returncode == 0
 
 
 def _check_package(module: str, label: str) -> bool:
@@ -260,7 +358,7 @@ def _check_package(module: str, label: str) -> bool:
         _print_check(f"Python: {label}", "installed", True)
         return True
     except ImportError:
-        print(fail(f"Python package {label} not installed."))
+        tui.safe_print(fail(f"Python package {label} not installed."))
         return False
 
 
@@ -268,4 +366,4 @@ def _print_check(name: str, detail: str, ok_: bool):
     """Print a single aligned check result line."""
     detail_str = f"{tui.C_MUTED}{detail}{tui.RESET}" if detail else ""
     message = f"{name:<20} {detail_str}".rstrip()
-    print(tui.ok_badge(message) if ok_ else tui.error_badge(message))
+    tui.safe_print(tui.ok_badge(message) if ok_ else tui.error_badge(message))

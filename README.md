@@ -302,11 +302,13 @@ python tools/preview_ui.py --accent "#FF0EA5E9" --token radius_card=28
 ### Design tokens
 
 ```python
-from pydrud import Spacing, Radius, Elevation, Motion, Colors, Theme
+from pydrud import (Spacing, Radius, Elevation, Motion, Colors, Theme,
+                    LinearGradient)
 
 Column(spacing=Spacing.MD, children=[...])      # 4dp grid: XS…HUGE
 Card(border_radius=Radius.LG)                   # consistent corners
 Container(style={"elevation": Elevation.CARD})  # named depths
+Container(gradient=LinearGradient([Colors.PRIMARY, Colors.SECONDARY]))
 Colors.on(Colors.PRIMARY)                       # readable foreground
 Colors.mix(Colors.PRIMARY, Colors.SECONDARY)    # blend two colours
 ```
@@ -530,6 +532,11 @@ def dashboard(page):
                                          on_click=open_account)),
     ], on_change=lambda e: print("tab", e.value)))
 ```
+
+`page.storage` calls are asynchronous native bridge requests. `get()` returns
+`Result`, not the stored value: consume it with
+`page.storage.get("profile", default={}).then(render_profile)`, or call
+`.wait(default={})` only from a worker started with `page.run_task()`.
 
 ---
 

@@ -12,7 +12,10 @@ understood by the Android renderer::
 
 from __future__ import annotations
 
+import re
+
 from pydrud.widgets.tokens import Tokens
+from pydrud.widgets.styling import LinearGradient, RadialGradient, SweepGradient
 
 
 def _argb(hex_rgb: str, alpha: str = "FF") -> str:
@@ -126,8 +129,26 @@ class Colors:
         return (0.299 * r + 0.587 * g + 0.114 * b) / 255.0 > 0.62
 
 
-class Icons:
-    """Icon names understood by the Android ``ViewFactory``."""
+class _IconsMeta(type):
+    """Offer forgiving Python spellings while keeping canonical constants."""
+
+    def __getattr__(cls, name: str):
+        # ``Icons.favorite``, ``Icons.favoriteBorder`` and
+        # ``Icons.FAVORITE_BORDER`` all resolve to the same documented value.
+        token = re.sub(r"(?<!^)([A-Z])", r"_\1", name).replace("-", "_").upper()
+        value = vars(cls).get(token)
+        if isinstance(value, str):
+            return value
+        raise AttributeError(f"Icons has no icon named {name!r}")
+
+
+class Icons(metaclass=_IconsMeta):
+    """Icon names understood by the Android ``ViewFactory``.
+
+    Constants are published in ``ALL_CAPS`` form, but attribute lookup is
+    case-insensitive and accepts camelCase for compatibility with Flutter and
+    other UI toolkits. Values remain lower-case renderer names.
+    """
 
     STAR = "star"
     HOME = "home"
@@ -299,6 +320,19 @@ class Icons:
     TRANSLATE = "translate"
 
     @classmethod
+    def normalize(cls, name: str) -> str:
+        """Normalise a constant spelling to the renderer's icon name.
+
+        Arbitrary names are returned in a conservative lower-case form so
+        generated apps can still use renderer aliases; Android performs the
+        final alias lookup and supplies a visible fallback for unknown names.
+        """
+        raw = str(name).strip()
+        token = re.sub(r"(?<!^)([A-Z])", r"_\1", raw).replace("-", "_").upper()
+        value = vars(cls).get(token)
+        return value if isinstance(value, str) else raw.lower().replace("-", "_")
+
+    @classmethod
     def all(cls) -> list[str]:
         return sorted(
             value for name, value in vars(cls).items()
@@ -345,8 +379,13 @@ class Radius:
     LG = 18
     XL = 24
     XXL = 32
-    #: Fully rounded (pill / circle) — clamped by the renderer.
+    #: Fully rounded (pill) — clamped by the renderer.
     PILL = 999
+    #: Semantic alias for circular avatars and square icon containers.
+    #:
+    #: The native renderer clamps large radii to half the shortest side, so
+    #: this works for fixed and responsive containers alike.
+    CIRCLE = PILL
 
 
 class Elevation:

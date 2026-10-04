@@ -253,10 +253,11 @@ class TestRouterBehaviour(unittest.TestCase):
         self.router.push("detail", id=1)
         self.assertEqual(seen, ["detail"])
 
-    def test_reset_clears_history(self):
+    def test_reset_restores_initial_route_and_clears_history(self):
         self.router.push("detail", id=1)
         self.router.reset()
-        self.assertIsNone(self.router.current_route)
+        self.assertEqual(self.router.current_route, "home")
+        self.assertEqual(self.router.stack_size, 1)
 
 
 class TestAppInternals(unittest.TestCase):
@@ -265,8 +266,8 @@ class TestAppInternals(unittest.TestCase):
         router = Router().define("home", lambda page: None).initial("home")
         app.attach_router(router)
         app.build()
-        app.hot_restart()  # used to crash: current_route had no setter
-        self.assertIsNone(router.current_route)
+        app.hot_restart()  # reset returns the router to its initial route
+        self.assertEqual(router.current_route, "home")
 
     def test_page_add_rejects_non_widgets(self):
         app = App()
