@@ -126,6 +126,12 @@ CAPABILITY_ALIASES = {
     "exact_alarm": "exact_alarms",
     "battery": "battery_optimization",
     "battery_optimization": "battery_optimization",
+    "file": "files",
+    "file_picker": "files",
+    "download": "downloads",
+    "sharing": "share",
+    "audio": "audio",
+    "sensors": "sensors",
 }
 
 # Safe, user-consent-oriented bundles. Android system/signature permissions
@@ -151,6 +157,13 @@ CAPABILITY_PERMISSIONS = {
     "activity_recognition": {"ACTIVITY_RECOGNITION"},
     "exact_alarms": {"SCHEDULE_EXACT_ALARM"},
     "battery_optimization": {"REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"},
+    # Storage Access Framework, sharing and downloads use user-mediated
+    # intents and therefore intentionally require no broad storage permission.
+    "files": set(),
+    "downloads": set(),
+    "share": set(),
+    "audio": {"RECORD_AUDIO"},
+    "sensors": {"ACTIVITY_RECOGNITION"},
 }
 
 CAPABILITY_DESCRIPTIONS = {
@@ -168,6 +181,11 @@ CAPABILITY_DESCRIPTIONS = {
     "activity_recognition": "Physical activity recognition",
     "exact_alarms": "Exact scheduled alarms",
     "battery_optimization": "Request battery optimization exemption",
+    "files": "User-mediated file picker and document access",
+    "downloads": "User-mediated download and save access",
+    "share": "System share sheet and outbound intents",
+    "audio": "Audio recording and playback services",
+    "sensors": "Motion and device sensor access",
     "foreground_service": "Long-running foreground work",
     "boot_receiver": "Start work after device boot",
     "wake_lock": "Keep CPU awake during work",
