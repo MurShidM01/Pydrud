@@ -195,6 +195,17 @@ CAPABILITY_DESCRIPTIONS = {
 
 KNOWN_CAPABILITIES = frozenset(CAPABILITY_PERMISSIONS)
 
+#: Friendly permission names that users keep typing where a capability is
+#: expected. The resolver redirects them to ``pydrud permissions add``
+#: instead of silently enabling a bundle: ``camera`` is the canonical
+#: mix-up documented by the generated manifest, the README release
+#: workflow and the ``capabilities`` CLI itself, because CAMERA is a
+#: dangerous permission that should stay a conscious, reviewable
+#: declaration. The matching bundle stays registered in
+#: ``CAPABILITY_PERMISSIONS`` so ``capabilities list --all`` and the
+#: doctor's manifest checks keep describing it.
+CAPABILITY_MISTAKES = frozenset({"camera"})
+
 ANDROID_NS = "http://schemas.android.com/apk/res/android"
 
 #: Launcher icon sizes (density bucket → pixels).
@@ -238,6 +249,12 @@ def permission_command_suggestion(name: str) -> str | None:
 def resolve_capability(name: str) -> str:
     """Return the canonical capability name or raise an actionable error."""
     key = str(name).strip().lower().replace("-", "_")
+    if key in CAPABILITY_MISTAKES:
+        # A documented permission, not a capability: point at the command
+        # that declares it deliberately (see ``CAPABILITY_MISTAKES``).
+        raise ValueError(permission_command_suggestion(name)
+                         or f"Unknown capability {name!r}; use one of "
+                           f"{', '.join(sorted(KNOWN_CAPABILITIES))}")
     resolved = CAPABILITY_ALIASES.get(key, key)
     if resolved not in KNOWN_CAPABILITIES:
         suggestion = permission_command_suggestion(name)

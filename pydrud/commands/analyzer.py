@@ -60,6 +60,9 @@ _WIDGET_CLASSES = {
     "BackButton", "CloseButton", "MenuButton", "SectionHeader",
     "EmptyState", "ErrorState", "LoadingState", "InfoCard", "StatCard",
     "SettingsTile", "NavigationTile", "FormSection",
+    # v2.0 — Flutter sizing presets and premium compositions
+    "FractionallySizedBox", "FittedBox", "DataTable", "MetricCard",
+    "Timeline",
 }
 
 # Style property keys known to be valid.
@@ -83,6 +86,9 @@ _VALID_STYLE_KEYS = {
     # read by the native renderer (ViewFactory / MaterialViews)
     "gradient", "feedback", "role", "pill", "accent", "size",
     "minItemWidth", "maxColumns", "tabletColumns",
+    # v2.0 — FractionallySizedBox factors (resolved by the renderer against
+    # the parent at layout time)
+    "widthFactor", "heightFactor",
 }
 
 

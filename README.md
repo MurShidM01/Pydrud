@@ -947,8 +947,9 @@ list --all` shows the supported production-safe bundles.
 
 ```bash
 # Build-time declaration (run from the project directory)
-pydrud capabilities add camera microphone contacts
+pydrud capabilities add microphone contacts
 pydrud capabilities add notifications files
+pydrud permissions add camera        # dangerous permissions stay explicit
 pydrud sync
 
 # Inspect enabled and available bundles
@@ -1570,7 +1571,9 @@ gradle_version: "8.14.4"
 `notifications`. Use `pydrud capabilities list --all` for descriptions.
 `permissions:` remains available for an individual Android permission. The CLI
 updates YAML and the generated manifest: `pydrud capabilities add contacts` or
-`pydrud permissions add camera`, then `pydrud sync`. Runtime dangerous
+`pydrud permissions add camera`, then `pydrud sync`. (`capabilities add camera`
+answers with that same suggestion — the camera permission is always a
+deliberate declaration.) Runtime dangerous
 permissions still require `page.permissions.request(...)` and user consent.
 
 `pydrud.toml` continues to own `[python.packages]` and `[theme]`. Its legacy

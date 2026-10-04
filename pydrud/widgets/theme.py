@@ -440,12 +440,22 @@ class Icons(metaclass=_IconsMeta):
         return value if isinstance(value, str) else raw.lower().replace("-", "_")
 
     @classmethod
-    def all(cls) -> list[str]:
+    def builtins(cls) -> list[str]:
+        """Renderer names the framework itself ships.
+
+        Unlike :meth:`all` this excludes icons registered at runtime from
+        optional packs, so generated-code checks (and documentation) can
+        reason about the constants Pydrud itself guarantees — pack icons
+        are only known after ``Icons.load_pack`` runs inside an app.
+        """
         return sorted({
-            *(value for name, value in vars(cls).items()
-              if name.isupper() and isinstance(value, str)),
-            *cls._external.values(),
+            value for name, value in vars(cls).items()
+            if name.isupper() and isinstance(value, str)
         })
+
+    @classmethod
+    def all(cls) -> list[str]:
+        return sorted({*cls.builtins(), *cls._external.values()})
 
 
 class Spacing:

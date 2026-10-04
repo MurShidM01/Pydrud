@@ -33,10 +33,18 @@ def test_material_icon_compatibility_aliases_are_renderer_backed():
 
 
 def test_optional_icon_packs_can_be_loaded_without_a_hard_dependency():
-    count = Icons.load_pack({"BRAND_GITHUB": "github", "BRAND_PYTHON": "python"})
-    assert count == 2
-    assert Icons.BRAND_GITHUB == "github"
-    assert Icons.normalize("brandGithub") == "github"
+    # Pack registration is process-global state; snapshot and restore it so
+    # this test cannot leak pack icons into other suites (e.g. the generated
+    # vector-set checks in test_v14_ui).
+    saved = dict(Icons._external)
+    try:
+        count = Icons.load_pack({"BRAND_GITHUB": "github", "BRAND_PYTHON": "python"})
+        assert count == 2
+        assert Icons.BRAND_GITHUB == "github"
+        assert Icons.normalize("brandGithub") == "github"
+    finally:
+        Icons._external.clear()
+        Icons._external.update(saved)
 
 
 def test_premium_compositions_use_native_widget_trees():

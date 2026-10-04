@@ -265,7 +265,10 @@ class TestGeneratedNativeLayer(unittest.TestCase):
         icons = template("PydrudIcons.java.j2")
         known = set(re.findall(r'PATHS\.put\("([a-z0-9_]+)"', icons))
         known |= set(re.findall(r'ALIASES\.put\("([a-z0-9_]+)"', icons))
-        missing = [name for name in Icons.all() if name not in known]
+        # Only the constants Pydrud ships must resolve here: icons registered
+        # at runtime from optional packs (Icons.load_pack) deliberately have
+        # no vector in the generated template.
+        missing = [name for name in Icons.builtins() if name not in known]
         self.assertEqual(missing, [], "Icons constants without vector paths")
 
     def test_renderers_use_theme_roles_not_hardcoded_colours(self):
