@@ -30,3 +30,10 @@ def test_material_icon_compatibility_aliases_are_renderer_backed():
     assert Icons.SKULL == Icons.WARNING
     assert Icons.LEADERBOARD == Icons.ANALYTICS
     assert Icons.STORAGE == Icons.DATABASE
+
+
+def test_optional_icon_packs_can_be_loaded_without_a_hard_dependency():
+    count = Icons.load_pack({"BRAND_GITHUB": "github", "BRAND_PYTHON": "python"})
+    assert count == 2
+    assert Icons.BRAND_GITHUB == "github"
+    assert Icons.normalize("brandGithub") == "github"
