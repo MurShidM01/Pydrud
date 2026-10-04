@@ -9,7 +9,7 @@ fully compatible with diffing, testing, theming and older Android runtimes.
 
 from __future__ import annotations
 
-from typing import Callable, Optional, Union
+from typing import Any, Callable, Optional, Sequence, Union
 
 from pydrud.widgets.base import Widget
 from pydrud.widgets.basic import (
@@ -95,6 +95,90 @@ class FittedBox(Container):
         style["fit"] = fit
         super().__init__(child=child, alignment=alignment, style=style,
                          **kwargs)
+
+
+class MetricCard(Card):
+    """A production dashboard metric with optional trend and icon.
+
+    This is a composition of native ``Card``, ``Row`` and ``Text`` widgets,
+    so it works on Android runtimes that predate the convenience class.
+    """
+
+    def __init__(self, label: str, value: Any, *,
+                 trend: Optional[str] = None, icon: Optional[str] = None,
+                 accent: Optional[str] = None, **kwargs):
+        from pydrud.widgets.basic import Icon
+        from pydrud.widgets.theme import Theme
+        color = accent or Theme.primary
+        top: list[Widget] = [Text(str(label), size=13, color=Theme.text_secondary)]
+        if icon:
+            top.append(Icon(icon, size=20, color=color))
+        children: list[Widget] = [Row(children=top,
+                                      horizontal_alignment="space_between")]
+        children.append(Text(str(value), size=28, weight=700,
+                             color=Theme.text))
+        if trend:
+            children.append(Text(str(trend), size=12, color=color))
+        super().__init__(child=Column(children=children, spacing=6), **kwargs)
+
+
+class DataTable(Card):
+    """A responsive, scroll-friendly data table built from native layouts.
+
+    ``rows`` may contain strings or arbitrary values.  The table validates
+    row widths early and exposes a stable ``on_row_click(index)`` callback.
+    """
+
+    def __init__(self, columns: Sequence[str], rows: Sequence[Sequence[Any]], *,
+                 on_row_click: Optional[Callable[[int], None]] = None,
+                 striped: bool = False, compact: bool = False, **kwargs):
+        from pydrud.widgets.theme import Theme
+        labels = [str(column) for column in columns]
+        if not labels:
+            raise ValueError("DataTable requires at least one column")
+        normalized = [list(row) for row in rows]
+        if any(len(row) != len(labels) for row in normalized):
+            raise ValueError("every DataTable row must match columns length")
+        pad = 8 if compact else 14
+        header = Row(children=[Text(label, weight=700, size=13,
+                                     color=Theme.text) for label in labels],
+                     spacing=pad, style={"tableRow": True, "header": True})
+        body: list[Widget] = [header, Divider()]
+        for index, row in enumerate(normalized):
+            cells = [Text(str(value), size=13, color=Theme.text) for value in row]
+            style = {"tableRow": True, "stripe": index % 2 == 1} if striped else {"tableRow": True}
+            body.append(Row(children=cells, spacing=pad, style=style,
+                            on_click=(lambda _event, i=index: on_row_click(i))
+                            if on_row_click else None))
+        super().__init__(child=Column(children=body, spacing=0, scroll=True), **kwargs)
+
+
+class Timeline(Column):
+    """A vertical activity timeline with native rows and dividers."""
+
+    def __init__(self, events: Sequence[Any], *,
+                 accent: Optional[str] = None, **kwargs):
+        from pydrud.widgets.theme import Theme
+        color = accent or Theme.primary
+        children: list[Widget] = []
+        for index, event in enumerate(events):
+            if isinstance(event, dict):
+                title = event.get("title", "")
+                subtitle = event.get("subtitle", event.get("time", ""))
+                icon = event.get("icon")
+            else:
+                title, subtitle = (list(event) + [""])[:2]
+                icon = None
+            marker = Text("●", size=18, color=color)
+            content = Column(children=[Text(str(title), weight=600),
+                                       Text(str(subtitle), size=12,
+                                            color=Theme.text_secondary)],
+                             spacing=3, expand=1)
+            children.append(Row(children=[marker, content], spacing=12,
+                                style={"timelineIndex": index, "timelineIcon": icon}))
+            if index < len(events) - 1:
+                children.append(Divider(indent=10, end_indent=10))
+        super().__init__(children=children, spacing=0, **kwargs)
 
 
 class Align(Container):
@@ -532,7 +616,8 @@ class FormSection(Column):
 
 
 __all__ = [
-    "Expanded", "Flexible", "Align", "ColoredBox", "DecoratedBox",
+    "Expanded", "Flexible", "FractionallySizedBox", "FittedBox", "Align",
+    "MetricCard", "DataTable", "Timeline", "ColoredBox", "DecoratedBox",
     "ConstrainedBox", "LimitedBox", "Gap", "VerticalDivider",
     "SingleChildScrollView", "Wrap", "ButtonBar", "Heading", "Title",
     "Subtitle", "Label", "Caption", "Link", "NetworkImage", "AssetImage",

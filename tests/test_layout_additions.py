@@ -2,7 +2,7 @@
 
 import pytest
 
-from pydrud import FittedBox, FractionallySizedBox, Icons, Text
+from pydrud import DataTable, FittedBox, FractionallySizedBox, Icons, MetricCard, Text, Timeline
 
 
 def test_fractionally_sized_box_is_exported_and_serializes_factors():
@@ -37,3 +37,17 @@ def test_optional_icon_packs_can_be_loaded_without_a_hard_dependency():
     assert count == 2
     assert Icons.BRAND_GITHUB == "github"
     assert Icons.normalize("brandGithub") == "github"
+
+
+def test_premium_compositions_use_native_widget_trees():
+    metric = MetricCard("Revenue", "$12k", trend="+8%")
+    table = DataTable(["Name", "Status"], [["Ada", "Active"]], striped=True)
+    timeline = Timeline([{"title": "Created", "time": "Today"}])
+    assert metric.to_dict()["type"] == "Card"
+    assert table.to_dict()["type"] == "Card"
+    assert timeline.to_dict()["type"] == "Column"
+
+
+def test_data_table_rejects_mismatched_rows():
+    with pytest.raises(ValueError):
+        DataTable(["Only"], [["one", "too many"]])
