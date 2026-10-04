@@ -9,8 +9,8 @@ import tempfile
 import unittest
 
 from pydrud import (
-    App, Canvas, Column, Container, Icons, IconButton, Router,
-    Stack, Store, Text, job,
+    App, Canvas, Column, Container, Icons, Router,
+    Store, Text, job,
 )
 from pydrud.commands.analyzer import _check_icon_references, _check_shadowing_issues
 from pydrud.core.diff import TreeDiff
