@@ -708,6 +708,7 @@ def _sync_context(project_dir: str, found: dict) -> dict:
         "capabilities_list": sorted(capability_names),
         "capabilities": {name: name in capability_names
                          for name in known_capabilities},
+        "capability_permissions": sorted(generated_permissions),
         "firebase": _config_bool(
             config, "firebase", found.get("firebase", False)
             or os.path.isfile(os.path.join(project_dir, "google-services.json"))),
