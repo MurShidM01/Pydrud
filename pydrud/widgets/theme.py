@@ -157,7 +157,6 @@ class Icons(metaclass=_IconsMeta):
     A pack is a mapping, a module exposing ``ICONS``/``icons``, or an object
     with public string attributes. Values should be Android drawable names;
     SVG/vector asset pipelines can register their own renderer names too.
-    """
 
     Constants are published in ``ALL_CAPS`` form, but attribute lookup is
     case-insensitive and accepts camelCase for compatibility with Flutter and
