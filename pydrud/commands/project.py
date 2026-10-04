@@ -801,6 +801,12 @@ def create_project(
 
     seed_color = _normalise_color(accent) or _Colors.PRIMARY
     default_capabilities = ["haptics", "notifications"]
+    # The manifest is generated from capability bundles here too — not just
+    # during ``pydrud sync`` — so a fresh project declares VIBRATE and
+    # POST_NOTIFICATIONS before its first build (the starter app demos both).
+    from pydrud.commands.release import CAPABILITY_PERMISSIONS
+    starter_permissions = sorted(set().union(*(
+        CAPABILITY_PERMISSIONS[name] for name in default_capabilities)))
     ctx = {
         "project_name": name,
         "app_name": android_app_name,
@@ -837,6 +843,7 @@ def create_project(
             "haptics": True,
             "notifications": True,
         },
+        "capability_permissions": starter_permissions,
         # ABIs shipped in the APK. 32-bit arm is still common on budget
         # devices; x86_64 keeps the emulator working.
         "abi_filters_list": ["arm64-v8a", "armeabi-v7a", "x86_64"],

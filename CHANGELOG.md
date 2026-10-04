@@ -4,6 +4,30 @@ All notable changes to Pydrud are documented here.
 
 ## [Unreleased]
 
+### Fixed — CI and drift regressions
+* **New widgets are known to the analyzer again.** `FractionallySizedBox`,
+  `FittedBox`, `DataTable`, `MetricCard` and `Timeline` are registered in
+  `_WIDGET_CLASSES`, so the key-in-loops lint covers them and the registry
+  drift test passes. `widthFactor`/`heightFactor` join the valid style keys
+  (the renderer reads them).
+* **Fresh projects declare their starter permissions.** `pydrud init` now
+  renders `capability_permissions` into `AndroidManifest.xml` from the same
+  registry `pydrud sync` uses, so a new project declares
+  `android.permission.VIBRATE` and `android.permission.POST_NOTIFICATIONS`
+  before its first build instead of only after a manual sync.
+* **`capabilities add camera` suggests the permissions command again.** The
+  expanded capability table made `camera` resolvable as a bundle, which
+  silently re-enabled the exact mistake the command guards against. The
+  resolver now redirects `camera` to `pydrud permissions add camera` (the
+  flow documented by the generated manifest and the README release
+  workflow); the `camera` bundle stays registered for
+  `capabilities list --all` and the doctor's manifest checks.
+* **Icon-pack tests no longer leak into the vector drift check.**
+  `Icons.builtins()` separates the constants the framework ships from
+  icons registered at runtime via `Icons.load_pack` (`Icons.all()` still
+  reports both), the generated-template drift test checks only the shipped
+  constants, and the pack test restores the registry afterwards.
+
 ### Fixed — runtime hardening batch
 * **Legacy Gingerbread-era icons removed.** The ~106-entry
   `android.R.drawable` lookup table in the generated `ViewFactory` (which
