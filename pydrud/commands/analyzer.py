@@ -105,6 +105,8 @@ def run_analysis(path: str = "src") -> list[dict]:
             "message": f"Directory not found: {path}",
         }]
 
+    issues.extend(_check_shadowing_issues(src_dir))
+
     for root, _dirs, files in os.walk(src_dir):
         # Skip __pycache__ and virtual environments.
         if "__pycache__" in root or ".venv" in root or "venv" in root:
@@ -147,6 +149,7 @@ def _analyze_file(source: str, filepath: str) -> list[dict]:
     issues.extend(_check_inline_styles(tree, filepath))
     issues.extend(_check_event_handlers(tree, filepath))
     issues.extend(_check_page_update_in_loops(tree, filepath))
+    issues.extend(_check_icon_references(tree, filepath))
 
     return _dedupe(issues)
 
@@ -268,6 +271,53 @@ def _check_page_update_in_loops(tree: ast.AST, filepath: str) -> list[dict]:
                             "message": "page.update() inside a loop - "
                                        "causes excessive re-renders",
                         })
+    return issues
+
+
+# ── Check 5: Invalid icon references ────────────────────────────────────────
+
+
+def _check_icon_references(tree: ast.AST, filepath: str) -> list[dict]:
+    """Warn if code references non-existent Icons constants."""
+    from pydrud.widgets.theme import Icons
+
+    issues: list[dict] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "Icons":
+            icon_name = node.attr
+            try:
+                getattr(Icons, icon_name)
+            except AttributeError:
+                issues.append({
+                    "file": filepath,
+                    "line": node.lineno,
+                    "severity": _SEVERITY_ERROR,
+                    "message": f"Invalid icon reference: 'Icons.{icon_name}' does not exist",
+                })
+    return issues
+
+
+# ── Check 6: Package shadowing ──────────────────────────────────────────────
+
+
+def _check_shadowing_issues(src_dir: str) -> list[dict]:
+    """Check for directory packages that shadow same-named .py modules."""
+    issues: list[dict] = []
+    for root, dirs, files in os.walk(src_dir):
+        if "__pycache__" in root or ".venv" in root or "venv" in root:
+            continue
+        py_stems = {f[:-3]: f for f in files if f.endswith(".py") and f != "__init__.py"}
+        for d in dirs:
+            if d in py_stems:
+                dir_path = os.path.relpath(os.path.join(root, d), os.getcwd())
+                py_path = os.path.relpath(os.path.join(root, py_stems[d]), os.getcwd())
+                issues.append({
+                    "file": py_path,
+                    "line": 1,
+                    "severity": _SEVERITY_ERROR,
+                    "message": f"Package shadowing: directory '{dir_path}' shadows module '{py_path}'. "
+                               "Python import resolution prioritizes package directories over modules with the same name.",
+                })
     return issues
 
 

@@ -198,6 +198,14 @@ def _diff_children(
         _diff_node(old_w, new_w, patches, parent_key=parent_key, index=index)
 
 
+def _copy_auto_keys(fresh_node: Widget, prev_node: Widget) -> None:
+    """Recursively synchronize auto-generated keys for matched subtrees."""
+    fresh_node.key = prev_node.key
+    for fc, pc in zip(fresh_node.children, prev_node.children):
+        if getattr(fc, "_auto_key", False) and getattr(pc, "_auto_key", False):
+            _copy_auto_keys(fc, pc)
+
+
 def _preserve_keyless_identities(
     old_list: list[Widget], new_list: list[Widget], parent_key: str,
 ) -> None:
@@ -227,7 +235,7 @@ def _preserve_keyless_identities(
         # reliable identity without an explicit key, so positional matching is
         # less surprising than moving an arbitrary duplicate.
         if len(previous) == len(fresh) == 1:
-            fresh[0].key = previous[0].key
+            _copy_auto_keys(fresh[0], previous[0])
             used.add(previous[0].key)
             matched.add(id(fresh[0]))
 
@@ -263,6 +271,7 @@ def _keyless_fingerprint(widget: Widget) -> str:
             "expand": widget.expand,
             "visible": widget.visible,
             "tooltip": widget.tooltip,
+            "children": [_keyless_fingerprint(c) for c in widget.children],
         }
         return json.dumps(payload, sort_keys=True, default=str,
                           separators=(",", ":"))

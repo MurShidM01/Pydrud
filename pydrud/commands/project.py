@@ -96,8 +96,14 @@ def _strip_runtime_comments(bundle_dir: str) -> None:
                 tokens = tokenize.generate_tokens(io.StringIO(source).readline)
                 compact = tokenize.untokenize(
                     token for token in tokens if token.type != tokenize.COMMENT)
+                lines = [line.rstrip() for line in compact.splitlines()]
+                cleaned = []
+                for line in lines:
+                    if not line and (not cleaned or not cleaned[-1]):
+                        continue
+                    cleaned.append(line)
                 with open(path, "w", encoding="utf-8", newline="\n") as handle:
-                    handle.write(compact)
+                    handle.write("\n".join(cleaned) + "\n")
             except (OSError, tokenize.TokenError):
                 # A source file that cannot be compacted is still safe to
                 # ship verbatim; import correctness is more important than a

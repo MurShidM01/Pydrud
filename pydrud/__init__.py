@@ -16,7 +16,7 @@ from pydrud.core.events import Event, EventDispatcher
 from pydrud.core.results import Result, ResultError
 from pydrud.core.elements import Element, ElementTree
 from pydrud.core.subscriptions import Subscription
-from pydrud.core.tasks import TaskRunner, Timer, debounce, throttle
+from pydrud.core.tasks import TaskRunner, Timer, debounce, throttle, job
 from pydrud.core.responsive import (Breakpoints, MediaQuery, Responsive,
                                     ScreenInfo)
 from pydrud.runtime.navigation import Router, NavigationStack, Route, parse_url
@@ -185,6 +185,7 @@ __all__ = [
     "Timer",
     "debounce",
     "throttle",
+    "job",
     "Widget",
     "Container",
     "Column",

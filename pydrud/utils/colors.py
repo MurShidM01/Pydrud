@@ -43,4 +43,4 @@ def header(text: str) -> str:
 
 def print_step(step: str, status: str = "working") -> None:
     """Print a build step with the global Pydrud TUI formatting."""
-    print(tui.step_badge(step, status))
+    tui.safe_print(tui.step_badge(step, status))

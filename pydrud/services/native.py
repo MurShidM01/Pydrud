@@ -518,6 +518,9 @@ class Background(_Service):
         """Invoke a registered job locally (used by the worker and in tests)."""
         fn = self._jobs.get(str(name))
         if fn is None:
+            from pydrud.core.tasks import GLOBAL_JOBS
+            fn = GLOBAL_JOBS.get(str(name))
+        if fn is None:
             raise KeyError(f"No background job named {name!r}")
         try:
             return fn(dict(inputs or {}))
@@ -526,7 +529,8 @@ class Background(_Service):
 
     @property
     def jobs(self) -> list[str]:
-        return sorted(self._jobs)
+        from pydrud.core.tasks import GLOBAL_JOBS
+        return sorted(set(self._jobs) | set(GLOBAL_JOBS))
 
     # ── scheduling ───────────────────────────────────────────────────────
 

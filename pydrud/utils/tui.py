@@ -35,6 +35,17 @@ def _supports_color() -> bool:
         return False
 
 
+def _configure_io_encoding() -> None:
+    """Ensure stdout and stderr use UTF-8 with replacement fallback on Windows / cp1252."""
+    for stream in (sys.stdout, sys.stderr):
+        if stream and hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
+_configure_io_encoding()
 _COLOR_ENABLED = _supports_color()
 
 
@@ -127,7 +138,7 @@ def safe_text(text: object, stream=None) -> str:
     """
     value = str(text)
     target = stream if stream is not None else sys.stdout
-    encoding = getattr(target, "encoding", None) or locale.getpreferredencoding(False)
+    encoding = getattr(target, "encoding", None) or locale.getpreferredencoding(False) or "utf-8"
     try:
         value.encode(encoding)
         return value
@@ -137,7 +148,7 @@ def safe_text(text: object, stream=None) -> str:
             value.encode(encoding)
             return value
         except (LookupError, UnicodeEncodeError):
-            return value.encode(encoding, errors="replace").decode(encoding)
+            return value.encode(encoding, errors="replace").decode(encoding, errors="replace")
 
 
 def safe_print(*values, sep: str = " ", end: str = "\n", file=None) -> None:

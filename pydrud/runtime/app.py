@@ -1078,6 +1078,15 @@ class App:
 
     # ── Router support ────────────────────────────────────────────────────
 
+    @property
+    def router(self):
+        """The navigation Router attached to this App, or None."""
+        return getattr(self, "_router", None)
+
+    @router.setter
+    def router(self, router) -> None:
+        self.attach_router(router)
+
     def attach_router(self, router) -> None:
         """Attach a Router so the hardware back button pops screens."""
         self._router = router
@@ -1690,6 +1699,15 @@ class _Page:
 
             self._http = Http(self._app.run_task)
         return self._http
+
+    @property
+    def router(self):
+        """The navigation router for this page/app."""
+        if getattr(self._app, "_router", None) is not None:
+            return self._app._router
+        if getattr(self._app, "router", None) is not None:
+            return self._app.router
+        return None
 
     def invoke(self, cmd: str, **data):
         """Low-level escape hatch: call any native command and await a Result."""

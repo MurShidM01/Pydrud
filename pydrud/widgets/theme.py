@@ -318,6 +318,31 @@ class Icons(metaclass=_IconsMeta):
     GLOBE = "globe"
     TRANSLATE = "translate"
 
+    # Gaming & interaction icons
+    ASTROPHYSICS = "astrophysics"
+    GAMES = "games"
+    GAMEPAD = "gamepad"
+    CONTROLLER = "controller"
+    JOYSTICK = "joystick"
+    TOUCH_APP = "touch_app"
+    TOUCH = "touch"
+    ANIMATION = "animation"
+    CANVAS = "canvas"
+    STATE = "state"
+    VIBRATION = "vibration"
+    SCREEN_ROTATION = "screen_rotation"
+    ARROW_BACK = "arrow_back"
+    ARROW_FORWARD = "arrow_forward"
+    ARROW_UP = "arrow_up"
+    ARROW_DOWN = "arrow_down"
+    SPARKLES = "sparkles"
+    VOLUME_UP = "volume_up"
+    VOLUME_OFF = "volume_off"
+    VOLUME_MUTE = "volume_mute"
+    MUTE = "mute"
+    SOUND = "sound"
+    FULLSCREEN_EXIT = "fullscreen_exit"
+
     @classmethod
     def normalize(cls, name: str) -> str:
         """Normalise a constant spelling to the renderer's icon name.

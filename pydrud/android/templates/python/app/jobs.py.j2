@@ -27,7 +27,8 @@ def _refresh(inputs):
 
 def run_background_job(name, inputs_json="{}"):
     """Entry point invoked by PydrudWorker.java."""
-    handler = JOBS.get(name)
+    from pydrud.core.tasks import GLOBAL_JOBS
+    handler = JOBS.get(name) or GLOBAL_JOBS.get(name)
     if handler is None:
         return f"no such job: {name}"
     try:

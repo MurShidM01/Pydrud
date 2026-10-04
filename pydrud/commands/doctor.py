@@ -50,6 +50,7 @@ def run_doctor():
         tui.safe_print(tui.render_section("Project"))
         all_ok &= _check_chaquopy(project)
         all_ok &= _check_manifest_permissions(project)
+        all_ok &= _check_project_shadowing(project)
 
     tui.safe_print(tui.render_summary(
         "Environment is ready" if all_ok else "Environment needs attention",
@@ -241,6 +242,26 @@ def _check_chaquopy(project_dir: str) -> bool:
         configured = False
     _print_check("Chaquopy", "configured" if configured else "missing from Android Gradle", configured)
     return configured
+
+
+def _check_project_shadowing(project_dir: str) -> bool:
+    """Ensure no directory packages shadow .py modules in src/."""
+    src_dir = os.path.join(project_dir, "src")
+    if not os.path.isdir(src_dir):
+        return True
+    shadowed = []
+    for root, dirs, files in os.walk(src_dir):
+        if "__pycache__" in root or ".venv" in root or "venv" in root:
+            continue
+        py_stems = {f[:-3] for f in files if f.endswith(".py") and f != "__init__.py"}
+        for d in dirs:
+            if d in py_stems:
+                rel = os.path.relpath(os.path.join(root, d), project_dir)
+                shadowed.append(rel)
+    ok_ = not shadowed
+    detail = "no package shadowing" if ok_ else f"shadowing detected in: {', '.join(shadowed)}"
+    _print_check("Import integrity", detail, ok_)
+    return ok_
 
 
 def _check_manifest_permissions(project_dir: str) -> bool:

@@ -632,6 +632,15 @@ class AppTester:
             time.sleep(0.005)
         return self
 
+    def refresh(self, timeout: float = 1.0) -> "AppTester":
+        """Alias for settle(); waits for any pending renders/events to complete."""
+        return self.settle(timeout=timeout)
+
+    @property
+    def connected(self) -> bool:
+        """True when the fake device has received a connection from the app."""
+        return self.device._connected.is_set() and getattr(self.app, "_running", False)
+
     def _quiet(self, target: int) -> bool:
         """True when nothing is in flight in either direction."""
         app = self.app
