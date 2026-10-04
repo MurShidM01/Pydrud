@@ -320,12 +320,13 @@ def terminal_qr(
     ansi: Optional[bool] = None,
     max_width: Optional[int] = None,
 ) -> str:
-    """Render a compact, scanner-friendly terminal QR code.
+    """Render a clean, square, scanner-friendly terminal QR code.
 
-    The output is responsive: small symbols use the half-block rendering
-    (one module per column), while larger symbols — or terminals too narrow
-    to show them — are drawn with quarter-block glyphs that pack two modules
-    into every column and line, halving both the width and the height.
+    In normal terminal widths, it uses half-block unicode characters (▀, ▄, █, space)
+    where 1 character width and 0.5 line height form a 1:1 square module,
+    ensuring the QR code is rendered as a clean square with width == height.
+    On narrow terminals with max_width constraint, it falls back to
+    compact quarter-block rendering to avoid terminal line-wrapping.
     """
     matrix = _qr_matrix(payload)
     if ansi is None:
@@ -338,7 +339,7 @@ def terminal_qr(
 
     size = len(matrix[0]) if matrix else 0
     available = max(16, int(max_width) - _QR_INDENT)
-    if size > _HALF_BLOCK_MAX_MODULES or size > available:
+    if size > available:
         lines = _render_quarter_block(matrix, ansi)
     else:
         lines = _render_half_block(matrix, ansi)

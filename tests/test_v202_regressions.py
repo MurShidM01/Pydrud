@@ -155,5 +155,27 @@ class TestAnalyzerChecks(unittest.TestCase):
         self.assertIn("Invalid icon reference", issues[0]["message"])
 
 
+class TestSquareQRCode(unittest.TestCase):
+    def test_terminal_qr_is_square(self):
+        from pydrud.commands.preview import terminal_qr
+        from pydrud.core.preview import PreviewSession, build_preview_uri
+
+        session = PreviewSession.create("com.example.preview", "Preview App")
+        uri = build_preview_uri(session, "192.168.1.50", 8597)
+        qr_str = terminal_qr(uri, ansi=False)
+        lines = qr_str.splitlines()
+
+        # In monospace terminal fonts, 1 line height is ~2 char widths.
+        # Width in chars should be approximately 2x height in lines (width == height visually).
+        width_chars = len(lines[0])
+        height_lines = len(lines)
+        visual_height = height_lines * 2
+
+        self.assertGreater(width_chars, 0)
+        self.assertGreater(height_lines, 0)
+        self.assertAlmostEqual(width_chars, visual_height, delta=4)
+        self.assertTrue(any("█▀▀▀▀▀█" in line for line in lines))
+
+
 if __name__ == "__main__":
     unittest.main()

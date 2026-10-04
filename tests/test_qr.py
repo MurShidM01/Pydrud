@@ -201,10 +201,13 @@ class TerminalQRWithoutThirdPartyPackageTests(unittest.TestCase):
         rendered = terminal_qr(
             build_preview_uri(session, "192.168.1.24", 8597), ansi=False)
         lines = rendered.splitlines()
-        # Large preview payloads use the compact quarter-block rendering.
+        # Preview payloads use the square half-block rendering.
         self.assertTrue(10 < len(lines) < 40)
-        self.assertLess(max(map(len, lines)), 50)
-        self.assertTrue(any("▛▀▀▌" in line for line in lines))
+        width = len(lines[0])
+        height_in_char_units = len(lines) * 2
+        # Visual width and height are approximately equal (square).
+        self.assertAlmostEqual(width, height_in_char_units, delta=4)
+        self.assertTrue(any("█▀▀▀▀▀█" in line for line in lines))
 
     def test_fallback_output_is_scannable(self):
         session = PreviewSession.create("com.example.preview", "Preview App")

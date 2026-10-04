@@ -102,12 +102,10 @@ def test_terminal_qr_is_compact_and_contains_finder_pattern_modules():
     rendered = terminal_qr(
         build_preview_uri(session, "192.168.1.24", 8597), ansi=False)
     lines = rendered.splitlines()
-    # Preview URIs use the compact quarter-block rendering: two modules per
-    # column and per line, so the code stays a normal terminal size.
+    # Preview URIs use the square half-block rendering on standard terminals.
     assert 10 < len(lines) < 40
-    assert max(map(len, lines)) < 50
-    # Top-left finder pattern as drawn with quadrant glyphs.
-    assert any("▛▀▀▌" in line for line in lines)
+    # Top-left finder pattern as drawn with half-block glyphs.
+    assert any("█▀▀▀▀▀█" in line for line in lines)
 
 
 def test_terminal_qr_adapts_to_narrow_terminals():
