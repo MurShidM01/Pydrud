@@ -15,7 +15,6 @@ from __future__ import annotations
 import re
 
 from pydrud.widgets.tokens import Tokens
-from pydrud.widgets.styling import LinearGradient, RadialGradient, SweepGradient
 
 
 def _argb(hex_rgb: str, alpha: str = "FF") -> str:

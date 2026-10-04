@@ -102,9 +102,19 @@ def test_terminal_qr_is_compact_and_contains_finder_pattern_modules():
     rendered = terminal_qr(
         build_preview_uri(session, "192.168.1.24", 8597), ansi=False)
     lines = rendered.splitlines()
-    assert 20 < len(lines) < 50
-    assert max(map(len, lines)) < 80
-    assert any("█▀▀▀▀▀█" in line for line in lines)
+    # Preview URIs use the compact quarter-block rendering: two modules per
+    # column and per line, so the code stays a normal terminal size.
+    assert 10 < len(lines) < 40
+    assert max(map(len, lines)) < 50
+    # Top-left finder pattern as drawn with quadrant glyphs.
+    assert any("▛▀▀▌" in line for line in lines)
+
+
+def test_terminal_qr_adapts_to_narrow_terminals():
+    session = PreviewSession.create("com.example.preview", "Preview App")
+    uri = build_preview_uri(session, "192.168.1.24", 8597)
+    narrow = terminal_qr(uri, ansi=False, max_width=40)
+    assert max(map(len, narrow.splitlines())) <= 40
 
 
 def test_hello_authentication_and_capability_negotiation():

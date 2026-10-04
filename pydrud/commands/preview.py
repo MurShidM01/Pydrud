@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import shutil
 import socket
 import sys
 from pathlib import Path
@@ -211,16 +212,20 @@ def _qr_matrix(payload: str) -> list[list[bool]]:
 
     Pydrud ships a dependency-free encoder so ``pydrud dev`` always prints a
     scannable code. The third-party ``qrcode`` package is used when it happens
-    to be installed, purely to stay byte-identical with previous releases.
+    to be installed, purely to stay identical with the builtin encoder.
+
+    Error-correction level ``L`` keeps the symbol as small as possible, which
+    is the right trade-off for a high-contrast code scanned point-blank off a
+    monitor.
     """
     try:
         import qrcode
     except ImportError:
-        return encode_qr_matrix(payload, error_correction="M", border=2)
+        return encode_qr_matrix(payload, error_correction="L", border=2)
 
     qr = qrcode.QRCode(
         version=None,
-        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
         box_size=1,
         border=2,
     )
@@ -229,17 +234,28 @@ def _qr_matrix(payload: str) -> list[list[bool]]:
     return [[bool(cell) for cell in row] for row in qr.get_matrix()]
 
 
-def terminal_qr(payload: str, *, ansi: Optional[bool] = None) -> str:
-    """Render a compact, scanner-friendly terminal QR code."""
-    matrix = _qr_matrix(payload)
-    if len(matrix) % 2:
-        matrix.append([False] * len(matrix[0]))
-    if ansi is None:
-        ansi = bool(getattr(sys.stdout, "isatty", lambda: False)())
+# Indentation the banner adds in front of every QR line, plus a safety margin.
+_QR_INDENT = 4
+
+# Symbols up to this many modules per side stay in the roomier half-block
+# rendering (two modules per character cell); anything larger switches to the
+# quarter-block rendering so the code keeps a normal, compact footprint.
+_HALF_BLOCK_MAX_MODULES = 45
+
+# Quadrant glyphs indexed by the four module bits (upper-left, upper-right,
+# lower-left, lower-right) where a set bit means "dark module".
+_QUADRANT_GLYPHS = " ▗▖▄▝▐▞▟▘▚▌▙▀▜▛█"
+
+
+def _render_half_block(matrix: list[list[bool]], ansi: bool) -> list[str]:
+    """One module per column, two module rows per text line."""
+    rows = [list(row) for row in matrix]
+    if len(rows) % 2:
+        rows.append([False] * len(rows[0]))
 
     lines: list[str] = []
-    for row in range(0, len(matrix), 2):
-        top, bottom = matrix[row], matrix[row + 1]
+    for row in range(0, len(rows), 2):
+        top, bottom = rows[row], rows[row + 1]
         if ansi:
             parts: list[str] = []
             last = None
@@ -265,6 +281,67 @@ def terminal_qr(payload: str, *, ansi: Optional[bool] = None) -> str:
                 (False, True): "▄",
             }
             lines.append("".join(glyphs[pair] for pair in zip(top, bottom)))
+    return lines
+
+
+def _render_quarter_block(matrix: list[list[bool]], ansi: bool) -> list[str]:
+    """Two modules per column and per text line — half the width and height."""
+    width = len(matrix[0])
+    pad_col = width % 2
+    rows = [list(row) + [False] * pad_col for row in matrix]
+    width += pad_col
+    if len(rows) % 2:
+        rows.append([False] * width)
+
+    lines: list[str] = []
+    for row in range(0, len(rows), 2):
+        top, bottom = rows[row], rows[row + 1]
+        cells = []
+        for col in range(0, width, 2):
+            index = (
+                (8 if top[col] else 0)
+                | (4 if top[col + 1] else 0)
+                | (2 if bottom[col] else 0)
+                | (1 if bottom[col + 1] else 0)
+            )
+            cells.append(_QUADRANT_GLYPHS[index])
+        line = "".join(cells)
+        if ansi:
+            # Dark modules as black foreground on a white background so the
+            # code keeps proper contrast on any terminal colour scheme.
+            line = f"\x1b[30;47m{line}\x1b[0m"
+        lines.append(line)
+    return lines
+
+
+def terminal_qr(
+    payload: str,
+    *,
+    ansi: Optional[bool] = None,
+    max_width: Optional[int] = None,
+) -> str:
+    """Render a compact, scanner-friendly terminal QR code.
+
+    The output is responsive: small symbols use the half-block rendering
+    (one module per column), while larger symbols — or terminals too narrow
+    to show them — are drawn with quarter-block glyphs that pack two modules
+    into every column and line, halving both the width and the height.
+    """
+    matrix = _qr_matrix(payload)
+    if ansi is None:
+        ansi = bool(getattr(sys.stdout, "isatty", lambda: False)())
+    if max_width is None:
+        try:
+            max_width = shutil.get_terminal_size(fallback=(80, 24)).columns
+        except (OSError, ValueError):  # pragma: no cover - defensive
+            max_width = 80
+
+    size = len(matrix[0]) if matrix else 0
+    available = max(16, int(max_width) - _QR_INDENT)
+    if size > _HALF_BLOCK_MAX_MODULES or size > available:
+        lines = _render_quarter_block(matrix, ansi)
+    else:
+        lines = _render_half_block(matrix, ansi)
     return "\n".join(lines)
 
 
