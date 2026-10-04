@@ -138,6 +138,9 @@ class _IconsMeta(type):
         value = vars(cls).get(token)
         if isinstance(value, str):
             return value
+        value = cls._external.get(name)
+        if isinstance(value, str):
+            return value
         value = cls._external.get(token)
         if isinstance(value, str):
             return value
@@ -382,7 +385,8 @@ class Icons(metaclass=_IconsMeta):
         never imported during framework startup and a pack cannot overwrite a
         built-in icon constant.
         """
-        token = re.sub(r"(?<!^)([A-Z])", r"_\1", str(name)).replace("-", "_").upper()
+        raw = str(name).replace("-", "_")
+        token = raw if raw.isupper() else re.sub(r"(?<!^)([A-Z])", r"_\1", raw).upper()
         if not token.isidentifier() or not token.isupper():
             raise ValueError("icon name must contain letters, digits or underscores")
         if token in vars(cls) and isinstance(vars(cls)[token], str):
@@ -412,7 +416,8 @@ class Icons(metaclass=_IconsMeta):
         for name, value in items:
             if str(name).startswith("_") or not isinstance(value, str):
                 continue
-            token = re.sub(r"(?<!^)([A-Z])", r"_\1", str(name)).replace("-", "_").upper()
+            raw = str(name).replace("-", "_")
+            token = raw if raw.isupper() else re.sub(r"(?<!^)([A-Z])", r"_\1", raw).upper()
             if token in vars(cls) or token in cls._external:
                 continue
             cls.register(token, value)
@@ -430,6 +435,8 @@ class Icons(metaclass=_IconsMeta):
         raw = str(name).strip()
         token = re.sub(r"(?<!^)([A-Z])", r"_\1", raw).replace("-", "_").upper()
         value = vars(cls).get(token)
+        if not isinstance(value, str):
+            value = cls._external.get(token)
         return value if isinstance(value, str) else raw.lower().replace("-", "_")
 
     @classmethod
