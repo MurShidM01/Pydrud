@@ -651,17 +651,24 @@ def capabilities_remove(names):
 
 
 @capabilities.command("list")
-def capabilities_list():
-    """List capabilities enabled for this project."""
-    from pydrud.commands.release import list_capabilities
+@click.option("--all", "show_all", is_flag=True,
+              help="Show every supported capability and its description.")
+def capabilities_list(show_all: bool):
+    """List enabled capabilities, or all supported capability bundles."""
+    from pydrud.commands.release import (CAPABILITY_DESCRIPTIONS,
+                                         list_capabilities)
 
     root = _project_or_exit()
-    enabled = list_capabilities(root)
-    _show_header("capabilities list", "Enabled Android capabilities",
+    enabled = set(list_capabilities(root))
+    title = "Supported Android capabilities" if show_all else "Enabled Android capabilities"
+    _show_header("capabilities list", title,
                  details=(("Project", os.path.basename(root)),))
-    if enabled:
-        for name in enabled:
-            click.echo(tui.neutral_badge(name))
+    names = sorted(CAPABILITY_DESCRIPTIONS if show_all else enabled)
+    if names:
+        for name in names:
+            marker = "[enabled] " if name in enabled else ""
+            description = CAPABILITY_DESCRIPTIONS.get(name, "")
+            click.echo(tui.neutral_badge(f"{marker}{name} — {description}"))
     else:
         click.echo(tui.neutral_badge("No optional capabilities enabled."))
 

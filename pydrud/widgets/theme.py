@@ -138,16 +138,35 @@ class _IconsMeta(type):
         value = vars(cls).get(token)
         if isinstance(value, str):
             return value
+        value = cls._external.get(name)
+        if isinstance(value, str):
+            return value
+        value = cls._external.get(token)
+        if isinstance(value, str):
+            return value
         raise AttributeError(f"Icons has no icon named {name!r}")
 
 
 class Icons(metaclass=_IconsMeta):
     """Icon names understood by the Android ``ViewFactory``.
 
+    Applications may register icons from any optional pip package without
+    making Pydrud depend on that package::
+
+        from pydrud import Icons
+        Icons.load_pack("simple_icons")
+        Icon(Icons.BRAND_GITHUB)
+
+    A pack is a mapping, a module exposing ``ICONS``/``icons``, or an object
+    with public string attributes. Values should be Android drawable names;
+    SVG/vector asset pipelines can register their own renderer names too.
+
     Constants are published in ``ALL_CAPS`` form, but attribute lookup is
     case-insensitive and accepts camelCase for compatibility with Flutter and
     other UI toolkits. Values remain lower-case renderer names.
     """
+
+    _external: dict[str, str] = {}
 
     STAR = "star"
     HOME = "home"
@@ -343,6 +362,68 @@ class Icons(metaclass=_IconsMeta):
     SOUND = "sound"
     FULLSCREEN_EXIT = "fullscreen_exit"
 
+    # Common Flutter/Material spellings.  These aliases intentionally map to
+    # renderer-backed names rather than emitting unsupported icon identifiers.
+    PLAY_ARROW = PLAY
+    EMOJI_EVENTS = TROPHY
+    SKULL = WARNING
+    LEADERBOARD = ANALYTICS
+    TIMELAPSE = CLOCK
+    COLLISION = CLOSE
+    RESTART_ALT = UNDO
+    STORAGE = DATABASE
+    ARROW_BACK_IOS = ARROW_BACK
+    MORE = MORE_VERT
+    REFRESH_OUTLINED = REFRESH
+    SETTINGS_OUTLINED = SETTINGS
+
+    @classmethod
+    def register(cls, name: str, value: str) -> str:
+        """Register one optional-pack icon and return its renderer value.
+
+        Registration is deliberately explicit: arbitrary pip packages are
+        never imported during framework startup and a pack cannot overwrite a
+        built-in icon constant.
+        """
+        raw = str(name).replace("-", "_")
+        token = raw if raw.isupper() else re.sub(r"(?<!^)([A-Z])", r"_\1", raw).upper()
+        if not token.isidentifier() or not token.isupper():
+            raise ValueError("icon name must contain letters, digits or underscores")
+        if token in vars(cls) and isinstance(vars(cls)[token], str):
+            raise ValueError(f"cannot overwrite built-in icon {token}")
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("icon value must be a non-empty string")
+        cls._external[token] = value.strip()
+        return cls._external[token]
+
+    @classmethod
+    def load_pack(cls, pack) -> int:
+        """Load icons from a mapping, module, or installed pip icon package.
+
+        The package is imported only when a string is supplied. Supported
+        shapes are ``ICONS``/``icons`` mappings and public string attributes.
+        Returns the number of newly registered icons.
+        """
+        if isinstance(pack, str):
+            import importlib
+            pack = importlib.import_module(pack)
+        source = getattr(pack, "ICONS", getattr(pack, "icons", pack))
+        if isinstance(source, dict):
+            items = source.items()
+        else:
+            items = ((name, getattr(source, name)) for name in dir(source))
+        added = 0
+        for name, value in items:
+            if str(name).startswith("_") or not isinstance(value, str):
+                continue
+            raw = str(name).replace("-", "_")
+            token = raw if raw.isupper() else re.sub(r"(?<!^)([A-Z])", r"_\1", raw).upper()
+            if token in vars(cls) or token in cls._external:
+                continue
+            cls.register(token, value)
+            added += 1
+        return added
+
     @classmethod
     def normalize(cls, name: str) -> str:
         """Normalise a constant spelling to the renderer's icon name.
@@ -354,14 +435,17 @@ class Icons(metaclass=_IconsMeta):
         raw = str(name).strip()
         token = re.sub(r"(?<!^)([A-Z])", r"_\1", raw).replace("-", "_").upper()
         value = vars(cls).get(token)
+        if not isinstance(value, str):
+            value = cls._external.get(token)
         return value if isinstance(value, str) else raw.lower().replace("-", "_")
 
     @classmethod
     def all(cls) -> list[str]:
-        return sorted(
-            value for name, value in vars(cls).items()
-            if name.isupper() and isinstance(value, str)
-        )
+        return sorted({
+            *(value for name, value in vars(cls).items()
+              if name.isupper() and isinstance(value, str)),
+            *cls._external.values(),
+        })
 
 
 class Spacing:

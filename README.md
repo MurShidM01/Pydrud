@@ -932,7 +932,134 @@ form.set_error("email", "Already registered")         # server-side errors
 Validators: `required`, `min_length`, `max_length`, `email`, `phone`, `url`,
 `numeric`, `between`, `pattern`, `matches` (cross-field), `custom`.
 
-### Native services (v1.2)
+### Native services and runtime permissions (v2.0.2)
+
+Pydrud separates **manifest declaration**, **user consent**, and **native use**:
+
+1. Enable the smallest capability bundle your feature needs.
+2. Run `pydrud sync` so Android receives the matching manifest entries.
+3. Ask the user at the moment the feature is needed.
+4. Check the result before opening the camera, contacts, microphone, etc.
+
+Do not request every permission at startup. Android and Google Play expect a
+clear, user-visible reason for each dangerous permission. `pydrud capabilities
+list --all` shows the supported production-safe bundles.
+
+```bash
+# Build-time declaration (run from the project directory)
+pydrud capabilities add camera microphone contacts
+pydrud capabilities add notifications files
+pydrud sync
+
+# Inspect enabled and available bundles
+pydrud capabilities list
+pydrud capabilities list --all
+```
+
+`files`, `downloads`, and `share` use Android's user-mediated system intents;
+they do not request broad storage access. Avoid copying old internet permission
+lists into a manifest: `BIND_*`, `MANAGE_*`, `INTERNAL_*`, `DUMP`, `INSTALL_*`
+and similar permissions are reserved for the Android system or device-owner
+apps and will not work for a normal Play Store application.
+
+#### Allow / Don't allow permission popups
+
+`page.permissions.request(...)` opens the native Android permission dialog. The
+user sees Android's own **Allow** / **Don't allow** controls; Pydrud does not
+fake or bypass that security prompt. The result is a mapping from the full
+Android permission name to a boolean:
+
+```python
+from pydrud import Button, Text, Column, CameraPreview
+
+
+def request_camera(page):
+    # This is the real Android Allow / Don't allow popup.
+    page.permissions.request("camera").then(
+        lambda grants: start_camera(page, grants)
+    ).catch(lambda error: page.dialog.alert(
+        f"Camera permission failed: {error}"
+    ))
+
+
+def start_camera(page, grants):
+    if grants.get("android.permission.CAMERA", False):
+        page.add(CameraPreview(key="camera"))
+    else:
+        # The user selected Don't allow. Explain the feature and offer retry.
+        page.dialog.confirm(
+            "Camera access is needed to scan QR codes. Open app settings?",
+            title="Permission needed",
+            ok="Open settings",
+            cancel="Not now",
+        ).then(lambda open_settings: (
+            page.permissions.open_settings() if open_settings else None
+        ))
+
+page.add(Button("Scan QR code", on_click=lambda event: request_camera(page)))
+```
+
+For multiple permissions, request them together only when the feature needs
+them:
+
+```python
+page.permissions.request("camera", "microphone").then(
+    lambda grants: print(grants)
+)
+```
+
+You can inspect permission state without opening a popup. The state is
+`granted`, `denied`, or `permanently_denied`:
+
+```python
+page.permissions.status("contacts").then(print)
+page.permissions.check("contacts").then(print)  # True / False
+
+# Safe synchronous check from a worker/guard; never opens a dialog.
+if page.permissions.is_granted("camera"):
+    open_scanner()
+```
+
+If Android reports `permanently_denied`, show an explanation and let the user
+open the app's system settings. Never repeatedly prompt after a permanent
+denial:
+
+```python
+page.permissions.status("notifications").then(
+    lambda state: page.permissions.open_settings()
+    if state == "permanently_denied" else None
+)
+```
+
+Android 13+ requires `notifications` to be declared before posting runtime
+notifications. The notification itself is separate from the permission
+popup:
+
+```python
+page.notifications.create_channel(
+    "updates", "App updates", importance="high"
+).then(lambda _: page.notifications.show(
+    "Sync complete", "Your files are ready", id=42,
+    channel="updates", route="/files"
+))
+```
+
+The system permission popup is controlled by Android. Use `dialog.confirm`
+only for an explanatory pre-permission screen; the final Allow / Don't allow
+decision must always come from `page.permissions.request`.
+
+```python
+page.dialog.confirm(
+    "Allow notifications so we can tell you when downloads finish?",
+    title="Enable notifications",
+    ok="Continue",
+    cancel="Not now",
+).then(lambda proceed: (
+    page.permissions.request("notifications") if proceed else None
+))
+```
+
+#### Available native services
 
 ```python
 page.dialog.confirm("Delete?").then(lambda yes: delete() if yes else None)
@@ -1435,12 +1562,16 @@ agp_version: "8.13.2"
 gradle_version: "8.14.4"
 ```
 
-`capabilities:` is for generated feature bundles (`haptics`, `notifications`,
-`foreground_service`, `boot_receiver`, `wake_lock`). `permissions:` is for
-app-specific Android permissions such as `CAMERA`, `RECORD_AUDIO` or
-`ACCESS_FINE_LOCATION`. The CLI updates both YAML and the generated manifest:
-`pydrud capabilities add haptics` or `pydrud permissions add camera`, then
-`pydrud sync`.
+`capabilities:` is for generated feature bundles. Supported bundles include
+`camera`, `microphone`, `location`, `contacts`, `calendar`, `phone`, `sms`,
+`media`, `bluetooth`, `nfc`, `biometrics`, `activity_recognition`,
+`exact_alarms`, `battery_optimization`, `files`, `downloads`, `share`, `audio`,
+`sensors`, `foreground_service`, `boot_receiver`, `wake_lock`, `haptics` and
+`notifications`. Use `pydrud capabilities list --all` for descriptions.
+`permissions:` remains available for an individual Android permission. The CLI
+updates YAML and the generated manifest: `pydrud capabilities add contacts` or
+`pydrud permissions add camera`, then `pydrud sync`. Runtime dangerous
+permissions still require `page.permissions.request(...)` and user consent.
 
 `pydrud.toml` continues to own `[python.packages]` and `[theme]`. Its legacy
 `[app]` identity fields are kept in sync with YAML for compatibility; when
