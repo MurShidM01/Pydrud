@@ -343,6 +343,21 @@ class Icons(metaclass=_IconsMeta):
     SOUND = "sound"
     FULLSCREEN_EXIT = "fullscreen_exit"
 
+    # Common Flutter/Material spellings.  These aliases intentionally map to
+    # renderer-backed names rather than emitting unsupported icon identifiers.
+    PLAY_ARROW = PLAY
+    EMOJI_EVENTS = TROPHY
+    SKULL = WARNING
+    LEADERBOARD = ANALYTICS
+    TIMELAPSE = CLOCK
+    COLLISION = CLOSE
+    RESTART_ALT = UNDO
+    STORAGE = DATABASE
+    ARROW_BACK_IOS = ARROW_BACK
+    MORE = MORE_VERT
+    REFRESH_OUTLINED = REFRESH
+    SETTINGS_OUTLINED = SETTINGS
+
     @classmethod
     def normalize(cls, name: str) -> str:
         """Normalise a constant spelling to the renderer's icon name.

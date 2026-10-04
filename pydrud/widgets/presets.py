@@ -51,6 +51,52 @@ class Flexible(Container):
         super().__init__(child=child, expand=int(flex), **kwargs)
 
 
+class FractionallySizedBox(Container):
+    """Size a child as a fraction of its available width and/or height.
+
+    Factors are expressed as values between zero and one.  ``None`` leaves
+    that axis unconstrained, matching Flutter's FractionallySizedBox API.
+    The factors are kept in the serialized style so the Android renderer can
+    resolve them against the parent at layout time.
+    """
+
+    def __init__(self, child: Optional[Widget] = None, *,
+                 width_factor: Optional[float] = None,
+                 height_factor: Optional[float] = None,
+                 alignment: Optional[str] = None, **kwargs):
+        for name, value in (("width_factor", width_factor),
+                            ("height_factor", height_factor)):
+            if value is not None and not 0 <= value <= 1:
+                raise ValueError(f"{name} must be between 0 and 1")
+        style = dict(kwargs.pop("style", {}) or {})
+        if width_factor is not None:
+            style["widthFactor"] = float(width_factor)
+        if height_factor is not None:
+            style["heightFactor"] = float(height_factor)
+        super().__init__(child=child, alignment=alignment, style=style,
+                         **kwargs)
+
+
+class FittedBox(Container):
+    """Scale and position a child to fit its available bounds.
+
+    ``fit`` accepts the renderer's standard scale modes (for example
+    ``contain``, ``cover``, ``fill`` and ``none``).
+    """
+
+    FITS = {"contain", "cover", "fill", "fit_width", "fit_height", "none"}
+
+    def __init__(self, child: Optional[Widget] = None, *,
+                 fit: str = "contain", alignment: Optional[str] = None,
+                 **kwargs):
+        if fit not in self.FITS:
+            raise ValueError(f"fit must be one of {sorted(self.FITS)}")
+        style = dict(kwargs.pop("style", {}) or {})
+        style["fit"] = fit
+        super().__init__(child=child, alignment=alignment, style=style,
+                         **kwargs)
+
+
 class Align(Container):
     """Place a child at a named :class:`~pydrud.Alignment` position."""
 

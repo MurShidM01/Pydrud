@@ -50,7 +50,8 @@ from pydrud.widgets.presets import (
     ActionChip, Align, AssetImage, BackButton, ButtonBar, Caption,
     CheckboxListTile, ChoiceChip, CircleAvatar, CircleImage, CloseButton,
     ColoredBox, ConstrainedBox, DecoratedBox, EmptyState, ErrorState, Expanded,
-    Flexible, FormSection, Gap, Heading, InfoCard, Label, LimitedBox, Link,
+    Flexible, FractionallySizedBox, FittedBox, FormSection, Gap, Heading, InfoCard,
+    Label, LimitedBox, Link,
     LoadingState, MenuButton, NavigationTile, NetworkImage, Placeholder,
     RadioListTile, SectionHeader, SettingsTile, SingleChildScrollView, StatCard,
     Subtitle, SwitchListTile, Title, VerticalDivider, Wrap,
@@ -209,6 +210,8 @@ __all__ = [
     # Flutter-style presets and common compositions
     "Expanded",
     "Flexible",
+    "FractionallySizedBox",
+    "FittedBox",
     "Align",
     "ColoredBox",
     "DecoratedBox",
