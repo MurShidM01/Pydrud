@@ -687,16 +687,46 @@ class AppTester:
     def requested(self, cmd: str, timeout: float = 1.0) -> dict:
         return self.device.wait_for_request(cmd, timeout)
 
-    def _resolve(self, key_or_text: str) -> str:
+    def wait_for(self, key_or_text: str, timeout: float = 1.0) -> "AppTester":
+        """Wait until a widget with this key (or text) is on screen.
+
+        Navigation and timers rebuild the tree a moment after the event
+        that triggered them; a test that taps straight through used to
+        fail with "No widget with key …" purely on timing.
+        """
+        self._resolve(key_or_text, timeout=timeout)
+        return self
+
+    def exists(self, key_or_text: str) -> bool:
+        """True when the widget is on screen right now (no waiting)."""
+        return self._match(key_or_text) is not None
+
+    def _match(self, key_or_text: str) -> Optional[str]:
         root = self.device.root
         if root is None:
-            raise AssertionError("nothing rendered yet")
+            return None
         if root.find(key_or_text) is not None:
             return key_or_text
         for node in root.walk():
             for field in ("value", "text", "label", "title"):
                 if node.props.get(field) == key_or_text:
                     return node.key
+        return None
+
+    def _resolve(self, key_or_text: str, *, timeout: float = 0.5) -> str:
+        # Re-check until the deadline: the widget may still be one rebuild
+        # away (a route transition, a timer tick, an async handler).
+        deadline = time.time() + max(0.0, timeout)
+        while True:
+            found = self._match(key_or_text)
+            if found is not None:
+                return found
+            if time.time() >= deadline:
+                break
+            time.sleep(0.01)
+        root = self.device.root
+        if root is None:
+            raise AssertionError("nothing rendered yet")
         raise AssertionError(
             f"No widget with key or text {key_or_text!r}. "
             f"Visible text: {root.texts()}")

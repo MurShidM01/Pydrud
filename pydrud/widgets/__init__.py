@@ -21,7 +21,8 @@ from pydrud.widgets.tokens import Tokens
 from pydrud.widgets.material import (
     ListTile, ExpansionTile, Chip, AssistChip, FilterChip, InputChip,
     SuggestionChip, Badge, Avatar, Banner, Tooltip,
-    Tab, Tabs, TabBar, NavItem, BottomNavigationBar, NavigationBar,
+    Tab, Tabs, TabBar, NavItem, NavigationItem, NavigationDestination,
+    BottomNavigationBar, NavigationBar,
     NavigationRail, Drawer,
     SegmentedButton, SearchBar, Rating, CircularProgress, Skeleton,
     RefreshIndicator, Stepper, WebView, VideoPlayer, Chart,
@@ -46,6 +47,7 @@ from pydrud.widgets.fab import FloatingActionButton
 from pydrud.widgets.responsive import (
     AdaptiveLayout, ResponsiveBuilder, ResponsiveGrid, SafeArea, ShowWhen,
 )
+from pydrud.widgets.conditional import Hidden, Visible
 from pydrud.widgets.presets import (
     ActionChip, Align, AssetImage, BackButton, ButtonBar, Caption,
     CheckboxListTile, ChoiceChip, CircleAvatar, CircleImage, CloseButton,
@@ -142,6 +144,8 @@ __all__ = [
     "Tabs",
     "TabBar",
     "NavItem",
+    "NavigationItem",
+    "NavigationDestination",
     "BottomNavigationBar",
     "NavigationBar",
     "NavigationRail",
@@ -207,6 +211,9 @@ __all__ = [
     "ResponsiveGrid",
     "ShowWhen",
     "SafeArea",
+    # conditional rendering
+    "Visible",
+    "Hidden",
     # Flutter-style presets and common compositions
     "Expanded",
     "Flexible",

@@ -109,9 +109,15 @@ class TaskRunner:
         timer.start()
         return timer
 
-    def every(self, interval: float, fn: Callable, *args, **kwargs) -> "Timer":
-        """Run *fn* every *interval* seconds until cancelled."""
-        timer = Timer(interval, fn, args, kwargs, repeat=True, runner=self)
+    def every(self, interval: float, fn: Callable, *args,
+              max_errors: Optional[int] = None, **kwargs) -> "Timer":
+        """Run *fn* every *interval* seconds until cancelled.
+
+        ``max_errors`` cancels the timer after that many consecutive
+        failures instead of letting a permanently broken tick run forever.
+        """
+        timer = Timer(interval, fn, args, kwargs, repeat=True, runner=self,
+                      max_errors=max_errors)
         self._track(timer)
         timer.start()
         return timer
@@ -156,11 +162,25 @@ class TaskRunner:
 
 
 class Timer:
-    """A cancellable one-shot or repeating timer."""
+    """A cancellable one-shot or repeating timer.
+
+    A repeating timer is an error boundary: a callback that raises is
+    reported and the timer keeps ticking, because one dropped frame must
+    not kill a game loop. Identical consecutive failures are collapsed in
+    the log, ``max_errors`` cancels a timer that only ever fails, and
+    :attr:`errors` / :attr:`consecutive_errors` / :attr:`last_error` say
+    what happened::
+
+        Timer(1 / 60, tick, repeat=True, max_errors=120).start()
+    """
+
+    #: Identical consecutive failures printed before the log is collapsed.
+    ERROR_LOG_LIMIT = 3
 
     def __init__(self, interval: float, fn: Callable, args: tuple = (),
                  kwargs: Optional[dict] = None, *, repeat: bool = False,
-                 runner: Optional[TaskRunner] = None):
+                 runner: Optional[TaskRunner] = None,
+                 max_errors: Optional[int] = None):
         self.interval = max(0.0, float(interval))
         self.repeat = bool(repeat)
         self._fn = fn
@@ -170,6 +190,16 @@ class Timer:
         self._cancelled = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self.ticks = 0
+        #: Total callback failures since the timer started.
+        self.errors = 0
+        #: Failures since the last successful tick.
+        self.consecutive_errors = 0
+        #: The most recent exception raised by the callback.
+        self.last_error: Optional[BaseException] = None
+        #: Cancel the timer after this many consecutive failures.
+        self.max_errors: Optional[int] = (None if max_errors is None
+                                          else max(1, int(max_errors)))
+        self._last_error_text = ""
 
     @property
     def active(self) -> bool:
@@ -194,13 +224,35 @@ class Timer:
             try:
                 self._fn(*self._args, **self._kwargs)
                 self.ticks += 1
+                self.consecutive_errors = 0
+                self._last_error_text = ""
             except BaseException as exc:  # noqa: BLE001
-                if self._runner is not None:
-                    self._runner._report(exc)
-                else:
-                    print("[Pydrud] timer error:", exc)
+                self._record_error(exc)
+                if (self.max_errors is not None
+                        and self.consecutive_errors >= self.max_errors):
+                    print(f"[Pydrud] timer cancelled after "
+                          f"{self.consecutive_errors} consecutive errors: "
+                          f"{exc}")
+                    self.cancel()
+                    return
             if not self.repeat:
                 return
+
+    def _record_error(self, exc: BaseException) -> None:
+        self.errors += 1
+        self.consecutive_errors += 1
+        self.last_error = exc
+        if self._runner is not None:
+            self._runner._report(exc)
+            return
+        text = f"{type(exc).__name__}: {exc}"
+        repeated = text == self._last_error_text
+        self._last_error_text = text
+        if not repeated or self.consecutive_errors <= self.ERROR_LOG_LIMIT:
+            print("[Pydrud] timer error:", exc)
+        elif self.consecutive_errors == self.ERROR_LOG_LIMIT + 1:
+            print(f"[Pydrud] timer error repeated — further identical "
+                  f"errors suppressed ({text})")
 
 
 def debounce(seconds: float):

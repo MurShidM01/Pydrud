@@ -50,6 +50,8 @@ _WIDGET_CLASSES = {
     # v1.5 — responsive layout
     "ResponsiveBuilder", "AdaptiveLayout", "ResponsiveGrid", "ShowWhen",
     "SafeArea", "NavigationBar", "TabBar",
+    # state-driven conditional rendering
+    "Visible", "Hidden",
     # Flutter-style presets and common app compositions
     "Expanded", "Flexible", "Align", "ColoredBox", "DecoratedBox",
     "ConstrainedBox", "LimitedBox", "Gap", "VerticalDivider",
@@ -156,6 +158,7 @@ def _analyze_file(source: str, filepath: str) -> list[dict]:
     issues.extend(_check_event_handlers(tree, filepath))
     issues.extend(_check_page_update_in_loops(tree, filepath))
     issues.extend(_check_icon_references(tree, filepath))
+    issues.extend(_check_constant_references(tree, filepath))
 
     return _dedupe(issues)
 
@@ -303,7 +306,42 @@ def _check_icon_references(tree: ast.AST, filepath: str) -> list[dict]:
     return issues
 
 
-# ── Check 6: Package shadowing ──────────────────────────────────────────────
+# ── Check 6: Design-token references ────────────────────────────────────────
+
+
+def _check_constant_references(tree: ast.AST, filepath: str) -> list[dict]:
+    """Warn if code references a design token that does not exist.
+
+    ``Colors.amber`` or ``Elevation.D4`` used to fail at runtime, on the
+    device, in whichever screen happened to build first. They resolve now,
+    but typos (``Colors.purlpe``) still do not — and the analyzer is the
+    cheapest place to find them.
+    """
+    from pydrud.widgets.theme import Colors, Elevation, Motion, Radius, Spacing
+
+    registries = {"Colors": Colors, "Spacing": Spacing, "Radius": Radius,
+                  "Elevation": Elevation, "Motion": Motion}
+    issues: list[dict] = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)):
+            continue
+        registry = registries.get(node.value.id)
+        if registry is None or node.attr.startswith("_"):
+            continue
+        try:
+            getattr(registry, node.attr)
+        except AttributeError as exc:
+            issues.append({
+                "file": filepath,
+                "line": node.lineno,
+                "severity": _SEVERITY_ERROR,
+                "message": f"Invalid design token: {exc}",
+            })
+    return issues
+
+
+# ── Check 7: Package shadowing ──────────────────────────────────────────────
 
 
 def _check_shadowing_issues(src_dir: str) -> list[dict]:

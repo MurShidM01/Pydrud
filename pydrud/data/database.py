@@ -48,6 +48,14 @@ _PY_TO_SQL = {
     list: "TEXT",   # stored as JSON
 }
 
+#: Column types may also be named as strings (``column("score", "int")``),
+#: which is what a schema loaded from YAML/JSON naturally produces.
+_TYPE_ALIASES = {t.__name__: t for t in _PY_TO_SQL}
+_TYPE_ALIASES.update({
+    "integer": int, "text": str, "string": str, "real": float,
+    "double": float, "boolean": bool, "blob": bytes, "json": dict,
+})
+
 
 #: SQLite identifiers (table and column names) cannot be parameterised, so
 #: they are interpolated into the SQL text. Everything that reaches that
@@ -71,20 +79,40 @@ def _ident(name: str) -> str:
     return text
 
 
-class Field:
-    """A column definition on a :class:`Model`."""
-
-    __slots__ = ("name", "type", "primary_key", "null", "unique", "index",
-                 "default", "sql_type")
-
-    def __init__(self, type_: type = str, *, primary_key: bool = False,
-                 null: bool = True, unique: bool = False, index: bool = False,
-                 default: Any = None):
-        if type_ not in _PY_TO_SQL:
+def _resolve_type(type_: Any) -> type:
+    """Accept ``int``, ``"int"`` or ``"INTEGER"`` and return a Python type."""
+    if isinstance(type_, str):
+        resolved = _TYPE_ALIASES.get(type_.strip().lower())
+        if resolved is None:
             raise TypeError(
                 f"Unsupported column type {type_!r}. "
                 f"Use one of {sorted(t.__name__ for t in _PY_TO_SQL)}")
-        self.name = ""           # filled in by ModelMeta
+        return resolved
+    if type_ not in _PY_TO_SQL:
+        raise TypeError(
+            f"Unsupported column type {type_!r}. "
+            f"Use one of {sorted(t.__name__ for t in _PY_TO_SQL)}")
+    return type_
+
+
+class Field:
+    """A column definition on a :class:`Model`.
+
+    ``name`` is optional — :class:`ModelMeta` fills it in from the
+    attribute the field is assigned to, and an explicit one (what
+    ``column("score", int)`` passes) has to agree with it.
+    """
+
+    __slots__ = ("name", "type", "primary_key", "null", "unique", "index",
+                 "default", "sql_type", "explicit_name")
+
+    def __init__(self, type_: Any = str, *, name: str = "",
+                 primary_key: bool = False,
+                 null: bool = True, unique: bool = False, index: bool = False,
+                 default: Any = None):
+        type_ = _resolve_type(type_)
+        self.name = str(name)    # filled in by ModelMeta when left empty
+        self.explicit_name = bool(name)
         self.type = type_
         self.primary_key = bool(primary_key)
         self.null = bool(null) and not primary_key
@@ -139,9 +167,52 @@ class Field:
         return f"Field({self.name!r}, {self.type.__name__})"
 
 
-def column(type_: type = str, **kwargs) -> Field:
-    """Shorthand for :class:`Field` — reads better in model bodies."""
-    return Field(type_, **kwargs)
+def column(*args: Any, **kwargs: Any) -> Field:
+    """Shorthand for :class:`Field` — reads better in model bodies::
+
+        name  = column(str)                      # type only (classic)
+        score = column("score", type_=int, index=True)
+        tags  = column("tags", "list")           # type named as a string
+        id    = column("id", primary_key=True)   # type inferred: int
+
+    An explicit name must match the attribute it is assigned to — the
+    attribute *is* the column name in ``where``/``order_by``/``to_dict``,
+    so a mismatch is a mistake, not an alias. Without a type, a primary
+    key (or ``id``) defaults to ``int``, the rest to ``str``.
+    """
+    name = kwargs.pop("name", "")
+    type_ = kwargs.pop("type_", None)
+    strings: list[str] = []
+    for arg in args:
+        if isinstance(arg, type):
+            if type_ is not None:
+                raise TypeError("column() got more than one type")
+            type_ = arg
+        elif isinstance(arg, str):
+            strings.append(arg)
+        else:
+            raise TypeError(
+                f"column() takes a name and/or a type, got {arg!r}")
+
+    if len(strings) == 2:
+        if name:
+            raise TypeError("column() got more than one name")
+        name, type_ = strings[0], strings[1] if type_ is None else type_
+    elif len(strings) == 1:
+        only = strings[0]
+        known_type = only.strip().lower() in _TYPE_ALIASES
+        if type_ is None and not name and known_type:
+            type_ = only            # column("int") — a type named as a string
+        elif name:
+            raise TypeError("column() got more than one name")
+        else:
+            name = only             # column("id", primary_key=True)
+    elif len(strings) > 2:
+        raise TypeError("column() takes at most two positional arguments")
+
+    if type_ is None:
+        type_ = int if (kwargs.get("primary_key") or name == "id") else str
+    return Field(type_, name=name, **kwargs)
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -546,6 +617,12 @@ class ModelMeta(type):
 
         for key, value in list(namespace.items()):
             if isinstance(value, Field):
+                if value.explicit_name and value.name != key:
+                    raise TypeError(
+                        f"{name}.{key}: column named {value.name!r} is "
+                        f"assigned to attribute {key!r}. The attribute name "
+                        f"is the column name everywhere else in the API — "
+                        f"rename one of them (or drop the name argument).")
                 value.name = key
                 fields[key] = value
                 namespace.pop(key)
@@ -570,7 +647,12 @@ class Model(metaclass=ModelMeta):
     """Base class for ORM models.
 
     Subclasses declare columns with :func:`column` and are attached to a
-    database with ``db.bind(MyModel)``.
+    database with ``db.bind(MyModel)``. Every model gets an autoincrement
+    ``id`` primary key for free — declaring it is optional, and it stays
+    ``None`` until the row is saved, because SQLite is what allocates it::
+
+        entry = Score(player="Ali")   # entry.id is None
+        entry.save()                  # entry.id is 1
     """
 
     __table__: str = ""
