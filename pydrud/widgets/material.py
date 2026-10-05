@@ -713,6 +713,13 @@ class NavItem:
         })
 
 
+#: Flutter spells this ``NavigationDestination``/``BottomNavigationBarItem``;
+#: plenty of ported code reaches for ``NavigationItem``. Same class, so
+#: ``isinstance(item, NavItem)`` keeps working either way.
+NavigationItem = NavItem
+NavigationDestination = NavItem
+
+
 class BottomNavigationBar(Widget):
     """A fully customisable bottom navigation bar (2-7 destinations).
 

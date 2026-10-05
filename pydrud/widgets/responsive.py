@@ -27,6 +27,7 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from pydrud.core.responsive import Breakpoints, MediaQuery, Responsive
+from pydrud.core.state import UNSET, is_truthy
 from pydrud.widgets.base import Widget
 from pydrud.widgets.layout import Container, GridView
 
@@ -183,17 +184,22 @@ class ResponsiveGrid(ResponsiveBuilder):
 
 
 class ShowWhen(ResponsiveBuilder):
-    """Render *child* only when the media query matches.
+    """Render *child* only when the media query — and ``condition`` — match.
 
     ::
 
         ShowWhen(Sidebar(), min_width=600)
         ShowWhen(CompactHeader(), at_most="compact")
         ShowWhen(Hero(), orientation="landscape", device="tablet")
+        ShowWhen(Banner(), condition=has_unread)          # state, not size
+        ShowWhen(Tips(), min_width=600, condition=show_tips)
 
-    When it does not match, a zero-sized placeholder is rendered, so the
-    diff engine can swap the real widget back in without rebuilding the
-    whole page.
+    ``condition`` accepts anything readable — a bool, a ``State``, a
+    ``Computed``, a ``Selector`` or a callable — and is re-read on every
+    serialisation; :class:`~pydrud.widgets.conditional.Visible` is the
+    clearer name for a purely state-driven toggle. When it does not
+    match, ``otherwise`` (or a zero-sized placeholder) renders, so the
+    diff engine can swap the real widget back without rebuilding the page.
     """
 
     _widget_type = "ShowWhen"
@@ -207,6 +213,7 @@ class ShowWhen(ResponsiveBuilder):
                  device: Optional[str] = None,
                  at_least: Optional[str] = None,
                  at_most: Optional[str] = None,
+                 condition: Any = UNSET,
                  otherwise: Optional[Widget] = None,
                  key: Optional[str] = None):
         self._child = child
@@ -221,9 +228,12 @@ class ShowWhen(ResponsiveBuilder):
                 Breakpoints.index(name)  # validate early
         self._at_least = at_least
         self._at_most = at_most
+        self._condition = condition
         super().__init__(self._choose, key=key)
 
     def matches(self) -> bool:
+        if self._condition is not UNSET and not is_truthy(self._condition):
+            return False
         if not MediaQuery.matches(**self._query):
             return False
         if self._at_least is not None and not MediaQuery.at_least(self._at_least):

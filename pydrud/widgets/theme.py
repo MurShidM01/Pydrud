@@ -21,8 +21,66 @@ def _argb(hex_rgb: str, alpha: str = "FF") -> str:
     return f"#{alpha}{hex_rgb.upper()}"
 
 
-class Colors:
-    """A small, opinionated Material-ish palette (ARGB strings)."""
+# deepOrange / deep_orange / amber -> DEEP_ORANGE
+def _token_name(name: str) -> str:
+    return re.sub(r"(?<!^)([A-Z])", r"_\1", name).replace("-", "_").upper()
+
+
+class _ConstantsMeta(type):
+    """Forgiving lookups and teaching errors for the token classes.
+
+    ``Colors.amber``, ``Colors.deepOrange`` and ``Colors.DEEP_ORANGE`` all
+    resolve to the same constant (exactly as :class:`Icons` already does),
+    and a name that genuinely does not exist reports the closest matches
+    instead of leaving the developer to guess from ``dir()``.
+    """
+
+    def __getattr__(cls, name: str):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        token = _token_name(name)
+        for klass in cls.__mro__:
+            value = vars(klass).get(token)
+            if value is not None and _is_constant(token, value):
+                return value
+        raise AttributeError(cls._unknown_message(name))
+
+    # ── introspection ────────────────────────────────────────────────────
+
+    def names(cls) -> list:
+        """Every constant this class defines, sorted."""
+        found: set = set()
+        for klass in cls.__mro__:
+            found.update(key for key, value in vars(klass).items()
+                         if _is_constant(key, value))
+        return sorted(found)
+
+    def _unknown_message(cls, name: str) -> str:
+        import difflib
+
+        options = cls.names()
+        close = difflib.get_close_matches(_token_name(name), options, n=3,
+                                          cutoff=0.5)
+        hint = f" Did you mean {' or '.join(repr(c) for c in close)}?" if close \
+            else ""
+        preview = ", ".join(options[:12])
+        if len(options) > 12:
+            preview += ", …"
+        return (f"type object {cls.__name__!r} has no attribute {name!r}."
+                f"{hint} Available: {preview} "
+                f"(see {cls.__name__}.names()).")
+
+
+def _is_constant(name: str, value) -> bool:
+    return (name.isupper() and not name.startswith("_")
+            and isinstance(value, (str, int, float, tuple)))
+
+
+class Colors(metaclass=_ConstantsMeta):
+    """A small, opinionated Material-ish palette (ARGB strings).
+
+    Names are forgiving: ``AMBER``, ``amber`` and ``deepOrange`` all work.
+    """
 
     TRANSPARENT = "#00000000"
     BLACK = "#FF000000"
@@ -74,6 +132,21 @@ class Colors:
     ORANGE = "#FFF97316"
     BROWN = "#FF78716C"
     GREY = "#FF6B7280"
+
+    #: The rest of the Material-style hue names developers reach for.
+    AMBER = "#FFF59E0B"
+    DEEP_ORANGE = "#FFEA580C"
+    DEEP_PURPLE = "#FF7C3AED"
+    LIGHT_BLUE = "#FF38BDF8"
+    LIGHT_GREEN = "#FF4ADE80"
+    BLUE_GREY = "#FF64748B"
+    GREY_LIGHT = "#FF9CA3AF"
+    GREY_DARK = "#FF374151"
+    #: American spellings of the same neutrals.
+    GRAY = GREY
+    GRAY_LIGHT = GREY_LIGHT
+    GRAY_DARK = GREY_DARK
+    BLUE_GRAY = BLUE_GREY
 
     #: Default series colours for Chart and Canvas.pie().
     CHART_PALETTE = ("#FF6366F1", "#FF14B8A6", "#FFF59E0B", "#FFEF4444",
@@ -128,23 +201,21 @@ class Colors:
         return (0.299 * r + 0.587 * g + 0.114 * b) / 255.0 > 0.62
 
 
-class _IconsMeta(type):
-    """Offer forgiving Python spellings while keeping canonical constants."""
+class _IconsMeta(_ConstantsMeta):
+    """Forgiving spellings, plus icons registered at runtime by a pack."""
 
     def __getattr__(cls, name: str):
         # ``Icons.favorite``, ``Icons.favoriteBorder`` and
-        # ``Icons.FAVORITE_BORDER`` all resolve to the same documented value.
-        token = re.sub(r"(?<!^)([A-Z])", r"_\1", name).replace("-", "_").upper()
-        value = vars(cls).get(token)
-        if isinstance(value, str):
-            return value
-        value = cls._external.get(name)
-        if isinstance(value, str):
-            return value
-        value = cls._external.get(token)
-        if isinstance(value, str):
-            return value
-        raise AttributeError(f"Icons has no icon named {name!r}")
+        # ``Icons.FAVORITE_BORDER`` all resolve to the same documented value;
+        # unknown names get the same "did you mean" error as the tokens.
+        try:
+            return super().__getattr__(name)
+        except AttributeError:
+            for key in (name, _token_name(name)):
+                value = cls._external.get(key)
+                if isinstance(value, str):
+                    return value
+            raise
 
 
 class Icons(metaclass=_IconsMeta):
@@ -458,7 +529,7 @@ class Icons(metaclass=_IconsMeta):
         return sorted({*cls.builtins(), *cls._external.values()})
 
 
-class Spacing:
+class Spacing(metaclass=_ConstantsMeta):
     """The 4dp spacing scale every Pydrud layout is built on.
 
     Sticking to a scale is what makes a UI look designed rather than
@@ -487,7 +558,7 @@ class Spacing:
         return int(round(steps * 4))
 
 
-class Radius:
+class Radius(metaclass=_ConstantsMeta):
     """Corner radii. Rounded-but-not-bubbly is the modern default."""
 
     NONE = 0
@@ -504,10 +575,17 @@ class Radius:
     #: The native renderer clamps large radii to half the shortest side, so
     #: this works for fixed and responsive containers alike.
     CIRCLE = PILL
+    #: Flutter/Tailwind spelling of the same "round it all the way" intent.
+    FULL = PILL
 
 
-class Elevation:
-    """Shadow depths, named for intent rather than for a number."""
+class Elevation(metaclass=_ConstantsMeta):
+    """Shadow depths, named for intent rather than for a number.
+
+    The semantic names survive a design-system change; a raw number does
+    not. For code ported from a Material spec the full ``D0``–``D24`` dp
+    scale also exists (``Elevation.D4 == 4``).
+    """
 
     FLAT = 0
     HAIRLINE = 1
@@ -517,8 +595,23 @@ class Elevation:
     DIALOG = 12
     MODAL = 16
 
+    #: Material's dp scale — ``D0`` … ``D24`` are filled in below.
+    MAX = 24
 
-class Motion:
+    @classmethod
+    def dp(cls, value: float) -> float:
+        """Clamp *value* into the 0–24dp Material elevation range."""
+        return max(0.0, min(float(cls.MAX), float(value)))
+
+
+# Material names elevations by dp; Pydrud names them by intent. Both now
+# exist, so examples copied from a Material spec resolve.
+for _depth in range(Elevation.MAX + 1):
+    setattr(Elevation, f"D{_depth}", _depth)
+del _depth
+
+
+class Motion(metaclass=_ConstantsMeta):
     """Durations (ms) and curves — keep animations short and consistent."""
 
     INSTANT = 80

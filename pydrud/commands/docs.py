@@ -115,6 +115,7 @@ def build_docs(project_dir: str = ".", output: str = "docs") -> str:
 
     modules = ["pydrud", "pydrud.runtime.app", "pydrud.runtime.navigation",
                "pydrud.widgets", "pydrud.widgets.canvas",
+               "pydrud.widgets.conditional", "pydrud.widgets.responsive",
                "pydrud.widgets.advanced", "pydrud.core.store",
                "pydrud.core.controllers", "pydrud.core.tasks",
                "pydrud.core.results", "pydrud.data.database",

@@ -26,6 +26,7 @@ Usage::
 
 from __future__ import annotations
 import inspect
+import threading
 import warnings
 from typing import Any, Callable, Optional
 
@@ -146,48 +147,82 @@ def _coerce(value: str):
 
 
 class NavigationStack:
-    """A LIFO stack of navigation entries (the top entry is the active screen)."""
+    """A LIFO stack of navigation entries (the top entry is the active screen).
+
+    Every operation takes a lock, and the compound ones ("pop unless this
+    is the root", "collapse back to the root") are single operations
+    rather than a check followed by a mutation — two taps landing on
+    different threads can no longer interleave into a corrupted stack.
+    """
 
     def __init__(self):
+        self._lock = threading.RLock()
         self._stack: list[dict] = []
 
     def push(self, route_name: str, params: dict | None = None) -> None:
         """Push a new screen onto the stack."""
-        self._stack.append({"route": route_name, "params": dict(params or {})})
+        with self._lock:
+            self._stack.append({"route": route_name,
+                                "params": dict(params or {})})
 
-    def pop(self) -> dict | None:
-        """Pop the top screen. Returns the removed entry, or None if empty."""
-        if not self._stack:
-            return None
-        return self._stack.pop()
+    def pop(self, *, keep_root: bool = False) -> dict | None:
+        """Pop the top screen, or return ``None`` when there is none.
+
+        ``keep_root=True`` refuses to pop the last entry, which is the
+        atomic form of ``if stack.can_pop(): stack.pop()``.
+        """
+        with self._lock:
+            if not self._stack or (keep_root and len(self._stack) < 2):
+                return None
+            return self._stack.pop()
 
     def current(self) -> dict | None:
         """Peek at the top entry without removing it."""
-        return self._stack[-1] if self._stack else None
+        with self._lock:
+            return self._stack[-1] if self._stack else None
+
+    def root(self) -> dict | None:
+        """Peek at the bottom (root) entry."""
+        with self._lock:
+            return self._stack[0] if self._stack else None
 
     def clear(self) -> None:
-        self._stack.clear()
+        with self._lock:
+            self._stack.clear()
 
     def can_pop(self) -> bool:
         """True when there is a screen *below* the active one."""
-        return len(self._stack) > 1
+        with self._lock:
+            return len(self._stack) > 1
 
     def size(self) -> int:
-        return len(self._stack)
+        with self._lock:
+            return len(self._stack)
 
     def routes(self) -> list[str]:
-        return [e["route"] for e in self._stack]
+        with self._lock:
+            return [e["route"] for e in self._stack]
 
     def reset_to(self, route_name: str, params: dict | None = None) -> None:
         """Clear the stack and set *route_name* as the single root entry."""
-        self._stack = [{"route": route_name, "params": dict(params or {})}]
+        with self._lock:
+            self._stack = [{"route": route_name, "params": dict(params or {})}]
+
+    def collapse_to_root(self) -> bool:
+        """Drop every entry above the root. False when already there."""
+        with self._lock:
+            if len(self._stack) < 2:
+                return False
+            del self._stack[1:]
+            return True
 
     def replace_top(self, route_name: str, params: dict | None = None) -> None:
         entry = {"route": route_name, "params": dict(params or {})}
-        if self._stack:
-            self._stack[-1] = entry
-        else:
-            self._stack.append(entry)
+        with self._lock:
+            if self._stack:
+                self._stack[-1] = entry
+            else:
+                self._stack.append(entry)
 
 
 class Router:
@@ -395,9 +430,8 @@ class Router:
 
     def pop(self) -> bool:
         """Go back to the previous screen. Returns True when it navigated."""
-        if not self._stack.can_pop():
+        if self._stack.pop(keep_root=True) is None:
             return False
-        self._stack.pop()
         self._render()
         return True
 
@@ -433,11 +467,8 @@ class Router:
 
     def pop_to_root(self) -> bool:
         """Pop every screen except the root one."""
-        if not self._stack.can_pop():
+        if not self._stack.collapse_to_root():
             return False
-        root = self._stack.routes()[0]
-        root_params = self._stack._stack[0]["params"]
-        self._stack.reset_to(root, root_params)
         self._render()
         return True
 

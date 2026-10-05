@@ -313,6 +313,28 @@ Colors.on(Colors.PRIMARY)                       # readable foreground
 Colors.mix(Colors.PRIMARY, Colors.SECONDARY)    # blend two colours
 ```
 
+Token names are forgiving, so code ported from Flutter, Material or CSS
+resolves instead of raising at runtime:
+
+```python
+Colors.AMBER                 # …also reachable as Colors.amber
+Colors.deepOrange            # camelCase, snake_case and ALL_CAPS agree
+Elevation.D4                 # Material's dp scale, D0…D24, alongside the
+Elevation.CARD               # semantic names (which are still preferred)
+Radius.FULL                  # alias for Radius.PILL / Radius.CIRCLE
+Colors.names()               # every constant, for discovery in a REPL
+```
+
+A name that really does not exist says what does, instead of a bare
+`AttributeError`:
+
+```text
+AttributeError: type object 'Colors' has no attribute 'purlpe'.
+Did you mean 'PURPLE' or 'DEEP_PURPLE'? Available: ACCENT, AMBER, … 
+```
+
+`pydrud analyze` reports the same mistakes statically, before a build.
+
 ### Live theming
 
 One brand colour drives the whole app — including the native widgets,
@@ -405,11 +427,17 @@ e.g. `Chart(labels=…)`, `CircularProgress(stroke=…)`, `Rating(half=True)`.
 
 ```python
 from pydrud import Model, Field, Database
+from pydrud.data import column
 
 class Note(Model):
     title = Field(str, index=True)
     body  = Field(str, default="")
     done  = Field(bool, default=False)
+
+class Score(Model):                 # column() takes a name, a type, or both
+    id     = column("id", primary_key=True)   # optional: every model has one
+    player = column("player", str)
+    points = column("points", "int", index=True)
 
 db = page.database("notes.db")
 Note.bind(db)
@@ -417,6 +445,11 @@ Note.bind(db)
 Note.create(title="Buy milk")
 open_notes = Note.where(done=False, title__contains="milk").order_by("-id").page(1, 20)
 ```
+
+Every model gets an autoincrement `id` for free; declaring it is optional
+and it stays `None` until `save()`, because SQLite allocates it. An
+explicit column name has to match the attribute it is assigned to — the
+attribute is the column name in `where()`, `order_by()` and `to_dict()`.
 
 ### Navigation
 
@@ -912,6 +945,40 @@ Text("Pulse").animate(Animation.fast(), opacity=0.4)
 Animated widgets tween towards their new values on the device
 (`ValueAnimator` / `ViewPropertyAnimator`) instead of snapping.
 
+### Custom painting (Canvas)
+
+`Canvas` records drawing commands in Python and replays them in a real
+`View.onDraw`, so gauges, sparklines, signatures and game boards are
+drawn by Skia — no bitmap transfer, no WebView.
+
+```python
+from pydrud import Canvas, Colors
+
+def gauge(value):
+    canvas = Canvas(height=160)
+    canvas.circle(0.5, 0.5, 0.45, color=Colors.SURFACE_VARIANT)
+    canvas.arc(0.5, 0.5, 0.45, start=135, sweep=270 * value,
+               color=Colors.PRIMARY, width=14, cap="round")
+    canvas.text(f"{value:.0%}", 0.5, 0.55, size=28, align="center",
+                weight="bold")        # "bold"/"medium"/… or 400/700
+    return canvas
+```
+
+Pass `on_draw` to repaint on every rebuild. It is called with as many
+arguments as it declares, so pick whichever shape suits the drawing:
+
+```python
+Canvas(on_draw=lambda c: c.circle(0.5, 0.5, 0.4))             # fractions
+Canvas(on_draw=lambda c, size: c.rect(0, 0, size.width, 20))  # a Size
+Canvas(units="px", on_draw=lambda c, w, h: c.line(0, 0, w, h))  # dp
+```
+
+`canvas.size` (`.width` / `.height`, dp) is available outside `on_draw`
+too; it resolves `"match"` and percentage styles against the live device
+metrics, and `canvas.measure(w, h)` pins exact values. A painter that
+raises is logged, keeps whatever it drew and leaves the exception on
+`canvas.last_draw_error` — one bad frame cannot take down the rebuild.
+
 ### Forms & validation (v1.2)
 
 ```python
@@ -1198,9 +1265,15 @@ def test_login():
         app.answer("dialog", True)              # stub the native dialog
         app.type_in("email", "ada@example.com")
         app.tap("Sign in")                      # by key *or* visible text
+        app.wait_for("Welcome back")            # ride out a late rebuild
         assert app.shows("Welcome back")
+        assert app.exists("sign_out")           # no waiting, just a check
         assert app.requested("prefs_set")["key"] == "token"
 ```
+
+Interactions settle before they return, and lookups retry for a moment,
+so a tap that triggers navigation, a timer or an async handler does not
+have to be followed by a hand-written sleep.
 
 ### Styling
 
@@ -1344,6 +1417,32 @@ ResponsiveGrid(children=cards, min_item_width=180)   # columns follow the screen
 ShowWhen(Sidebar(), min_width=600, otherwise=MenuButton())
 SafeArea(child=body, top=False)       # real cutout / gesture-bar insets
 ```
+
+### Conditional rendering
+
+`ShowWhen` asks whether the *window* is big enough; `Visible` and `Hidden`
+ask whether the *app* is in the right state. The condition is re-read
+every time the tree is serialised, so the usual `app.bind(...)` /
+`page.update()` flow is all it takes:
+
+```python
+from pydrud import Visible, Hidden, State
+
+logged_in = State(False)
+
+Visible(Dashboard(), when=logged_in)                  # State
+Visible(Spinner(), when=is_loading, otherwise=Results())
+Visible(Badge("3"), when=lambda: cart.count > 0)      # callable
+Hidden(CheckoutButton(), when=cart_is_empty)          # the inverse
+ShowWhen(Tips(), min_width=600, condition=show_tips)  # size *and* state
+```
+
+A bool, `State`, `Computed`, `Selector`, `ReactiveList` (truthy when
+non-empty) or a callable all work, and `when=`, `condition=` and
+`visible=` are the same parameter under three names. When the condition
+is false the `otherwise` widget renders — or a zero-sized placeholder, so
+the diff engine can swap the real widget back in without rebuilding the
+page.
 
 ### Responsive units in styles
 

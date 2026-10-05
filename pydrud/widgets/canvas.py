@@ -23,15 +23,64 @@ pixels instead.
 
 from __future__ import annotations
 
+import inspect
 import math
-from typing import Any, Callable, Optional, Sequence
+from typing import Any, Callable, NamedTuple, Optional, Sequence
 
+from pydrud.core.responsive import MediaQuery
 from pydrud.widgets.base import Widget
 from pydrud.widgets.theme import Colors
 
 CAPS = ("butt", "round", "square")
 JOINS = ("miter", "round", "bevel")
 ALIGNS = ("left", "center", "right")
+
+#: CSS/Flutter font-weight names accepted by :meth:`Canvas.text`.
+WEIGHTS = {"thin": 100, "extralight": 200, "ultralight": 200, "light": 300,
+           "normal": 400, "regular": 400, "medium": 500, "semibold": 600,
+           "demibold": 600, "bold": 700, "extrabold": 800, "black": 900,
+           "heavy": 900}
+
+
+class Size(NamedTuple):
+    """The canvas size in dp — also unpacks as ``(width, height)``."""
+
+    width: float
+    height: float
+
+
+# Accept 700, "700" or "bold" and return the int weight the renderer wants.
+def _font_weight(weight: Any) -> int:
+    if isinstance(weight, bool):
+        return 700 if weight else 400
+    if isinstance(weight, (int, float)):
+        return int(weight)
+    text = str(weight).strip().lower().replace("-", "").replace("_", "")
+    if text in WEIGHTS:
+        return WEIGHTS[text]
+    if text.isdigit():
+        return int(text)
+    raise ValueError(f"weight must be a number or one of "
+                     f"{sorted(WEIGHTS)}, got {weight!r}")
+
+
+# Best-effort dp size for a style width/height value ("match", 40, "50%").
+def _resolve_dimension(value: Any, available: float) -> float:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    if value is None or isinstance(value, bool):
+        return float(available)
+    text = str(value).strip().lower()
+    if text.endswith("%"):
+        text = text[:-1]
+        try:
+            return float(available) * float(text) / 100.0
+        except ValueError:
+            return float(available)
+    try:
+        return float(text)
+    except ValueError:
+        return float(available)
 
 
 class Paint:
@@ -163,6 +212,14 @@ class Canvas(Widget):
 
     Every method returns ``self``, so drawing reads as a chain. Drawing
     commands are replayed on the device in the order they were issued.
+
+    ``on_draw`` is re-run on every rebuild with as many arguments as it
+    declares — ``(canvas)``, ``(canvas, size)`` or ``(canvas, w, h)``::
+
+        Canvas(on_draw=lambda c, w, h: c.line(0, 0, w, h), units="px")
+
+    ``size``/``w``/``h`` are dp (see :attr:`size`), so pixel-accurate
+    drawing no longer means guessing the layout size.
     """
 
     _widget_type = "Canvas"
@@ -191,10 +248,55 @@ class Canvas(Widget):
         self.style.setdefault("height", height)
         if bg:
             self.style.setdefault("bg", bg)
-        #: Optional ``on_draw(canvas, size)`` hook, re-run on every rebuild.
+        #: Optional ``on_draw`` hook, re-run on every rebuild. It may take
+        #: ``(canvas)``, ``(canvas, size)`` or ``(canvas, width, height)``.
         self.on_draw = on_draw
         if on_draw is not None and not callable(on_draw):
             raise TypeError("on_draw must be callable")
+        #: Size pinned by :meth:`measure` (dp), or ``None`` to estimate it.
+        self._measured: Optional[Size] = None
+        #: The exception raised by the last ``on_draw``, if any.
+        self.last_draw_error: Optional[BaseException] = None
+
+    # ── dimensions ───────────────────────────────────────────────────────
+
+    @property
+    def size(self) -> Size:
+        """The canvas size in dp, as a ``(width, height)`` named tuple.
+
+        Fixed sizes come from the style; ``"match"`` and percentages are
+        resolved against the live :class:`MediaQuery` metrics (a 360x640
+        phone when nothing is connected). :meth:`measure` pins exact
+        values when the real laid-out size is known.
+        """
+        if self._measured is not None:
+            return self._measured
+        available_w, available_h = MediaQuery.viewport()
+        width = _resolve_dimension(self.style.get("width"), available_w)
+        height = _resolve_dimension(self.style.get("height"), available_h)
+        return Size(max(width, 0.0), max(height, 0.0))
+
+    @property
+    def width(self) -> float:
+        """Canvas width in dp (see :attr:`size`)."""
+        return self.size.width
+
+    @property
+    def height(self) -> float:
+        """Canvas height in dp (see :attr:`size`)."""
+        return self.size.height
+
+    def measure(self, width: Optional[float] = None,
+                height: Optional[float] = None) -> "Canvas":
+        """Pin the size (dp); pass nothing to go back to estimating."""
+        if width is None and height is None:
+            self._measured = None
+        else:
+            current = self.size
+            self._measured = Size(
+                float(current.width if width is None else width),
+                float(current.height if height is None else height))
+        return self
 
     # ── primitives ───────────────────────────────────────────────────────
 
@@ -266,12 +368,13 @@ class Canvas(Widget):
 
     def text(self, value: str, x: float, y: float, *, size: float = 14,
              color: str = Colors.TEXT, align: str = "left",
-             weight: int = 400, rotate: float = 0.0) -> "Canvas":
+             weight: Any = 400, rotate: float = 0.0) -> "Canvas":
+        """Draw a string — ``weight`` takes ``400``/``700`` or ``"bold"``."""
         if align not in ALIGNS:
             raise ValueError(f"align must be one of {ALIGNS}")
         self.ops.append({"op": "text", "value": str(value), "x": float(x),
                          "y": float(y), "size": float(size), "color": color,
-                         "align": align, "weight": int(weight),
+                         "align": align, "weight": _font_weight(weight),
                          "rotate": float(rotate)})
         return self
 
@@ -383,10 +486,50 @@ class Canvas(Widget):
 
     # ── serialisation ────────────────────────────────────────────────────
 
+    # Painters are written f(canvas), f(canvas, size) or f(canvas, w, h) —
+    # match whichever one this is instead of raising TypeError at render time.
+    def _draw_arguments(self) -> tuple:
+        try:
+            params = list(inspect.signature(self.on_draw).parameters.values())
+        except (TypeError, ValueError):       # builtins / C callables
+            return (self,)
+        positional = [p for p in params
+                      if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+        if any(p.kind is p.VAR_POSITIONAL for p in params):
+            accepted = 3
+        else:
+            accepted = min(len(positional), 3)
+        required = sum(1 for p in positional if p.default is p.empty)
+        count = max(accepted, min(required, 3))
+        if count <= 1:
+            return (self,)
+        size = self.size
+        if count == 2:
+            return (self, size)
+        return (self, size.width, size.height)
+
+    def draw(self) -> "Canvas":
+        """Re-run ``on_draw``, replacing the recorded commands.
+
+        Called automatically before serialisation. A painter that raises
+        is logged and keeps whatever it recorded — one bad frame cannot
+        take down the rebuild cycle — and the exception stays on
+        :attr:`last_draw_error`.
+        """
+        if self.on_draw is None:
+            return self
+        self.ops.clear()
+        self.last_draw_error = None
+        try:
+            self.on_draw(*self._draw_arguments())
+        except Exception as exc:              # pragma: no cover - defensive
+            self.last_draw_error = exc
+            print(f"[Pydrud] canvas on_draw error ({self.key}): "
+                  f"{type(exc).__name__}: {exc}")
+        return self
+
     def _serialise_props(self) -> dict:
-        if self.on_draw is not None:
-            self.ops.clear()
-            self.on_draw(self)
+        self.draw()
         props = dict(self._extra)
         props.update({"ops": list(self.ops), "units": self.units,
                       "antialias": self.antialias})

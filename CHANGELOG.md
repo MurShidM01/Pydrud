@@ -4,6 +4,79 @@ All notable changes to Pydrud are documented here.
 
 ## [Unreleased]
 
+### Added — conditional rendering and canvas painters
+* **`Visible` / `Hidden` — conditional rendering by state.** `ShowWhen` only
+  ever answered "is the window big enough?", so there was no built-in way to
+  show a widget because the *app* is in a particular state. `Visible(child,
+  when=…)` (and its inverse `Hidden`) accept a bool, a `State`, a `Computed`,
+  a `Selector`, a `ReactiveList` or a callable, re-read on every
+  serialisation, and render `otherwise` — or a zero-sized placeholder — when
+  false. `ShowWhen` also gained `condition=`, so size and state can be
+  required together.
+* **`Canvas.on_draw` adapts to the painter's signature.** The framework only
+  ever called `on_draw(canvas)`, while the obvious Flutter-shaped
+  `def paint(canvas, width, height)` failed at render time. `(canvas)`,
+  `(canvas, size)` and `(canvas, width, height)` all work now, and a painter
+  that raises is reported, keeps what it drew and leaves the exception on
+  `canvas.last_draw_error` instead of taking down the rebuild cycle.
+* **Canvas dimensions are available.** `canvas.size` / `.width` / `.height`
+  report dp, resolving `"match"` and percentage styles against the live
+  `MediaQuery` metrics; `canvas.measure(w, h)` pins exact values when the
+  laid-out size is known. Pixel-accurate drawing no longer requires guessing.
+* **`AppTester.wait_for()` / `.exists()`.** Lookups now retry for a moment
+  before failing, so a tap that triggers navigation, a timer or an async
+  handler no longer needs a hand-written sleep to be found.
+* **`Timer(..., max_errors=…)`.** A repeating timer still survives a failing
+  tick, but identical consecutive failures are collapsed in the log instead
+  of printing thousands of lines a minute, `errors` /`consecutive_errors` /
+  `last_error` are exposed, and `max_errors` cancels a timer that only ever
+  fails.
+
+### Fixed — API gaps found by an adversarial stress test
+* **The design-token APIs have the names developers type.** `Elevation` gained
+  Material's full `D0`–`D24` dp scale next to its semantic names, `Radius.FULL`
+  aliases `PILL`/`CIRCLE`, and the palette gained `AMBER`, `DEEP_ORANGE`,
+  `DEEP_PURPLE`, `LIGHT_BLUE`, `LIGHT_GREEN`, `BLUE_GREY`, light/dark greys
+  and the American spellings. Lookups are spelling-insensitive
+  (`Colors.amber`, `Colors.deepOrange`), every class answers `.names()`, and
+  an unknown name now reports the closest matches instead of a bare
+  `AttributeError`. `Icons` shares the same machinery, so misspelled icons get
+  suggestions too.
+* **`Canvas.text(weight="bold")` works.** Weight accepts the CSS/Flutter names
+  (`"normal"`, `"medium"`, `"bold"`, …) as well as the renderer's numbers.
+* **`column("id", primary_key=True)` no longer reads the name as a type.**
+  `column()` accepts a name, a type, or both (`column("score", int)`,
+  `column("tags", "list")`, `column(name=…, type_=…)`), infers `int` for
+  primary keys and `id`, and rejects a name that contradicts the attribute it
+  is assigned to — the attribute is the column name everywhere else in the
+  API. `Model`'s docstring now states that the free `id` stays `None` until
+  the row is saved.
+* **`NavigationItem` and `NavigationDestination` alias `NavItem`**, for code
+  ported from Flutter.
+* **`ReactiveList(name=…)`** matches `Store`'s API and shows up in `repr()`
+  (`Computed(name=…)` too), and `replace_all()` no longer notifies every
+  subscriber when the new contents are identical.
+* **Concurrent `Store` writes cannot interleave.** `update`, `replace`,
+  `mutate`, actions, `undo` and `reset` take a reentrant write lock, so two
+  threads running read-modify-write actions can no longer lose an update or
+  publish a state nobody computed.
+* **The navigation stack is atomic.** `NavigationStack` locks every operation
+  and exposes the compound ones as single calls (`pop(keep_root=True)`,
+  `collapse_to_root()`), so rapid taps on different threads cannot corrupt
+  the stack; `Router.pop()` and `Router.pop_to_root()` use them.
+* **`page.set_theme_mode()` repaints immediately** for every mode, including
+  `"system"`, instead of waiting for the next unrelated refresh.
+* **`pydrud analyze` catches invalid design tokens.** `Colors.purlpe`,
+  `Elevation.D44` and friends are reported statically, with suggestions,
+  alongside the existing icon check.
+
+### Changed
+* **The bundled-runtime size tripwire moves from 600 KB to 640 KB.** The
+  budget exists to catch *accidental* bloat (bundling the CLI, templates or
+  icons adds megabytes); the runtime features above take the real bundle to
+  ~600 KB, so the tripwire keeps roughly the same headroom it had when it was
+  set.
+
 ### Fixed — CI and drift regressions
 * **New widgets are known to the analyzer again.** `FractionallySizedBox`,
   `FittedBox`, `DataTable`, `MetricCard` and `Timeline` are registered in

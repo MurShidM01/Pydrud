@@ -113,6 +113,11 @@ class Store(_Observable):
     def __init__(self, initial: Optional[dict] = None, *, name: str = "store"):
         super().__init__()
         self.name = name
+        # Guards every read-modify-write. Reentrant, so an action that
+        # dispatches another action (or a subscriber that writes back) is
+        # fine, while two threads can no longer interleave halfway through
+        # a diff and publish a state nobody ever computed.
+        self._write_lock = threading.RLock()
         self._state: dict = dict(initial or {})
         self._history: list[dict] = []
         self._max_history = 50
@@ -172,13 +177,14 @@ class Store(_Observable):
         """Merge *changes* into the state and notify what really changed."""
         if not isinstance(changes, dict):
             raise TypeError("Store.update() expects a dict of changes")
-        diff = {k: v for k, v in changes.items()
-                if k not in self._state or self._state[k] != v}
-        if not diff:
-            return self
-        previous = dict(self._state)
-        self._push_history(previous)
-        self._state.update(diff)
+        with self._write_lock:
+            diff = {k: v for k, v in changes.items()
+                    if k not in self._state or self._state[k] != v}
+            if not diff:
+                return self
+            previous = dict(self._state)
+            self._push_history(previous)
+            self._state.update(diff)
         for hook in self._middleware:
             try:
                 hook(action, previous, dict(self._state))
@@ -196,13 +202,14 @@ class Store(_Observable):
         """
         if not isinstance(state, dict):
             raise TypeError("Store.replace() expects a dict")
-        previous = dict(self._state)
-        changed = {k for k in set(previous) | set(state)
-                   if previous.get(k) != state.get(k)}
-        if not changed:
-            return self
-        self._push_history(previous)
-        self._state = dict(state)
+        with self._write_lock:
+            previous = dict(self._state)
+            changed = {k for k in set(previous) | set(state)
+                       if previous.get(k) != state.get(k)}
+            if not changed:
+                return self
+            self._push_history(previous)
+            self._state = dict(state)
         for hook in self._middleware:
             try:
                 hook(action, previous, dict(self._state))
@@ -220,19 +227,22 @@ class Store(_Observable):
         in place and return anything else — the edited draft then *replaces*
         the state, so keys the draft deleted really disappear.
         """
-        draft = copy.deepcopy(self._state)
-        returned = fn(draft)
-        if isinstance(returned, dict):
-            return self.update(returned, action=action)
-        return self.replace(draft, action=action)
+        with self._write_lock:
+            draft = copy.deepcopy(self._state)
+            returned = fn(draft)
+            if isinstance(returned, dict):
+                return self.update(returned, action=action)
+            return self.replace(draft, action=action)
 
     def action(self, fn: Callable) -> Callable:
         """Decorator turning ``fn(state, *args)`` into a dispatchable action."""
 
         def wrapper(*args, **kwargs):
-            changes = fn(self.state, *args, **kwargs)
-            if isinstance(changes, dict):
-                self.update(changes, action=getattr(fn, "__name__", "action"))
+            with self._write_lock:
+                changes = fn(self.state, *args, **kwargs)
+                if isinstance(changes, dict):
+                    self.update(changes,
+                                action=getattr(fn, "__name__", "action"))
             return changes
 
         wrapper.__name__ = getattr(fn, "__name__", "action")
@@ -277,19 +287,21 @@ class Store(_Observable):
 
     def undo(self) -> bool:
         """Restore the previous state. Returns False if there is none."""
-        if not self._history:
-            return False
-        previous = self._history.pop()
-        old = dict(self._state)
-        self._state = previous
+        with self._write_lock:
+            if not self._history:
+                return False
+            previous = self._history.pop()
+            old = dict(self._state)
+            self._state = previous
         self._notify_selectors(old)
         self._emit(dict(self._state), set(old) | set(previous))
         return True
 
     def reset(self, state: Optional[dict] = None) -> "Store":
-        old = dict(self._state)
-        self._state = dict(state or {})
-        self._history.clear()
+        with self._write_lock:
+            old = dict(self._state)
+            self._state = dict(state or {})
+            self._history.clear()
         self._notify_selectors(old)
         self._emit(dict(self._state), set(old) | set(self._state))
         return self
@@ -359,10 +371,13 @@ class Computed(Generic[T]):
 
     ``Computed(lambda: a.value * b.value, sources=[a, b])`` recomputes only
     after one of its sources changed, so expensive derivations (filtering a
-    long list, formatting currency) do not run on every render.
+    long list, formatting currency) do not run on every render. ``name``
+    is optional and only used in ``repr()``.
     """
 
-    def __init__(self, fn: Callable[[], T], sources: Iterable[Any] = ()):
+    def __init__(self, fn: Callable[[], T], sources: Iterable[Any] = (), *,
+                 name: str = ""):
+        self.name = str(name)
         self._fn = fn
         self._cache: Any = None
         self._valid = False
@@ -418,14 +433,24 @@ class Computed(Generic[T]):
         return Subscription(_unsubscribe)
 
     def __repr__(self) -> str:
+        if self.name:
+            return f"Computed(name={self.name!r}, {self.value!r})"
         return f"Computed({self.value!r})"
 
 
 class ReactiveList(_Observable, Generic[T]):
-    """A list that notifies subscribers on every structural change."""
+    """A list that notifies subscribers on every structural change.
 
-    def __init__(self, initial: Optional[Iterable[T]] = None):
+    ``name`` is optional and purely for humans — it shows up in
+    ``repr()``, exactly like :class:`Store`'s. Iteration is snapshot-based
+    (``__iter__`` copies), so a loop that removes items as it goes cannot
+    skip entries or raise.
+    """
+
+    def __init__(self, initial: Optional[Iterable[T]] = None, *,
+                 name: str = ""):
         super().__init__()
+        self.name = str(name)
         self._items: list[T] = list(initial or [])
 
     # ── list protocol ────────────────────────────────────────────────────
@@ -447,6 +472,8 @@ class ReactiveList(_Observable, Generic[T]):
         return item in self._items
 
     def __repr__(self) -> str:
+        if self.name:
+            return f"ReactiveList(name={self.name!r}, {self._items!r})"
         return f"ReactiveList({self._items!r})"
 
     @property
@@ -492,7 +519,16 @@ class ReactiveList(_Observable, Generic[T]):
         return self
 
     def replace_all(self, items: Iterable[T]) -> "ReactiveList[T]":
-        self._items = list(items)
+        """Swap the contents, notifying only when they actually changed.
+
+        Re-assigning an identical list (a poll that returned the same rows,
+        a filter that matched everything) used to re-render every
+        subscriber for nothing.
+        """
+        replacement = list(items)
+        if replacement == self._items:
+            return self
+        self._items = replacement
         self._emit(self.value)
         return self
 

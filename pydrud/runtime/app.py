@@ -1905,9 +1905,10 @@ class _Page:
         elif mode == "light":
             Theme.light()
         self._send("theme_mode", mode=mode)
-        if mode in ("dark", "light"):
-            # Repaint natively-styled widgets with the new palette.
-            self._app.apply_theme()
+        # Repaint natively-styled widgets *and* rebuild the tree, so colours
+        # resolved in Python (Colors.TEXT, Theme.surface, …) change with the
+        # same call instead of waiting for the next unrelated refresh.
+        self._app.apply_theme()
 
     def set_theme(self, seed: str, *, dark: Optional[bool] = None) -> None:
         """Rebuild the palette from a brand colour and repaint.
