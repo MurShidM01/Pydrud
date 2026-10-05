@@ -221,6 +221,11 @@ class Timer:
         while not self._cancelled.is_set():
             if self._cancelled.wait(self.interval):
                 return
+            # Re-check immediately before invoking: ``cancel()`` may have
+            # landed while we were waking up, and a cancelled timer must
+            # never fire another tick.
+            if self._cancelled.is_set():
+                return
             try:
                 self._fn(*self._args, **self._kwargs)
                 self.ticks += 1
