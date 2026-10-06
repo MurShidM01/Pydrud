@@ -339,6 +339,9 @@ def _changed_props(old: Widget, new: Widget) -> dict:
     if old.tooltip != new.tooltip:
         changed["_tooltip"] = new.tooltip
 
+    if getattr(old, "semantics", None) != getattr(new, "semantics", None):
+        changed["_semantics"] = getattr(new, "semantics", None)
+
     return changed
 
 

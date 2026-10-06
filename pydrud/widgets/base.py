@@ -77,6 +77,7 @@ class Widget:
         expand: Optional[int] = None,
         visible: bool = True,
         tooltip: Optional[str] = None,
+        semantics: Optional[str] = None,
         on_click: Optional[Callable] = None,
         on_long_press: Optional[Callable] = None,
         **kwargs,
@@ -93,6 +94,10 @@ class Widget:
         self.visible: bool = visible
         #: Tooltip text (shown on long-press on Android).
         self.tooltip: Optional[str] = tooltip
+        #: Accessibility label, sent as Android's ``contentDescription``.
+        #: Screen readers announce this instead of the raw text, so an
+        #: icon-only button needs it to be reachable at all.
+        self.semantics: Optional[str] = semantics
         #: Child widgets (populated by subclasses for layout widgets).
         self.children: list["Widget"] = []
         # ``children=`` works on every widget, not just the layouts that
@@ -223,6 +228,7 @@ class Widget:
             "expand": self.expand,
             "visible": self.visible,
             "tooltip": self.tooltip,
+            "semantics": self.semantics,
             "has_events": bool(self.event_handlers),
             "events": sorted(self.event_handlers.keys()),
             "props": _serialise_value(props),

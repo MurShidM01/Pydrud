@@ -94,6 +94,8 @@ def _fill_node(node: "RenderedNode", data: dict) -> None:
     node.props = dict(data.get("props") or {})
     node.events = list(data.get("events") or [])
     node.visible = data.get("visible", True)
+    node.tooltip = data.get("tooltip")
+    node.semantics = data.get("semantics")
     node.children = []
     node.parent = None
 
@@ -302,6 +304,10 @@ class FakeDevice:
                     node.visible = bool(value)
                 elif name == "_events":
                     node.events = list(value or [])
+                elif name == "_tooltip":
+                    node.tooltip = value
+                elif name == "_semantics":
+                    node.semantics = value
                 elif not name.startswith("_"):
                     node.props[name] = value
             for name, value in (patch.get("style") or {}).items():

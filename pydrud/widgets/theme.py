@@ -201,6 +201,44 @@ class Colors(metaclass=_ConstantsMeta):
         r, g, b = _rgb(color)
         return (0.299 * r + 0.587 * g + 0.114 * b) / 255.0 > 0.62
 
+    # ── accessibility: WCAG 2.1 contrast (PYDRUD §14.7) ──────────────────
+
+    @staticmethod
+    def relative_luminance(color: str) -> float:
+        """WCAG relative luminance of *color* (0.0 – 1.0)."""
+        def _linear(channel: int) -> float:
+            value = channel / 255.0
+            return (value / 12.92 if value <= 0.03928
+                    else ((value + 0.055) / 1.055) ** 2.4)
+
+        r, g, b = _rgb(color)
+        return (0.2126 * _linear(r) + 0.7152 * _linear(g)
+                + 0.0722 * _linear(b))
+
+    @classmethod
+    def contrast(cls, color: str, other: str) -> float:
+        """WCAG contrast ratio between two colours (1.0 – 21.0).
+
+        ``Colors.contrast(Colors.WHITE, Colors.BLACK)`` is 21.0; identical
+        colours give 1.0.
+        """
+        a, b = cls.relative_luminance(color), cls.relative_luminance(other)
+        lighter, darker = max(a, b), min(a, b)
+        return (lighter + 0.05) / (darker + 0.05)
+
+    @classmethod
+    def meets_contrast(cls, color: str, background: str, *,
+                       large: bool = False) -> bool:
+        """True when *color* over *background* passes WCAG AA.
+
+        Normal text needs 4.5:1; large text (≥ 18 pt, or ≥ 14 pt bold)
+        needs 3:1. Ratios are compared at one decimal place — the precision
+        ``pydrud analyze`` reports — so a pair it prints as ``4.5:1`` is not
+        then claimed to fail ``4.5:1``.
+        """
+        threshold = 3.0 if large else 4.5
+        return round(cls.contrast(color, background), 1) >= threshold
+
 
 class _IconsMeta(_ConstantsMeta):
     """Forgiving spellings, plus icons registered at runtime by a pack."""

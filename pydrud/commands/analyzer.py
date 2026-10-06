@@ -165,6 +165,8 @@ def _analyze_file(source: str, filepath: str) -> list[dict]:
     issues.extend(_check_icon_strings(tree, filepath))
     issues.extend(_check_flex_collapse(tree, filepath))
     issues.extend(_check_constant_references(tree, filepath))
+    issues.extend(_check_contrast(tree, filepath))
+    issues.extend(_check_touch_targets(tree, filepath))
 
     return _dedupe(issues)
 
@@ -477,7 +479,244 @@ def _check_constant_references(tree: ast.AST, filepath: str) -> list[dict]:
     return issues
 
 
-# ── Check 9: Package shadowing ──────────────────────────────────────────────
+# ── Check 9: Accessibility — colour contrast (PYDRUD §14.7) ─────────────────
+
+
+#: Widgets that render interactive surfaces, and so need a 48 dp target.
+_INTERACTIVE_WIDGETS = {
+    "Button", "FilledButton", "TonalButton", "OutlinedButton", "TextButton",
+    "ElevatedButton", "IconButton", "FloatingActionButton", "PillButton",
+    "GestureDetector", "InkWell", "Dismissible", "Checkbox", "Switch",
+    "Radio", "Slider", "Dropdown", "SegmentedButton", "Chip", "FilterChip",
+    "InputChip", "ActionChip", "ChoiceChip", "AssistChip", "SuggestionChip",
+    "Link", "ListTile", "ExpansionTile", "NavigationTile", "SettingsTile",
+    "BackButton", "CloseButton", "MenuButton", "SwitchListTile",
+    "CheckboxListTile", "RadioListTile",
+}
+
+#: WCAG AA minimum contrast — normal text, then large text.
+_AA_NORMAL = 4.5
+_AA_LARGE = 3.0
+
+_HEX_DIGITS = set("0123456789abcdefABCDEF")
+
+
+def _literal_color(node: ast.AST) -> str | None:
+    """Resolve an AST node to a literal ARGB colour, or ``None``.
+
+    Handles both ``"#FF6366F1"`` string literals and ``Colors.PRIMARY``
+    token references — the two spellings the analyzer can see statically.
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        value = node.value.strip()
+        body = value.lstrip("#")
+        if len(body) in (6, 8) and all(ch in _HEX_DIGITS for ch in body):
+            return "#" + body
+        return None
+    if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+            and node.value.id == "Colors"):
+        from pydrud.widgets.theme import Colors
+
+        try:
+            value = getattr(Colors, node.attr)
+        except AttributeError:
+            return None
+        return value if isinstance(value, str) else None
+    return None
+
+
+def _dict_path(dict_node: ast.AST, *path: str) -> ast.AST | None:
+    """Follow a chain of literal keys into a ``{...}`` dict literal."""
+    current = dict_node
+    for key in path:
+        if not isinstance(current, ast.Dict):
+            return None
+        for k, v in zip(current.keys, current.values):
+            if isinstance(k, ast.Constant) and k.value == key:
+                current = v
+                break
+        else:
+            return None
+    return current
+
+
+def _foreground(call: ast.Call) -> str | None:
+    """The text colour literal a widget call declares, if any."""
+    for kw in call.keywords:
+        if kw.arg == "color":
+            found = _literal_color(kw.value)
+            if found:
+                return found
+        if kw.arg == "style" and isinstance(kw.value, ast.Dict):
+            for path in (("font", "color"), ("color",)):
+                found = _literal_color(_dict_path(kw.value, *path))
+                if found:
+                    return found
+    return None
+
+
+def _background(call: ast.Call) -> str | None:
+    """The background colour literal a widget call declares, if any."""
+    for kw in call.keywords:
+        if kw.arg in ("bg", "bg_color", "background"):
+            found = _literal_color(kw.value)
+            if found:
+                return found
+        if kw.arg == "style" and isinstance(kw.value, ast.Dict):
+            for path in (("bg",), ("background",)):
+                found = _literal_color(_dict_path(kw.value, *path))
+                if found:
+                    return found
+    return None
+
+
+def _alpha(color: str) -> int:
+    """The 0–255 alpha channel of an ARGB/hex colour string."""
+    body = color.lstrip("#")
+    return int(body[0:2], 16) if len(body) == 8 else 255
+
+
+def _is_large_text(call: ast.Call) -> bool:
+    """True when a call's ``style.font`` marks its text as "large"."""
+    for kw in call.keywords:
+        if kw.arg != "style" or not isinstance(kw.value, ast.Dict):
+            continue
+        size_node = _dict_path(kw.value, "font", "size")
+        weight_node = _dict_path(kw.value, "font", "weight")
+        size = size_node.value if isinstance(size_node, ast.Constant) else None
+        weight = (weight_node.value if isinstance(weight_node, ast.Constant)
+                  else 400)
+        if not isinstance(size, (int, float)):
+            continue
+        if size >= 18 or (size >= 14 and isinstance(weight, (int, float))
+                          and weight >= 700):
+            return True
+    return False
+
+
+def _direct_text_child(call: ast.Call) -> ast.Call | None:
+    """A direct ``child=``/``children=[...]`` widget call, if present."""
+    for kw in call.keywords:
+        if kw.arg == "child" and isinstance(kw.value, ast.Call):
+            return kw.value
+        if kw.arg == "children" and isinstance(kw.value, ast.List):
+            for el in kw.value.elts:
+                if isinstance(el, ast.Call):
+                    return el
+    return None
+
+
+def _contrast_issue(fg: str, bg: str, call: ast.Call, filepath: str,
+                    where: str) -> dict | None:
+    """Build a contrast finding for *fg* over *bg*, or ``None`` if it passes."""
+    if _alpha(fg) == 0 or _alpha(bg) == 0:
+        return None  # transparent either side — nothing to measure
+    from pydrud.widgets.theme import Colors
+
+    ratio = round(Colors.contrast(fg, bg), 1)
+    large = _is_large_text(call)
+    threshold = _AA_LARGE if large else _AA_NORMAL
+    if ratio >= threshold:
+        return None
+    kind = "large text" if large else "normal text"
+    return {
+        "file": filepath,
+        "line": call.lineno,
+        "severity": _SEVERITY_WARNING,
+        "message": f"Low contrast{where}: {fg} on {bg} is {ratio:.1f}:1 — "
+                   f"WCAG AA needs {threshold:g}:1 for {kind}. Try "
+                   f"Colors.on({bg!r}) for a readable foreground.",
+    }
+
+
+def _check_contrast(tree: ast.AST, filepath: str) -> list[dict]:
+    """Warn about text/background pairs that fail WCAG AA (PYDRUD §14.7).
+
+    The check sees two shapes statically: a single widget that declares both
+    a text colour and a background (``Button(color=…, bg_color=…)``,
+    ``Text(color=…, style={"bg": …})``), and a container whose ``bg`` is a
+    literal with a direct text child carrying a literal colour. Colours
+    written as ``Colors.X`` tokens are resolved too, so
+    ``Colors.GREY_LIGHT`` on ``Colors.WHITE`` is caught as surely as the
+    hex strings it expands to.
+    """
+    issues: list[dict] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fg, bg = _foreground(node), _background(node)
+        if fg is not None and bg is not None:
+            found = _contrast_issue(fg, bg, node, filepath, "")
+            if found:
+                issues.append(found)
+        # Parent background + direct text child foreground. Report at the
+        # child's line, and use the child to judge large text.
+        if bg is not None:
+            child = _direct_text_child(node)
+            if child is not None:
+                child_fg = _foreground(child)
+                if child_fg is not None:
+                    found = _contrast_issue(child_fg, bg, child, filepath,
+                                            " (child text)")
+                    if found:
+                        issues.append(found)
+    return issues
+
+
+# ── Check 10: Accessibility — 48 dp touch targets (PYDRUD §14.7) ────────────
+
+
+def _literal_dp(node: ast.AST) -> float | None:
+    """A dimension literal in dp: ``48``, ``48.0`` or ``"48dp"``."""
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, bool):
+            return None
+        if isinstance(node.value, (int, float)):
+            return float(node.value)
+        if isinstance(node.value, str):
+            text = node.value.strip().lower().removesuffix("dp").strip()
+            try:
+                return float(text)
+            except ValueError:
+                return None
+    return None
+
+
+def _check_touch_targets(tree: ast.AST, filepath: str) -> list[dict]:
+    """Warn when an interactive widget is pinned below 48 dp (PYDRUD §14.7).
+
+    Material and WCAG 2.5.5 both ask for a ≥ 48 dp touch target. Pydrud
+    already pads its stock buttons, but an explicit ``width``/``height`` in
+    ``style`` overrides that padding — this flags the cases where the
+    developer has shrunk a control below the accessible minimum.
+    """
+    issues: list[dict] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if _get_call_name(node) not in _INTERACTIVE_WIDGETS:
+            continue
+        style = next((kw.value for kw in node.keywords
+                      if kw.arg == "style" and isinstance(kw.value, ast.Dict)),
+                     None)
+        if style is None:
+            continue
+        for axis in ("width", "height"):
+            value = _literal_dp(_dict_path(style, axis))
+            if value is not None and value < 48:
+                issues.append({
+                    "file": filepath,
+                    "line": node.lineno,
+                    "severity": _SEVERITY_WARNING,
+                    "message": f"{_get_call_name(node)} has {axis}={value:g} dp — "
+                               "interactive controls need a ≥ 48 dp touch "
+                               "target (WCAG 2.5.5). Drop the explicit size or "
+                               "grow it to 48.",
+                })
+    return issues
+
+
+# ── Check 11: Package shadowing ─────────────────────────────────────────────
 
 
 def _check_shadowing_issues(src_dir: str) -> list[dict]:

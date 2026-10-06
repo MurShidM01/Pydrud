@@ -292,6 +292,23 @@ public class ViewFactory {
         applySafeAreaPadding(view, spec);
     }
 
+    /**
+     * Apply a widget's accessibility content description (PYDRUD §14.7).
+     *
+     * A widget's {@code semantics} becomes the view's content description,
+     * which TalkBack reads in place of the view's own text. It works on
+     * every supported API level and can describe views that carry no text
+     * at all — icons, images and canvases — so a bare icon button is
+     * announced instead of "unlabelled button".
+     */
+    private void applySemantics(View view, JSONObject node) {
+        if (view == null || node == null) return;
+        if (node.has("semantics") && !node.isNull("semantics")) {
+            String desc = node.optString("semantics", "");
+            view.setContentDescription(desc.isEmpty() ? null : desc);
+        }
+    }
+
     // ── View creation ────────────────────────────────────────────────────
 
     private View createView(JSONObject json) {
@@ -310,6 +327,7 @@ public class ViewFactory {
                 applyStyle(view, json.optJSONObject("style"));
                 applySafeArea(view, json.optJSONObject("style"));
                 applySize(view, json.optJSONObject("style"));
+                applySemantics(view, json);
                 return view;
             }
 
@@ -413,6 +431,7 @@ public class ViewFactory {
             gestures.bind(view, json);
             applyTransforms(view, style);
             playEntrance(view, type, json);
+            applySemantics(view, json);
 
             if (!json.optBoolean("visible", true)) view.setVisibility(View.GONE);
 
@@ -2189,7 +2208,7 @@ public class ViewFactory {
             + "progress prompt props protocol_version r radius rate ratio readOnly readonly records "
             + "refreshing repeat replace request_id resizeForKeyboard response right ripple role rotate "
             + "rotation route safeArea safeAreaBottom safeAreaTop sample_rate scale scan scanFormats "
-            + "scanOverlay scroll scrollable seconds selectable selected sensor service services shadow "
+            + "scanOverlay scroll scrollable seconds selectable selected semantics sensor service services shadow "
             + "shortcuts show showGrid showLabels side size source spacing spans src start "
             + "status_bar_color steps strike strikethrough style subject subtitle surface_variant sweep "
             + "swipeThreshold swipeToRemove sx sy tabHeight tabletColumns tabs text textAlign textColor "
@@ -2418,6 +2437,10 @@ public class ViewFactory {
         }
         if (p.has("_tooltip") && android.os.Build.VERSION.SDK_INT >= 26) {
             view.setTooltipText(p.optString("_tooltip", ""));
+        }
+        if (p.has("_semantics")) {
+            String desc = p.optString("_semantics", "");
+            view.setContentDescription(desc.isEmpty() ? null : desc);
         }
         if (p.has("_expand") && view.getLayoutParams() instanceof LinearLayout.LayoutParams) {
             LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) view.getLayoutParams();
