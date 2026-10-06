@@ -16,7 +16,8 @@ from pydrud.widgets.basic import (
     Button, Checkbox, Icon, IconButton, Image, Radio, Switch, Text,
 )
 from pydrud.widgets.layout import (
-    Card, Column, Container, Divider, GridView, ListView, Row, SizedBox,
+    Card, Column, Container, Divider, GridView, ListView, PageView, Row,
+    SizedBox,
 )
 from pydrud.widgets.material import (
     AssistChip, Avatar, CircularProgress, FilterChip, ListTile,
@@ -395,6 +396,21 @@ class ButtonBar(Row):
         super().__init__(children=children, spacing=spacing,
                          horizontal_alignment=alignment,
                          vertical_alignment="center", **kwargs)
+
+
+class Carousel(PageView):
+    """A peeking, snapping carousel — a :class:`PageView` with the neighbours
+    left visible.
+
+    Same widget, carousel defaults: a ``peek`` of 24 dp reveals a sliver of
+    the next page so the swipe affordance is obvious. Renders as a
+    ``PageView`` (there is no separate native type).
+    """
+
+    def __init__(self, children: Optional[list[Widget]] = None, *,
+                 peek: int = 24, orientation: str = "horizontal", **kwargs):
+        super().__init__(children=children, peek=peek,
+                         orientation=orientation, **kwargs)
 
 
 # ── Typography and images ───────────────────────────────────────────────────

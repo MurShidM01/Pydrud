@@ -527,6 +527,66 @@ class GridView(Widget):
         return self
 
 
+class PageView(Widget):
+    """A swipeable, snapping page container — one child per page.
+
+    Each child is a full-size page; a horizontal swipe snaps to the next.
+    ``initial_page`` is the page shown on first build (and whenever the value
+    changes). ``peek`` reveals a sliver of the neighbouring pages — the
+    Material carousel look — by padding the pager. ``on_change`` receives
+    ``{"index": page}`` once the pager settles on a new page.
+
+    The pager fills both axes by default, so give it a bounded parent (a
+    ``SizedBox``, an ``Expanded`` or a full-screen body) or an explicit
+    ``style={"height": …}``.
+    """
+
+    _widget_type = "PageView"
+
+    def __init__(
+        self,
+        children: Optional[list[Widget]] = None,
+        *,
+        initial_page: int = 0,
+        orientation: str = "horizontal",
+        peek: Optional[int] = None,
+        key: Optional[str] = None,
+        style: Optional[dict] = None,
+        expand: Optional[int] = None,
+        visible: bool = True,
+        **kwargs,
+    ):
+        super().__init__(key=key, style=style, expand=expand, visible=visible,
+                         **kwargs)
+        self.children = list(children) if children else []
+        if orientation not in ("horizontal", "vertical"):
+            raise ValueError(
+                "PageView orientation must be 'horizontal' or 'vertical'")
+        self._initial_page = max(0, int(initial_page))
+        self.style["orientation"] = orientation
+        if peek is not None:
+            if peek < 0:
+                raise ValueError("PageView peek must be >= 0")
+            self.style["peek"] = int(peek)
+        self.style.setdefault("width", "match")
+        self.style.setdefault("height", "match")
+
+    @property
+    def initial_page(self) -> int:
+        return self._initial_page
+
+    @initial_page.setter
+    def initial_page(self, value: int):
+        self._initial_page = max(0, int(value))
+
+    def add(self, *widgets: Widget) -> "PageView":
+        self.children.extend(widgets)
+        return self
+
+    def _serialise_props(self) -> dict:
+        return {"initialPage": self._initial_page}
+
+
 def _edge_dict(value: Union[EdgeInsets, float, int, dict]) -> dict:
     """Normalise padding/margin input into a serialisable dict."""
     if isinstance(value, EdgeInsets):

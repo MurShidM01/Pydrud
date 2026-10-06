@@ -25,11 +25,13 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.recyclerview.widget.ItemTouchHelper;
 import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.PagerSnapHelper;
 import androidx.recyclerview.widget.RecyclerView;
 
 import org.json.JSONArray;
@@ -573,6 +575,24 @@ public class AdvancedViews {
         }
     }
 
+    /**
+     * One full-size page per child (PYDRUD §15.2).
+     *
+     * <p>Extends {@link ViewAdapter} so the existing structural-patch path
+     * (a RecyclerView whose adapter is a ViewAdapter is rebuilt from the
+     * patched node) works unchanged; only the page size differs.
+     */
+    public static class PagerAdapter extends ViewAdapter {
+        @Override
+        public Holder onCreateViewHolder(ViewGroup parent, int viewType) {
+            FrameLayout page = new FrameLayout(parent.getContext());
+            page.setLayoutParams(new RecyclerView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+            return new Holder(page);
+        }
+    }
+
     public RecyclerView createList(final String key, final JSONObject props,
                                    final boolean reorderable) {
         RecyclerView list = new RecyclerView(activity);
@@ -642,5 +662,57 @@ public class AdvancedViews {
         if (adapter instanceof ViewAdapter) {
             ((ViewAdapter) adapter).setViews(children);
         }
+    }
+
+    /**
+     * A snapping page container (PYDRUD §15.2): a horizontal (or vertical)
+     * RecyclerView that snaps one full-size page at a time.
+     *
+     * <p>Each child is one page. ``peek`` reveals a sliver of the
+     * neighbouring pages (a carousel) by padding the pager and disabling
+     * clip-to-padding. The page-change event fires only when the pager
+     * settles on a new page, and starts from {@code initialPage} so the
+     * first settle does not echo a spurious change.
+     */
+    public RecyclerView createPager(final String key, final JSONObject style,
+                                    final int initialPage) {
+        RecyclerView pager = new RecyclerView(activity);
+        boolean vertical = style != null
+            && "vertical".equals(style.optString("orientation", ""));
+        pager.setLayoutManager(new LinearLayoutManager(activity,
+            vertical ? RecyclerView.VERTICAL : RecyclerView.HORIZONTAL, false));
+        pager.setAdapter(new PagerAdapter());
+        new PagerSnapHelper().attachToRecyclerView(pager);
+
+        int peek = style != null ? style.optInt("peek", 0) : 0;
+        if (peek > 0) {
+            int px = dp(peek);
+            pager.setClipToPadding(false);
+            pager.setClipChildren(false);
+            if (vertical) pager.setPadding(0, px, 0, px);
+            else pager.setPadding(px, 0, px, 0);
+        }
+
+        pager.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            private int last = initialPage;
+
+            @Override
+            public void onScrollStateChanged(RecyclerView view, int state) {
+                if (state != RecyclerView.SCROLL_STATE_IDLE) return;
+                LinearLayoutManager manager =
+                    (LinearLayoutManager) view.getLayoutManager();
+                if (manager == null) return;
+                int pos = manager.findFirstCompletelyVisibleItemPosition();
+                if (pos < 0) pos = manager.findFirstVisibleItemPosition();
+                if (pos < 0 || pos == last) return;
+                last = pos;
+                try {
+                    JSONObject data = new JSONObject();
+                    data.put("index", pos);
+                    events.dispatch("change", key, data);
+                } catch (Exception ignored) { }
+            }
+        });
+        return pager;
     }
 }

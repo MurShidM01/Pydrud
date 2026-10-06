@@ -27,6 +27,7 @@ _SEVERITY_ERROR = "error"
 _WIDGET_CLASSES = {
     "Container", "Column", "Row", "Center", "Spacer", "Divider",
     "Stack", "Positioned", "SizedBox", "Padding", "Card", "ListView", "GridView",
+    "PageView", "Carousel",
     "Text", "Button", "FilledButton", "TonalButton", "OutlinedButton",
     "TextButton", "ElevatedButton", "IconButton", "TextField",
     "SearchField", "EmailField", "PasswordField", "NumberField",

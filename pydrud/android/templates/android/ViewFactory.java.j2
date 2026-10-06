@@ -374,6 +374,8 @@ public class ViewFactory {
                     view = createSlider(json); break;
                 case "RangeSlider":
                     view = createRangeSlider(json); break;
+                case "PageView":
+                    view = createPageView(json); break;
                 case "Dropdown":
                     view = createDropdown(json); break;
                 case "Canvas":
@@ -703,6 +705,29 @@ public class ViewFactory {
         } catch (JSONException e) {
             Log.w(TAG, "virtualised list rebuild failed", e);
         }
+    }
+
+    /**
+     * A snapping page container (PYDRUD §15.2).
+     *
+     * A horizontal (or vertical) RecyclerView of full-size pages, one page
+     * per child. Structural patches — a page added, moved or removed — go
+     * through the shared virtualised-list path (its adapter is a
+     * {@link AdvancedViews.ViewAdapter}), so the pager needs no bespoke
+     * patch handling.
+     */
+    private View createPageView(JSONObject json) throws JSONException {
+        JSONObject style = json.optJSONObject("style");
+        JSONObject p = props(json);
+        int initial = p != null ? Math.max(0, p.optInt("initialPage", 0)) : 0;
+        androidx.recyclerview.widget.RecyclerView pager =
+            advanced.createPager(json.optString("key", ""), style, initial);
+        advanced.setListViews(pager, buildRows(json.optJSONArray("children")));
+        if (initial > 0) {
+            final androidx.recyclerview.widget.RecyclerView target = pager;
+            pager.post(() -> target.scrollToPosition(initial));
+        }
+        return pager;
     }
 
     /** Create a LinearLayout (Column, Row), optionally scrollable. */
@@ -1867,7 +1892,7 @@ public class ViewFactory {
             case "TextField": case "SearchBar": case "ListTile":
             case "ExpansionTile": case "Tabs": case "BottomNavigationBar":
             case "SegmentedButton": case "Chart": case "RefreshIndicator":
-            case "Form":
+            case "Form": case "PageView":
                 return true;
             default:
                 return false;
@@ -2293,7 +2318,7 @@ public class ViewFactory {
             + "feedback filename fill fit floating font font_family format gestures gradient h handled "
             + "haptic haptics has_events height heightFactor helper highAccuracy hint html icon "
             + "iconPosition icon_brightness id idle ime importance indeterminate index indicator "
-            + "indicatorSize initial initials inputs interval italic items javascript join key keyboard "
+            + "indicatorSize initial initialPage initials inputs interval italic items javascript join key keyboard "
             + "keyboard_height kind label labelBehavior lat leadingColor leadingIcon left letterSpacing "
             + "level lights lineHeight lines link locale lon long loop mainAxis mainAxisAlignment "
             + "margin markers max maxColumns maxHeight maxLabelLines maxLines maxWidth max_seconds "
@@ -2301,7 +2326,7 @@ public class ViewFactory {
             + "muted name native navigation_bar_color network new_key obscure ok on_primary ongoing op "
             + "opacity open ops options ordered orientation overflow overscroll_glow padding "
             + "padding_bottom padding_left padding_right padding_top paint parent_key password path "
-            + "pattern permission permissions pie pill pitch placeholder position primary_container "
+            + "pattern peek permission permissions pie pill pitch placeholder position primary_container "
             + "progress prompt props protocol_version r radius rate ratio readOnly readonly records "
             + "refreshing repeat replace request_id resizeForKeyboard response right ripple role rotate "
             + "rotation route safeArea safeAreaBottom safeAreaTop sample_rate scale scan scanFormats "
@@ -2617,6 +2642,18 @@ public class ViewFactory {
                     sp.setSelection(idx, false);
                     sp.post(() -> sp.setOnItemSelectedListener(listener));
                 }
+            }
+            return true;
+        }
+
+        if (view instanceof androidx.recyclerview.widget.RecyclerView
+                && ((androidx.recyclerview.widget.RecyclerView) view).getAdapter()
+                        instanceof AdvancedViews.PagerAdapter) {
+            if (p.has("initialPage")) {
+                final androidx.recyclerview.widget.RecyclerView pager =
+                    (androidx.recyclerview.widget.RecyclerView) view;
+                final int idx = Math.max(0, p.optInt("initialPage", 0));
+                pager.post(() -> pager.scrollToPosition(idx));
             }
             return true;
         }

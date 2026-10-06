@@ -7,7 +7,7 @@ from pydrud.widgets.styling import (
 )
 from pydrud.widgets.layout import (
     Container, Column, Row, Center, Spacer, Divider,
-    Stack, Positioned, SizedBox, Padding, Card, ListView, GridView,
+    Stack, Positioned, SizedBox, Padding, Card, ListView, GridView, PageView,
 )
 from pydrud.widgets.basic import (
     Text, Button, FilledButton, TonalButton, OutlinedButton, TextButton,
@@ -56,7 +56,7 @@ from pydrud.widgets.presets import (
     CheckboxListTile, ChoiceChip, CircleAvatar, CircleImage, CloseButton,
     ColoredBox, ConstrainedBox, DecoratedBox, EmptyState, ErrorState, Expanded,
     Flexible, Flex, FractionallySizedBox, FittedBox, MetricCard, DataTable,
-    Timeline,
+    Timeline, Carousel,
     FormSection, Gap, Heading, InfoCard, Label, LimitedBox, Link,
     LoadingState, MenuButton, NavigationTile, NetworkImage, Placeholder,
     RadioListTile, SectionHeader, SettingsTile, SingleChildScrollView, StatCard,
@@ -82,6 +82,7 @@ __all__ = [
     "Card",
     "ListView",
     "GridView",
+    "PageView",
     # basic
     "Text",
     "Button",
@@ -235,6 +236,7 @@ __all__ = [
     "MetricCard",
     "DataTable",
     "Timeline",
+    "Carousel",
     "Align",
     "ColoredBox",
     "DecoratedBox",
