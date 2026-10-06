@@ -148,6 +148,29 @@ unlimited-widget and unlimited-icon work.
 * **DOC-001…DOC-004** — documented the `permissions list` command, the
   `Row`/`Column` fill-width default, the icon vocabulary and the corrected
   Canvas painter contract.
+* **DX-003** — `pydrud analyze` now reports an *error* when app code imports
+  a build-time-only Pydrud module (`pydrud.commands`, `pydrud.android`,
+  `pydrud.utils`, `pydrud.preview`, `pydrud.qr`, `pydrud.compatibility`,
+  `pydrud.packages`). Those resolve in a checkout but are stripped from the
+  APK, so the mistake used to surface only on device. The release docs spell
+  out the boundary.
+* **`javacheck` catches lambda scope shadowing** — a lambda local that
+  redeclares a parameter or top-level local of its enclosing method is a
+  javac error ("variable X is already defined in method Y"), but the parser
+  accepted it and it only failed minutes into `pydrud build`. The static
+  cross-class checker now rejects it, with no false positives on sibling
+  blocks or anonymous-class locals.
+
+### Verified — release build (BT-002)
+`pydrud build --release` was exercised end to end with `shrink: true` on the
+generated project (AGP 8.13.2, R8, Gradle 8.14.4). It produced a signed
+release APK and the shrinking did not cost the runtime: the vendored Python
+tree (`assets/chaquopy/app.imy`, including `pydrud/core/icon_data.py`) and
+`libpython3.11.so` for every configured ABI are present, while the
+build-time-only modules are correctly absent. This pass also caught — and
+fixed — a Java compile error the parser-based tests had accepted. The
+release wiring (R8, `isShrinkResources`, the keep rules) is now pinned by
+tests so it cannot regress.
 
 ## [Unreleased]
 

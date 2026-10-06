@@ -120,6 +120,9 @@ and grows the UI layer toward Flutter/React Native parity:
 * **Two more §15.2 widgets.** `RangeSlider` (a two-thumb range, backed by
   Material's `RangeSlider`) and `PageView`/`Carousel` (swipeable, snapping
   pages, backed by a snapping RecyclerView that reuses the list patch path).
+* **The release build is verified (BT-002).** `pydrud build --release` was
+  run end to end with R8 shrinking on: the vendored Python runtime and the
+  native libraries survive, and the build wiring is now pinned by tests.
 
 Existing projects should regenerate their managed runtime after upgrading:
 
@@ -607,6 +610,21 @@ pydrud icons --source logo.png                 # every density, round + adaptive
 pydrud keygen                            # upload keystore + keystore.properties
 pydrud build --release                   # signed, R8-shrunk APK
 ```
+
+**Release builds are exercised, not assumed.** `pydrud build --release` runs
+AGP 8.13.2 + R8 end to end, and the vendored Python runtime
+(`assets/chaquopy/app.imy`) and the native libraries (`libpython3.11.so` for
+every ABI) survive shrinking. Turn shrinking on with `shrink: true` in
+`pydrud.yaml` (or `-PpydrudShrink=true`); the keep rules in
+`android/app/proguard-rules.pro` protect Chaquopy, every renderer class Python
+calls by name, and the `View(Context)` constructors `NativeView` reflects on.
+
+**The APK ships only the runtime.** The bundler strips Pydrud's build-time-only
+modules — `pydrud.commands`, `pydrud.android`, `pydrud.utils`,
+`pydrud.preview`, `pydrud.qr`, `pydrud.compatibility` and `pydrud.packages`
+— from the vendored runtime. Importing one from app code resolves in a
+checkout but raises on device, so `pydrud analyze` reports it as an error
+(DX-003).
 
 ---
 
