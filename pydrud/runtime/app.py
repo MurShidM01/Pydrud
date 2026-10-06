@@ -26,6 +26,8 @@ from pydrud.core.bridge import BridgeProtocol
 from pydrud.core.protocol import MAX_FRAME_BYTES, ProtocolError, RenderTransaction
 from pydrud.core.errors import FrameTooLargeError
 from pydrud.core.elements import ElementTree
+from pydrud.core.logcat import install as install_logcat
+from pydrud.core.logcat import log_exception
 from pydrud.widgets import Widget, assign_stable_keys, validate_tree_keys
 
 #: Above this many patches a full re-render is cheaper than patching.
@@ -161,6 +163,9 @@ class App:
             retry_delay: Seconds between connection retries.
             max_retries: Maximum connection attempts before giving up.
         """
+        # Route Python output to logcat under the stable `Pydrud` tag before
+        # anything else can fail (DX-004). No-op on the host.
+        install_logcat()
         self._build_tree()
 
         if self._hot_reload_requested:
@@ -679,10 +684,9 @@ class App:
                 return
             except Exception:
                 pass
-        print(f"[Pydrud] Error: {exc}")
-        if tb_str.strip() and tb_str.strip() != "NoneType: None":
-            sys.stderr.write(tb_str + "\n")
-            sys.stderr.flush()
+        # A single, documented logcat tag (`Pydrud`) so a device traceback
+        # is findable with `adb logcat -s Pydrud` (DX-004).
+        log_exception(exc, tb_str)
 
     # ── tree building ─────────────────────────────────────────────────────
 

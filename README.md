@@ -86,6 +86,11 @@ v2.0.2 hardens the device experience and expands the Flutter-style UI layer:
 * **Live logs belong to your app.** `pydrud run` scopes logcat to the app PID,
   preventing unrelated `System.err` output from Transsion and other OEM
   services from looking like a Pydrud failure.
+* **One stable log tag.** Framework output, your app's `print()` calls and
+  every Python error traceback are emitted under the `Pydrud` tag, so
+  `adb logcat -s Pydrud` shows them all in one place. Native services keep
+  their finer `Pydrud*` tags (`PydrudBridge`, `PydrudViewFactory`, …), which
+  you can select with `adb logcat -s PydrudBridge`.
 * **The Python mismatch warning is gone.** If the build machine has Python
   3.12 while the app embeds 3.11, Pydrud disables Chaquopy source bytecode
   compilation automatically. Builds remain successful; only first start is
@@ -543,6 +548,8 @@ are rejected with an explanation; anything else can still be forced with
 ```bash
 pydrud capabilities add haptics notifications  # normal generated capabilities
 pydrud permissions add camera location         # dangerous permissions you use
+pydrud capabilities list --all                 # every capability Pydrud knows
+pydrud permissions list --all                  # every permission Pydrud knows
 pydrud icons --source logo.png                 # every density, round + adaptive icons
 pydrud keygen                            # upload keystore + keystore.properties
 pydrud build --release                   # signed, R8-shrunk APK

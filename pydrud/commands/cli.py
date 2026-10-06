@@ -594,6 +594,39 @@ def permissions_remove(names):
     ))
 
 
+@permissions.command("list")
+@click.option("--all", "show_all", is_flag=True,
+              help="Show every permission alias Pydrud knows.")
+def permissions_list(show_all: bool):
+    """List the manifest permissions, or every known permission alias.
+
+    The counterpart to ``capabilities list`` (DOC-001).
+    """
+    from pydrud.commands.release import PERMISSIONS, list_permissions
+
+    root = _project_or_exit()
+    enabled = set(list_permissions(root))
+    title = ("Every permission Pydrud knows" if show_all
+             else "Permissions in AndroidManifest.xml")
+    _show_header("permissions list", title,
+                 details=(("Project", os.path.basename(root)),))
+    if show_all:
+        for alias in sorted(PERMISSIONS):
+            canonical = PERMISSIONS[alias].rsplit(".", 1)[-1]
+            marker = "[enabled] " if canonical in enabled else ""
+            click.echo(tui.neutral_badge(f"{marker}{alias} — {canonical}"))
+    elif enabled:
+        for name in sorted(enabled):
+            click.echo(tui.neutral_badge(name))
+    else:
+        click.echo(tui.neutral_badge(
+            "No permissions declared in AndroidManifest.xml."))
+    click.echo(tui.render_summary(
+        f"{len(enabled)} permission(s) in the manifest",
+        (("Source", "AndroidManifest.xml"),),
+    ))
+
+
 @main.group()
 def capabilities():
     """Manage generated Android capabilities in pydrud.yaml."""

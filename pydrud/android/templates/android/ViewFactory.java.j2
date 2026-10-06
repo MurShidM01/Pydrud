@@ -2006,8 +2006,68 @@ public class ViewFactory {
 
     // ── Style ───────────────────────────────────────────────────────────────
 
+    /**
+     * Every ``style``/``props`` key the renderer reads anywhere.
+     *
+     * <p>A key outside this set is a typo the native side would
+     * otherwise ignore in silence — exactly how PB-003/PB-006 hid. Dev
+     * builds log it once per key (DX-006).
+     */
+    private static final java.util.Set<String> KNOWN_KEYS =
+        new java.util.HashSet<>(java.util.Arrays.asList(
+            ("accent action active activeColor activeIcon address align alignment all "
+            + "allowNativeBridge allow_credential alpha animate animate_layout animation aspectRatio "
+            + "audio autoRequestPermission autofocus autoplay axis badge battery_not_low bg bgImage "
+            + "blocks body boldSelected border borderBottom borderLeft borderRadius borderRight "
+            + "borderTop bottom breakpoint buttonSize c1x c1y c2x c2y callback_id camera cancel "
+            + "cancellable cap channel characteristic charging checked children circular cmd codeBg "
+            + "color colors columns content controls count crossAxis crossAxisAlignment current curve "
+            + "cx cy dark dash default deg delay deletable dense density description direction disabled "
+            + "dismissible distance divider divisions drawerSide duration dx dy elevation enabled error "
+            + "errorColor error_image events every expand expanded extended fabPosition facing family "
+            + "feedback filename fill fit floating font font_family format gestures gradient h handled "
+            + "haptic haptics has_events height heightFactor helper highAccuracy hint html icon "
+            + "iconPosition icon_brightness id idle ime importance indeterminate index indicator "
+            + "indicatorSize initial initials inputs interval italic items javascript join key keyboard "
+            + "keyboard_height kind label labelBehavior lat leadingColor leadingIcon left letterSpacing "
+            + "level lights lineHeight lines link locale lon long loop mainAxis mainAxisAlignment "
+            + "margin markers max maxColumns maxHeight maxLabelLines maxLines maxWidth max_seconds "
+            + "message mime min minHeight minItemWidth minWidth mode mono multi multiline multiple "
+            + "muted name native navigation_bar_color network new_key obscure ok on_primary ongoing op "
+            + "opacity open ops options ordered orientation overflow overscroll_glow padding "
+            + "padding_bottom padding_left padding_right padding_top paint parent_key password path "
+            + "pattern permission permissions pie pill pitch placeholder position primary_container "
+            + "progress prompt props protocol_version r radius rate ratio readOnly readonly records "
+            + "refreshing repeat replace request_id resizeForKeyboard response right ripple role rotate "
+            + "rotation route safeArea safeAreaBottom safeAreaTop sample_rate scale scan scanFormats "
+            + "scanOverlay scroll scrollable seconds selectable selected sensor service services shadow "
+            + "shortcuts show showGrid showLabels side size source spacing spans src start "
+            + "status_bar_color steps strike strikethrough style subject subtitle surface_variant sweep "
+            + "swipeThreshold swipeToRemove sx sy tabHeight tabletColumns tabs text textAlign textColor "
+            + "textScale text_scale thickness threeLine threshold timeout title tokens tooltip top "
+            + "topDivider topic trailingColor trailingIcon transaction_id transition tristate type "
+            + "underline units uppercase url use24h v value values variant vibrate virtualized visible "
+            + "volume w weight width widthFactor x x1 x2 y y1 y2 zIndex zoom ").trim().split(" ")));
+    private static final java.util.Set<String> WARNED_STYLE_KEYS =
+        java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
+
+    /** Warn (once per key) about style keys no branch consumes (DX-006). */
+    private void warnUnknownStyleKeys(JSONObject s) {
+        if (s == null) return;
+        java.util.Iterator<String> it = s.keys();
+        while (it.hasNext()) {
+            String k = it.next();
+            if (k.startsWith("_") || KNOWN_KEYS.contains(k)) continue;
+            if (!WARNED_STYLE_KEYS.add(k)) continue;
+            Log.w(TAG, "unhandled style key '" + k + "' — the native "
+                + "renderer does not read it; check the Pydrud style "
+                + "reference for the supported keys.");
+        }
+    }
+
     private void applyStyle(View view, JSONObject s) {
         if (s == null) return;
+        warnUnknownStyleKeys(s);
         try {
             int radius = s.has("borderRadius") ? dp(s.optInt("borderRadius", 0)) : 0;
             boolean hasBorder = s.has("border");

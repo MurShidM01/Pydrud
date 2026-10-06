@@ -194,17 +194,28 @@ def _check_missing_keys(tree: ast.AST, filepath: str) -> list[dict]:
     items are inserted or reordered, structural keys shift and the diff
     engine has to rebuild more than it should. An explicit, data-derived key
     (e.g. ``key=f"todo-{item.id}"``) keeps those updates minimal.
+
+    Only the loop's *outermost* widgets need a key: a widget nested inside a
+    keyed parent (``Row(key=…, children=[Icon()])``) already gets its
+    identity from that parent, so flagging it was a false positive (DX-002).
     """
     issues: list[dict] = []
     for node in ast.walk(tree):
         if not isinstance(node, (ast.For, ast.While, ast.ListComp,
                                  ast.SetComp, ast.GeneratorExp)):
             continue
-        for child in ast.walk(node):
-            if not isinstance(child, ast.Call):
-                continue
-            func = _get_call_name(child)
-            if func not in _WIDGET_CLASSES:
+        widgets = [c for c in ast.walk(node)
+                   if isinstance(c, ast.Call)
+                   and _get_call_name(c) in _WIDGET_CLASSES]
+        # Any widget call inside another widget call is a nested child.
+        nested: set = set()
+        for call in widgets:
+            for inner in ast.walk(call):
+                if inner is not call and isinstance(inner, ast.Call) \
+                        and _get_call_name(inner) in _WIDGET_CLASSES:
+                    nested.add(id(inner))
+        for child in widgets:
+            if id(child) in nested:
                 continue
             has_key = any(kw.arg == "key" for kw in child.keywords if kw.arg is not None)
             if not has_key:
@@ -212,8 +223,9 @@ def _check_missing_keys(tree: ast.AST, filepath: str) -> list[dict]:
                     "file": filepath,
                     "line": child.lineno,
                     "severity": _SEVERITY_WARNING,
-                    "message": f"{func}() built in a loop without an explicit key= "
-                               "-- dynamic lists diff better with stable keys",
+                    "message": f"{_get_call_name(child)}() built in a loop without an "
+                               "explicit key= -- dynamic lists diff better with "
+                               "stable keys",
                 })
     return issues
 

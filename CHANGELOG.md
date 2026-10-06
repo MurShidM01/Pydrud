@@ -73,7 +73,8 @@ unlimited-widget and unlimited-icon work.
 * **DX-004** — framework output uses a stable `Pydrud` log tag.
 * **DX-005** — `pydrud analyze` resolves every icon string against the
   shipped set and suggests the closest supported name.
-* **DX-006** — dev builds log dropped/unknown native props once per key.
+* **DX-006** — the renderer logs (once per key) any `style` key that no
+  branch consumes, so a dropped prop is visible instead of silent.
 * **DOC-001…DOC-004** — documented the `permissions list` command, the
   `Row`/`Column` fill-width default, the icon vocabulary and the corrected
   Canvas painter contract.
