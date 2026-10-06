@@ -315,22 +315,23 @@ def analyze(path, json_output):
 
 
 # ──────────────────────────────────────────────────────────────────────────
-# Python packages (Chaquopy pip)
+# Python packages (runtime-aware)
 # ──────────────────────────────────────────────────────────────────────────
 
 
 @main.group()
 def pip():
-    """Manage Python packages bundled into the APK.
+    """Manage Python packages for this project.
 
     \b
         pydrud pip add yt-dlp requests
         pydrud pip list
         pydrud pip search qr
         pydrud pip remove requests
+        pydrud pip sync
 
-    Only packages verified to work under Chaquopy on Android are accepted;
-    pass --force to install something unverified anyway.
+    Chaquopy projects: packages are bundled into the APK at build time.
+    Pydash projects: packages run on the host side only.
     """
 
 
@@ -359,6 +360,14 @@ def _require_chaquopy(command: str) -> None:
         sys.exit(1)
 
 
+def _resolve_pip_backend(project_dir: str):
+    """Resolve the runtime and return the matching PackageBackend."""
+    from pydrud.runtime.runtime import resolve_runtime
+    from pydrud.commands.packages import get_backend
+    descriptor = resolve_runtime(project_dir)
+    return get_backend(descriptor.runtime.value), descriptor.runtime.value
+
+
 @pip.command("add")
 @click.argument("packages", nargs=-1, required=True)
 @click.option("--force", is_flag=True, default=False,
@@ -367,37 +376,49 @@ def _require_chaquopy(command: str) -> None:
               help="Only record it in pydrud.toml; do not touch Gradle.")
 def pip_add(packages, force, no_sync):
     """Add one or more packages (e.g. ``pydrud pip add yt-dlp``)."""
-    from pydrud.commands.packages import PackageError, Requirements, sync_gradle
+    from pydrud.commands.packages import PackageError
 
     root = _project_or_exit()
-    _show_header("pip add", "Add Python packages",
-                 "Recording Chaquopy-compatible dependencies for the Android build",
-                 details=(("Project", os.path.basename(root)),))
-    requirements = Requirements(root)
+    backend, runtime = _resolve_pip_backend(root)
+    runtime_label = "Chaquopy" if runtime == "chaquopy" else "Pydash"
+    subtitle = ("Recording dependencies for the Android build"
+                if runtime == "chaquopy" else
+                "Recording host-side dependencies (not bundled into an APK)")
+    _show_header("pip add", "Add Python packages", subtitle,
+                 details=(("Project", os.path.basename(root)),
+                          ("Runtime", runtime)))
     added = []
     for requirement in packages:
-        try:
-            entry = requirements.add(requirement, force=force)
-        except PackageError as exc:
-            _show_error(str(exc))
+        result = backend.add(root, requirement, force=force)
+        if not result.success:
+            _show_error(result.message)
             sys.exit(1)
+        entry = result.details or {}
         added.append(entry)
-        warning = " · native wheel, increases APK size" if entry["native"] else ""
+        cat = entry.get("support_category", "native_equivalent")
+        warning = ""
+        if cat == "device_native":
+            warning = " · native wheel, increases APK size"
+        elif cat == "host_only":
+            warning = " · host-only package"
         click.echo(tui.add_badge(
             f"{entry['name']}{entry.get('spec', '')} — "
             f"{entry['description']}{warning}"))
 
-    gradle_path = "not updated (--no-sync)"
-    if not no_sync:
-        try:
-            path = sync_gradle(root)
-            gradle_path = os.path.relpath(path, root)
-            click.echo(tui.info_badge(f"Updated {gradle_path}"))
-        except PackageError as exc:
-            click.echo(tui.warn_badge(str(exc)), err=True)
+    gradle_info = "—"
+    if runtime == "chaquopy" and not no_sync:
+        result = backend.sync_gradle(root)
+        if result.success:
+            import os.path as _osp
+            gradle_info = _osp.relpath(root, root)  # placeholder
+        else:
+            click.echo(tui.warn_badge(result.message), err=True)
+    elif runtime == "pydash":
+        gradle_info = "not applicable (pydash)"
     click.echo(tui.render_summary(
         f"{len(added)} package(s) ready",
-        (("Gradle", gradle_path), ("Install", "next Android build")),
+        (("Gradle", gradle_info),
+         ("Install", "next Android build" if runtime == "chaquopy" else "host run")),
     ))
 
 
@@ -405,24 +426,26 @@ def pip_add(packages, force, no_sync):
 @click.argument("packages", nargs=-1, required=True)
 def pip_remove(packages):
     """Remove packages from the project."""
-    from pydrud.commands.packages import PackageError, Requirements, sync_gradle
+    from pydrud.commands.packages import PackageError
 
     root = _project_or_exit()
+    backend, runtime = _resolve_pip_backend(root)
     _show_header("pip remove", "Remove Python packages",
-                 "Updating pydrud.toml and the generated Chaquopy build block",
-                 details=(("Project", os.path.basename(root)),))
-    requirements = Requirements(root)
+                 "Updating pydrud.toml and the generated build block",
+                 details=(("Project", os.path.basename(root)),
+                          ("Runtime", runtime)))
     removed = 0
     for name in packages:
-        if requirements.remove(name):
+        result = backend.remove(root, name)
+        if result.success:
             click.echo(tui.remove_badge(name))
             removed += 1
         else:
-            click.echo(tui.neutral_badge(f"{name} was not installed"))
-    try:
-        sync_gradle(root)
-    except PackageError as exc:
-        click.echo(tui.warn_badge(str(exc)), err=True)
+            click.echo(tui.neutral_badge(name))
+    if runtime == "chaquopy":
+        result = backend.sync_gradle(root)
+        if not result.success:
+            click.echo(tui.warn_badge(result.message), err=True)
     click.echo(tui.render_summary(
         f"Removed {removed} package(s)", (("Manifest", "pydrud.toml"),)
     ))
@@ -434,10 +457,10 @@ def pip_remove(packages):
 @click.option("--category", default=None, help="Filter --all by category.")
 def pip_list(show_all, category):
     """Show installed packages, or the whole verified registry."""
-    from pydrud.commands.packages import by_category, installed_summary
+    from pydrud.commands.packages import by_category
 
     if show_all:
-        _show_header("pip list", "Verified Android packages",
+        _show_header("pip list", "Verified packages",
                      "Packages tested with Chaquopy and available to Pydrud apps",
                      details=(("Filter", category or "all categories"),))
         groups = by_category()
@@ -450,33 +473,33 @@ def pip_list(show_all, category):
         for name, entries in groups.items():
             click.echo(tui.render_section(name.upper()))
             click.echo(tui.render_table(
-                ("PACKAGE", "WHEEL", "DESCRIPTION"),
-                ((entry["name"], "native" if entry["native"] else "pure",
+                ("PACKAGE", "SUPPORT", "DESCRIPTION"),
+                ((entry["name"], entry.get("support_category", "native_equivalent"),
                   entry["description"]) for entry in entries),
             ))
             total += len(entries)
         click.echo(tui.render_summary(
             f"{total} verified packages",
-            (("Native", "marked in the WHEEL column"),),
+            (("Support", "native_equivalent | device_native | host_only"),),
         ))
         return
 
     root = _project_or_exit()
-    _show_header("pip list", "Project packages",
-                 "Dependencies bundled into this application's APK",
-                 details=(("Project", os.path.basename(root)),))
-    rows = installed_summary(root)
+    backend, runtime = _resolve_pip_backend(root)
+    rows = backend.list_packages(root)
     if not rows:
         click.echo(tui.neutral_badge(
             "No extra packages. Add one with 'pydrud pip add <name>'."))
         return
     click.echo(tui.render_table(
-        ("PACKAGE", "VERSION", "DESCRIPTION"),
-        ((row["name"], row["spec"], row["description"]) for row in rows),
+        ("PACKAGE", "VERSION", "SUPPORT", "DESCRIPTION"),
+        ((row["name"], row["spec"],
+          row.get("support_category", "native_equivalent"),
+          row["description"]) for row in rows),
     ))
     click.echo(tui.render_summary(
-        f"{len(rows)} package(s)", (("Manifest", "pydrud.toml"),)
-    ))
+        f"{len(rows)} package(s)", (("Manifest", "pydrud.toml"),
+                                     ("Runtime", runtime))))
 
 
 @pip.command("search")
@@ -486,16 +509,17 @@ def pip_search(query):
     from pydrud.commands.packages import search
 
     _show_header("pip search", f"Package search · {query}",
-                 "Searching Pydrud's verified Android package registry")
+                 "Searching Pydrud's verified package registry")
     results = search(query)
     if not results:
         click.echo(tui.warn_badge(
             f"Nothing matches {query!r}. Try 'pydrud pip list --all'."))
         return
     click.echo(tui.render_table(
-        ("PACKAGE", "CATEGORY", "WHEEL", "DESCRIPTION"),
+        ("PACKAGE", "CATEGORY", "SUPPORT", "DESCRIPTION"),
         ((entry["name"], entry["category"],
-          "native" if entry["native"] else "pure", entry["description"])
+          entry.get("support_category", "native_equivalent"),
+          entry["description"])
          for entry in results),
     ))
     click.echo(tui.render_summary(
@@ -505,21 +529,30 @@ def pip_search(query):
 
 @pip.command("sync")
 def pip_sync():
-    """Re-apply pydrud.toml to the Gradle build (after editing it by hand)."""
-    from pydrud.commands.packages import PackageError, Requirements, sync_gradle
+    """Re-apply pydrud.toml to the build system (after editing it by hand)."""
+    from pydrud.commands.packages import PackageError, Requirements
 
     root = _project_or_exit()
+    backend, runtime = _resolve_pip_backend(root)
+    if runtime == "pydash":
+        result = backend.sync_gradle(root)
+        _show_header("pip sync", "Synchronize Python packages",
+                     result.message,
+                     details=(("Project", os.path.basename(root)),
+                              ("Runtime", runtime)))
+        return
     _show_header("pip sync", "Synchronize Python packages",
                  "Applying pydrud.toml dependencies to the Chaquopy Gradle block",
-                 details=(("Project", os.path.basename(root)),))
-    try:
-        path = sync_gradle(root)
-    except PackageError as exc:
-        _show_error(str(exc))
+                 details=(("Project", os.path.basename(root)),
+                          ("Runtime", runtime)))
+    result = backend.sync_gradle(root)
+    if not result.success:
+        _show_error(result.message)
         sys.exit(1)
+    count = len(Requirements(root))
     click.echo(tui.render_summary(
-        f"Synced {len(Requirements(root))} package(s)",
-        (("Gradle", os.path.relpath(path, root)),),
+        f"Synced {count} package(s)",
+        (("Gradle", "updated"),),
     ))
 
 
