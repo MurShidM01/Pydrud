@@ -54,6 +54,30 @@ class TestAnalyzer(unittest.TestCase):
                             messages(source)))
 
 
+class TestHostOnlyImports(unittest.TestCase):
+    """DX-003: build-time-only pydrud modules must not be imported by an app."""
+
+    def test_a_build_time_only_import_is_an_error(self):
+        for source, part in (
+            ("import pydrud.commands\n", "commands"),
+            ("from pydrud.android import templates\n", "android"),
+            ("from pydrud.utils import tui\n", "utils"),
+            ("from pydrud.commands.packages import Requirements\n", "commands"),
+            ("import pydrud.preview\n", "preview"),
+        ):
+            with self.subTest(source=source.strip()):
+                found = [i for i in _analyze_file(source, "x.py")
+                         if i["severity"] == "error"]
+                self.assertTrue(
+                    any(f"pydrud.{part}" in i["message"] for i in found), found)
+
+    def test_runtime_imports_are_clean(self):
+        source = ("from pydrud import App, Text, Colors\n"
+                  "import pydrud.icons\n"
+                  "from pydrud.core.diff import TreeDiff\n")
+        self.assertEqual(_analyze_file(source, "x.py"), [])
+
+
 class TestWidgetRegistryDrift(unittest.TestCase):
     def test_analyzer_knows_every_exported_widget(self):
         """A new widget must be added to ``_WIDGET_CLASSES`` as well."""

@@ -368,6 +368,31 @@ class TestGeneratedProject(unittest.TestCase):
         errors = [i for i in issues if i["severity"] == "error"]
         self.assertEqual(errors, [], f"analyzer errors: {errors}")
 
+    def test_release_build_is_wired_for_r8(self):
+        """BT-002: `pydrud build --release` must be able to shrink safely."""
+        gradle = open(self.path("android/app/build.gradle.kts"),
+                      encoding="utf-8").read()
+        self.assertIn("isMinifyEnabled", gradle)
+        self.assertIn("isShrinkResources = isMinifyEnabled", gradle)
+        self.assertIn("proguardFiles(", gradle)
+        self.assertIn('"proguard-rules.pro"', gradle)
+        # Shrinking is opt-in via pydrud.yaml / -PpydrudShrink=true.
+        self.assertIn("findProperty(\"pydrudShrink\")", gradle)
+
+    def test_proguard_keeps_python_called_classes(self):
+        """R8 must not rename what Python reaches by name."""
+        rules = open(self.path("android/app/proguard-rules.pro"),
+                     encoding="utf-8").read()
+        self.assertIn("com.chaquo.python.**", rules)
+        for name in ("Activity", "BridgeService", "ViewFactory", "MaterialViews",
+                     "AdvancedViews", "NativeServices", "PlatformServices",
+                     "GestureBinder", "EventDispatcher", "PydrudWorker",
+                     "WidgetRegistry"):
+            with self.subTest(kept=name):
+                self.assertIn(name, rules)
+        # NativeView mounts classes by name through their (Context) ctor.
+        self.assertIn("android.view.View", rules)
+
     def test_duplicate_project_is_refused(self):
         with self.assertRaises(SystemExit):
             create_project("demo_app", org="com.example")

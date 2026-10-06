@@ -168,6 +168,7 @@ def _analyze_file(source: str, filepath: str) -> list[dict]:
     issues.extend(_check_constant_references(tree, filepath))
     issues.extend(_check_contrast(tree, filepath))
     issues.extend(_check_touch_targets(tree, filepath))
+    issues.extend(_check_host_only_imports(tree, filepath))
 
     return _dedupe(issues)
 
@@ -738,6 +739,61 @@ def _check_shadowing_issues(src_dir: str) -> list[dict]:
                     "message": f"Package shadowing: directory '{dir_path}' shadows module '{py_path}'. "
                                "Python import resolution prioritizes package directories over modules with the same name.",
                 })
+    return issues
+
+
+# ── Check 12: Build-time-only imports (DX-003) ──────────────────────────────
+
+
+#: Pydrud submodules the bundler strips from the APK.
+#: Kept in step with ``BUNDLE_EXCLUDES`` in ``pydrud.commands.project``.
+_HOST_ONLY_MODULES = frozenset({
+    "android", "commands", "utils", "packages", "compatibility",
+    "preview", "preview_server", "qr",
+})
+
+
+def _host_only_module(module: str) -> str | None:
+    """The build-time-only ``pydrud`` submodule *module* names, if any."""
+    if not module.startswith("pydrud."):
+        return None
+    part = module.split(".", 2)[1]
+    return part if part in _HOST_ONLY_MODULES else None
+
+
+def _check_host_only_imports(tree: ast.AST, filepath: str) -> list[dict]:
+    """Flag imports of Pydrud's build-time-only modules (DX-003).
+
+    ``pydrud.commands``, ``pydrud.android`` and friends are the CLI and its
+    Android toolchain. They resolve in a checkout — where the editable
+    install can still find them — so the mistake is invisible locally, but
+    the bundler strips them from the APK, where the import raises at
+    start-up. The analyzer is the cheapest place to catch it.
+    """
+    issues: list[dict] = []
+    for node in ast.walk(tree):
+        modules: list = []
+        if isinstance(node, ast.ImportFrom):
+            if node.module:
+                modules.append(node.module)
+        elif isinstance(node, ast.Import):
+            modules.extend(alias.name for alias in node.names)
+        else:
+            continue
+        for module in modules:
+            part = _host_only_module(module)
+            if part is None:
+                continue
+            issues.append({
+                "file": filepath,
+                "line": node.lineno,
+                "severity": _SEVERITY_ERROR,
+                "message": f"'{module}' is build-time only — the bundler "
+                           f"strips pydrud.{part} from the APK, so this "
+                           "import works in a checkout but fails on device "
+                           "(DX-003). Import only the runtime API from "
+                           "`pydrud`.",
+            })
     return issues
 
 
