@@ -84,7 +84,18 @@ class TestStoreDataCompatibility(unittest.TestCase):
 
 
 class TestJobDecorator(unittest.TestCase):
+    def setUp(self):
+        # Snapshot GLOBAL_JOBS to restore after test
+        from pydrud.core.tasks import GLOBAL_JOBS
+        self._saved_jobs = dict(GLOBAL_JOBS)
+
+    def tearDown(self):
+        from pydrud.core.tasks import GLOBAL_JOBS
+        GLOBAL_JOBS.clear()
+        GLOBAL_JOBS.update(self._saved_jobs)
+
     def test_standalone_job_decorator(self):
+        from pydrud.core.tasks import GLOBAL_JOBS
         @job("custom_sync")
         def sync_worker(inputs):
             return {"synced": True, "count": inputs.get("count", 0)}

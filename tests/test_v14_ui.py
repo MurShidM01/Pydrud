@@ -472,6 +472,15 @@ class TestGeneratedThemeResources(unittest.TestCase):
 
 
 class TestFloatingActionButtonPlacement(unittest.TestCase):
+    """Floating action button placement within Scaffold."""
+
+    def setUp(self):
+        # Reset any global state that might leak from other test files
+        from pydrud.core.responsive import MediaQuery, Breakpoints, Responsive
+        MediaQuery.reset()
+        MediaQuery.clear_listeners()
+        Breakpoints.reset()
+        Responsive.configure_reset()
 
     def test_fab_clears_a_bottom_navigation_bar(self):
         from pydrud import BottomNavigationBar, NavItem, Scaffold, Text

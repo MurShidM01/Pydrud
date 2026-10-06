@@ -211,6 +211,9 @@ class TestAdaptiveScaffold(unittest.TestCase):
 
     def setUp(self):
         MediaQuery.reset()
+        # Ensure clean state for adaptive scaffold tests
+        from pydrud.core.responsive import Breakpoints
+        Breakpoints.reset()
 
     tearDown = setUp
 
