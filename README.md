@@ -20,6 +20,22 @@
 
 ---
 
+## Table of Contents
+
+| # | Section | # | Section |
+|---|---------|---|---------|
+| 1 | [Quick Start](#quick-start) | 7 | [Responsive](#responsive-v15) |
+| 2 | [What You Get](#what-you-get) | 8 | [Bottom Navigation & Tabs](#bottom-navigation-and-tabs-v15) |
+| 3 | [What's New in v2.0.3](#whats-new-in-v203) | 9 | [System UI](#set_system_ui-v101) |
+| 4 | [Examples](#examples) | 10 | [Architecture](#architecture) |
+| 5 | [Installation](#installation) | 11 | [Android Project Configuration](#android-project-configuration) |
+| 6 | [Widget Reference](#widget-reference) | 12 | [CLI Reference](#cli-reference) |
+|   |                                 | 13 | [Requirements](#requirements) |
+|   |                                 | 14 | [Development & Testing](#development) |
+|   |                                 | 15 | [Roadmap](#roadmap) · [Contributing](#contributing) · [License](#license) |
+
+---
+
 ## Quick Start
 
 ```bash
@@ -73,231 +89,6 @@ for handshake, capabilities, framing, ACK/NACK and reconnect semantics.
 Existing `pydrud run`, APK generation and the embedded Android bridge remain
 separate and unchanged.
 
----
-
-## New in v2.0.3 — production readiness and a richer UI layer
-
-v2.0.3 is the production-readiness release. It closes every finding in the
-2.0.2 adversarial QA report (`PYDRUD.md`) — the seven confirmed bugs
-(PB-001…PB-007), the developer-experience traps (DX-001…DX-006), the
-doc/API mismatches (DOC-001…DOC-004) and the intermittent race (IC-001) —
-and grows the UI layer toward Flutter/React Native parity:
-
-* **Deep trees can't crash the renderer.** Every tree algorithm
-  (`to_dict`, `walk`, `clone`, `find_by_key`, the whole diff engine) is now
-  iterative, so a 1 000-level tree raises a structured `PydrudError`
-  instead of a bare `RecursionError`.
-* **A huge frame can't wedge the UI.** An oversized snapshot is split into
-  windowed frames, and an encode failure rolls the in-flight transaction
-  back and raises loudly instead of deferring every later render.
-* **`Canvas` animates and `Positioned` moves.** Canvas `ops` and absolute
-  offsets are applied on the update path, not just at creation.
-* **The pickers honour their arguments.** `page.dialog.date(min=…, max=…)`
-  and `page.dialog.time(initial=…)` were accepted by Python and silently
-  dropped by Java; both now reach the native dialogs, and both are validated
-  in Python so a typo raises instead of doing nothing.
-* **Icons fail loud and cover Material Symbols.** An unknown name logs once
-  under the stable `Pydrud` tag, `pydrud.icons` reports the shipped set, and
-  the names developers copy from the docs (`rocket_launch`, `play_arrow`,
-  `emoji_events`, …) resolve. `Icon.svg("M…")` renders arbitrary 24×24 path
-  data, so the icon set is effectively unlimited.
-* **Scoped theming.** `Theme.scope()`, `TextTheme` and `ThemeExtension`
-  bring Flutter's theming model to Pydrud without giving up build-time
-  resolution.
-* **`pydrud.components`** — a pure-Python library of composite widgets
-  (stat cards, toolbars, form rows, empty states, …) so the catalogue grows
-  without touching the generated Java.
-* **The remaining §15.2 gaps, in Python.** `Flex` (one widget, either axis),
-  `LayoutBuilder`/`Constraints` (build from the live box constraints) and
-  `ExpansionPanelList` (an accordion set) need no native code, so they ship
-  as compositions of the primitives.
-* **Deterministic tests.** `AppTester.settle()` now awaits render
-  convergence, so State-driven navigation is reproducible without sleeps.
-* **Accessibility is checked, not hoped for.** Any widget takes
-  `semantics=` (Android `contentDescription`), `Colors.contrast()` measures
-  WCAG ratios, and `pydrud analyze` flags unreadable text/background pairs
-  and sub-48 dp touch targets (§14.7).
-* **Two more §15.2 widgets.** `RangeSlider` (a two-thumb range, backed by
-  Material's `RangeSlider`) and `PageView`/`Carousel` (swipeable, snapping
-  pages, backed by a snapping RecyclerView that reuses the list patch path).
-* **The overflow menu, natively.** `PopupMenu`/`DropdownMenu` shows a real
-  `android.widget.PopupMenu` anchored to its trigger, with icons, groups,
-  checkable entries and submenus; `on_select` reports the chosen entry.
-* **The release build is verified (BT-002).** `pydrud build --release` was
-  run end to end with R8 shrinking on: the vendored Python runtime and the
-  native libraries survive, and the build wiring is now pinned by tests.
-
-Existing projects should regenerate their managed runtime after upgrading:
-
-```bash
-pydrud sync
-pydrud run
-```
-
-## New in v2.0.2 — reliable haptics, clean logs and 130+ widgets
-
-v2.0.2 hardens the device experience and expands the Flutter-style UI layer:
-
-* **Haptics are perceptible across more hardware.** Android 12+ now resolves
-  the default vibrator through `VibratorManager`, named impacts use
-  device-tuned predefined effects, and older devices receive explicit
-  amplitude fallbacks. The playground uses an unmistakable heavy impact.
-* **Live logs belong to your app.** `pydrud run` scopes logcat to the app PID,
-  preventing unrelated `System.err` output from Transsion and other OEM
-  services from looking like a Pydrud failure.
-* **One stable log tag.** Framework output, your app's `print()` calls and
-  every Python error traceback are emitted under the `Pydrud` tag, so
-  `adb logcat -s Pydrud` shows them all in one place. Native services keep
-  their finer `Pydrud*` tags (`PydrudBridge`, `PydrudViewFactory`, …), which
-  you can select with `adb logcat -s PydrudBridge`.
-* **The Python mismatch warning is gone.** If the build machine has Python
-  3.12 while the app embeds 3.11, Pydrud disables Chaquopy source bytecode
-  compilation automatically. Builds remain successful; only first start is
-  slightly slower.
-* **130+ widget constructors.** New native-backed Flutter-style presets include
-  `Expanded`, `Flexible`, `Align`, `Wrap`, `ConstrainedBox`,
-  `SwitchListTile`, `CheckboxListTile`, `RadioListTile`, typography/image
-  presets, empty/error/loading states, dashboard cards and settings tiles.
-* **The starter is easier to grow.** Shared UI now lives under
-  `app/components/`, and the dark-mode row uses `SwitchListTile` so its label
-  stays left while its switch is aligned to the right.
-
-Existing projects should regenerate their managed runtime after upgrading:
-
-```bash
-pydrud sync
-pydrud run
-```
-
-## New in v2.0.1 — starter app fixes, capabilities and more UI presets
-
-v2.0.1 is a production-hardening patch for the v2 line. It fixes the two
-issues most visible in a brand-new `pydrud init` app:
-
-* **Vibration works out of the box.** New projects enable the `haptics`
-  capability, so the generated manifest includes `android.permission.VIBRATE`.
-  `page.haptics.*` results settle successfully or fail with an actionable
-  message instead of only logging `Vibrate unavailable`.
-* **Runtime permission demos work out of the box.** New projects enable the
-  `notifications` capability, so `page.permissions.request("notifications")`
-  is declared before Android is asked for it. The native bridge now reports a
-  clear error when a requested permission is missing from the manifest.
-* **No hand edits in `android/` are required.** Use
-  `pydrud capabilities add haptics notifications` or
-  `pydrud permissions add camera location`, then `pydrud sync`; YAML remains
-  the source of truth.
-* **More Python UI building blocks.** v2.0.1 adds convenience widgets such as
-  `OutlinedButton`, `TextButton`, `ElevatedButton`, `IconButton`,
-  `SearchField`, `PasswordField`, `EmailField`, `PhoneField`,
-  `AssistChip`, `FilterChip`, `InputChip`, `SuggestionChip` and
-  `LinearProgress`, all backed by the same native Android renderers.
-* **More icon names.** The `Icons` catalogue now includes additional app,
-  commerce, media, navigation, security and developer aliases so common app
-  UIs can stay expressive from Python.
-
-Existing projects can opt in without recreating the app:
-
-```bash
-pydrud capabilities add haptics notifications
-pydrud sync
-pydrud run
-```
-
----
-
-## Runtime 2.x / production hardening
-
-The current development line adds a stronger runtime contract between
-Python's declarative widget tree and the generated Android renderer.
-These changes are intentionally documented here before the next package
-release so the runtime behavior and migration surface stay visible.
-
-### Transactional rendering
-
-UI updates now carry protocol metadata instead of being fire-and-forget:
-
-* protocol **v2** adds a transaction id, desired revision and patch base revision
-* Android returns an explicit **render ACK or NACK**
-* Python advances its confirmed snapshot only after acknowledgement
-* updates that arrive while a render is in flight are coalesced into the next
-  transaction
-* duplicate and invalid widget keys are rejected before they can corrupt the
-  diff
-
-The important distinction is **desired state vs confirmed native state**. A
-Python rebuild describes what the app wants; the renderer confirms what the
-Android View tree actually accepted.
-
-### Persistent element identity
-
-Pydrud now has a first-class `Element`/`ElementTree` layer between widgets
-and native Views. Elements retain stable keys, parent relationships, desired
-and confirmed properties, listener/resource ownership metadata and the native
-reference associated with a mounted widget.
-
-This is the foundation for preserving native View identity across updates
-instead of treating every Python render as an unrelated tree.
-
-### Safer reactive state and lifetimes
-
-Subscriptions are represented by cancellable handles and can be retained by
-the owning `App`. State watchers may be marshalled through a scheduler, equal
-values can use explicit distinct semantics, and worker task failures remain
-observable on the returned future. Legacy `.result()` stays non-raising by
-default, with strict propagation available via `propagate_exceptions=True`.
-
-For existing code, legacy watcher behavior remains available unless
-`distinct=True` is selected.
-
-### Modern Android project defaults
-
-New generated projects target the current Android release requirements used
-by this development line:
-
-| Toolchain | Default |
-|-----------|---------|
-| Compile / target SDK | 36 |
-| Android Gradle Plugin | 8.13.2 |
-| Gradle | 8.13 |
-| Chaquopy | 17.0.0 |
-| Python runtime | 3.11 |
-| JDK | 17 |
-| Min SDK | 24 |
-| NDK | 28.2.13676358 |
-
-Generated projects also include compatibility metadata for the Python-side
-framework, protocol and Android runtime so upgrades can be made deliberately.
-
-### Android hardening
-
-The generated runtime now includes:
-
-* WebView JavaScript disabled by default; the native JavaScript bridge is
-  opt-in rather than automatic.
-* Optional manifest permissions/components are generated only when the
-  corresponding capability is requested.
-* Foreground services use `START_NOT_STICKY` and implement the newer timeout
-  callback path.
-* Back handling is wired through AndroidX's modern `OnBackPressedDispatcher`
-  path while retaining the legacy entry point for compatibility.
-* Oversized or invalid bridge frames are rejected with protocol errors instead
-  of being processed as arbitrary input.
-
-### Tests and CI
-
-The development line adds regression and compatibility coverage for:
-
-* duplicate-key rejection and keyed tree invariants
-* protocol envelope size/version/revision handling
-* subscription/state scheduling behavior
-* generated-project compatibility defaults
-* generated Java static checks in CI
-* transaction-aware `FakeDevice` acknowledgements so AppTester matches the v2 bridge
-
-The PR still needs real Android build/device validation before these defaults
-should be treated as a fully certified production matrix.
-
----
 
 ## What You Get
 
@@ -322,580 +113,37 @@ should be treated as a fully certified production matrix.
 
 ---
 
-## New in v1.4.0 — the design release
+## What's New in v2.0.3
+
+The production-readiness release: every finding from the 2.0.2 adversarial
+QA report is closed, on top of a richer UI layer and a fully modularised
+codebase. The complete, itemised history (v1.0.1 → v2.0.3) lives in
+[CHANGELOG.md](CHANGELOG.md).
+
+| Area | Highlights |
+|------|------------|
+| Reliability | Deep widget trees no longer raise `RecursionError`; oversized frames are windowed instead of wedging the renderer; Canvas repaints on device; hot reload is revision-safe |
+| Renderer | Recycler-based virtualised lists; managed image pipeline (decode pool + LRU cache); crash-proof keyed view tags; edge-to-edge insets re-applied on rotation |
+| New widgets | `Flex`, `PageView` / `Carousel`, `RangeSlider`, `PopupMenu` / `DropdownMenu`, `NavigationBar`, `Dismissible`, `InfiniteList` |
+| Accessibility | `semanticsLabel`, live-region announcements, touch-target enforcement (§14.7) |
+| Developer experience | `AppTester.settle()`, analyzer icon suggestions + build-time-only import detection, once-per-key unknown-style warnings, offline HTML docs |
+| Project structure | Every Python module and Java template is now under 1,000 lines — `ViewFactory` split into 8 collaborator classes, `MaterialViews` into 2, and five Python packages modularised |
 
-v1.4 rebuilt everything you can see. Pydrud now has a real design system
-shared by the Python widgets and the native renderer: one palette, one
-4dp spacing scale, one set of motion curves — so the default app looks
-designed instead of assembled.
-
-### The whole UI is controlled from Python
-
-Corner radii, control heights, bar heights, depth, motion, the type ramp
-and the typeface are **Python values**. They are sent to the device with
-the palette, so the Java renderer never makes a design decision of its
-own — it draws what Python tells it to:
-
-```python
-from pydrud import Theme
-
-Theme.configure(
-    radius_card=24, radius_button=20,      # shape
-    app_bar_height=64, nav_height=72,      # size
-    elevation_card=2, press_scale=0.96,    # depth and feedback
-    font_family="serif", font_scale=1.1,   # type
-)
-
-page.configure(radius_card=4)              # restyle a running app
-Theme.configure_reset()                    # back to the defaults
-```
-
-Same for the project's native theme: `pydrud init --accent "#FF0EA5E9"`
-generates `themes.xml`, `values-night/themes.xml` and the starter app
-from that one colour, and `pydrud.toml` keeps it under `[theme] seed`
-for `pydrud sync`. No XML or Java editing anywhere in the loop.
-
-See `Tokens` for the full list (`python -c "from pydrud import Tokens;
-print(Tokens.names())"`), and `tools/preview_ui.py` to see a change
-before you build:
-
-```bash
-python tools/preview_ui.py --accent "#FF0EA5E9" --token radius_card=28
-```
-
-### Design tokens
-
-```python
-from pydrud import (Spacing, Radius, Elevation, Motion, Colors, Theme,
-                    LinearGradient)
-
-Column(spacing=Spacing.MD, children=[...])      # 4dp grid: XS…HUGE
-Card(border_radius=Radius.LG)                   # consistent corners
-Container(style={"elevation": Elevation.CARD})  # named depths
-Container(gradient=LinearGradient([Colors.PRIMARY, Colors.SECONDARY]))
-Colors.on(Colors.PRIMARY)                       # readable foreground
-Colors.mix(Colors.PRIMARY, Colors.SECONDARY)    # blend two colours
-```
-
-Token names are forgiving, so code ported from Flutter, Material or CSS
-resolves instead of raising at runtime:
-
-```python
-Colors.AMBER                 # …also reachable as Colors.amber
-Colors.deepOrange            # camelCase, snake_case and ALL_CAPS agree
-Elevation.D4                 # Material's dp scale, D0…D24, alongside the
-Elevation.CARD               # semantic names (which are still preferred)
-Radius.FULL                  # alias for Radius.PILL / Radius.CIRCLE
-Colors.names()               # every constant, for discovery in a REPL
-```
-
-A name that really does not exist says what does, instead of a bare
-`AttributeError`:
-
-```text
-AttributeError: type object 'Colors' has no attribute 'purlpe'.
-Did you mean 'PURPLE' or 'DEEP_PURPLE'? Available: ACCENT, AMBER, … 
-```
-
-`pydrud analyze` reports the same mistakes statically, before a build.
-
-### Live theming
-
-One brand colour drives the whole app — including the native widgets,
-ripples, text selection handles and system bars.
-
-```python
-Theme.seed(Colors.TEAL)        # rebuild the palette from a brand colour
-Theme.dark()                   # same brand, dark surfaces
-page.set_theme_mode("dark")    # repaint Python *and* native widgets
-page.set_theme("#FFEF4444")    # swap the accent while the app is running
-```
-
-The palette is sent to the device before the first frame, so there is no
-flash of unstyled UI, and generated projects ship a `values-night` theme
-for native dialogs.
-
-### Layouts that adapt
-
-```python
-Responsive.breakpoint()                             # compact | medium | expanded
-Responsive.value(compact=1, medium=2, expanded=3)   # per-size-class values
-Responsive.value(phone=16, tablet=32)               # the same, by device
-Responsive.columns(min_width=180)                   # grid columns that fit
-Responsive.content_width(560)                       # readable page width
-```
-
-Size scaling is clamped to 0.9–1.2x: a tablet is twice as wide as a
-phone, but doubling every font and button just produces a zoomed-in
-phone app. Layout changes come from breakpoints instead.
-
-Scaffolds are edge to edge — the app bar and bottom navigation absorb the
-system-bar insets themselves, so their surfaces continue behind the
-status and gesture bars.
-
-### Widgets that look the part
-
-```python
-Button("Save")                       # filled, tonal, outlined, text, elevated
-Button("Save", variant="tonal", pill=True, full_width=True)
-TextField(hint="Email", variant="outlined", icon=Icons.EMAIL)
-Card(child=..., on_click=open_item)  # flat + outlined by default
-AppBar(title="Home")                 # themed 56dp bar with a hairline
-AppBar(title="Search", density="compact")  # per-screen compact / normal / comfortable
-Divider(indent=56)                   # inset rule, theme coloured
-```
-
-Icons are real vectors: **176 paths + 178 aliases** (≈350 names) drawn at any
-size and colour, with 123 named constants on `Icons`. The catalogue now also
-carries the Material Symbols names developers copy from the docs
-(`play_arrow`, `rocket_launch`, `emoji_events`, `sports_esports`, `bolt`,
-`shuffle`, …) and reports unknown names instead of silently rendering "?":
-
-```python
-from pydrud import Icon, icons
-
-icons.has("rocket_launch")      # True
-icons.has("rocket_lunch")       # False
-icons.suggest("rocket_lunch")   # ['rocket_launch', 'rocket']
-sorted(icons.available())[:5]   # the full supported set
-
-Icon("play_arrow")                                  # a shipped name or alias
-Icon.svg("M12,2 L22,12 L12,22 L2,12 Z")            # any 24x24 path data
-```
-
-`Icon.svg(...)` renders arbitrary vector path data, so an app can ship its own
-iconography without touching the framework — the icon set is effectively
-unlimited. An unknown name logs `unknown icon '...'` under the stable `Pydrud`
-logcat tag **and** is flagged by `pydrud analyze`.
-
-### Upgrading an existing project
-
-```bash
-pydrud sync     # rewrite the generated Java + theme resources, keep your code
-pydrud run
-```
-
----
-
-## New in v1.3.0 — the "ship it" release
-
-v1.2 completed the toolkit. v1.3 closes the gap with Flet and Flutter: a real
-data layer, URL-based navigation, background execution, hardware access and
-the release plumbing you need to put an app on the Play Store.
-
-| Area | What you get |
-|------|--------------|
-| **Data** | `Database` (SQLite + migrations + transactions), a tiny `Model` ORM with lookups, pagination and bulk ops, and a TTL `Cache` with an `@cached` decorator |
-| **Navigation** | Pattern routes (`/items/:id`, `/files/*rest`), query strings, guards and redirects, nested navigators, deep links and 7 screen transitions |
-| **PyPI packages** | `pydrud pip add yt-dlp` — 119 verified Android-compatible packages wired into Chaquopy automatically |
-| **Background** | WorkManager jobs with constraints, foreground services with progress, FCM push and notification routing |
-| **Hardware** | Permission-aware `CameraPreview`, `QRScanner`, capture + torch/zoom/video/barcode scanning, Bluetooth LE, NFC, sensors, biometrics, audio record/play, speech-to-text and TTS — every documented native command has a handler |
-| **Security** | `page.secure` — EncryptedSharedPreferences-backed keystore storage |
-| **Graphics** | `Canvas` with paths, gradients, transforms, sparklines and pies; `AnimationController` + `Tween` + `Sequence_` for explicit animations |
-| **Widgets** | `CameraPreview`, `MapView`, `RichText`, `Markdown`, `ReorderableList`, virtualising `InfiniteList` |
-| **Release** | `pydrud keygen` (upload keystore), `pydrud icons` (every density + round + adaptive), `pydrud permissions`, R8 shrinking |
-| **DX** | Stateful hot reload (your counters survive a save), `pydrud inspect` widget inspector, `pydrud docs` offline API reference |
-
-### Native coverage
-
-Every command in the Python service API has a handler in the generated
-Android runtime: `pydrud.services.native.UNIMPLEMENTED_COMMANDS` is empty,
-and `tests/test_native_coverage.py` fails the build if that ever stops
-being true.
-
-A few widget properties are still inert (the widget renders, the
-refinement is ignored) — see `pydrud.compatibility.NATIVE_IGNORED_PROPS`,
-e.g. `Chart(labels=…)`, `CircularProgress(stroke=…)`, `Rating(half=True)`.
-
-### Data layer
-
-```python
-from pydrud import Model, Field, Database
-from pydrud.data import column
-
-class Note(Model):
-    title = Field(str, index=True)
-    body  = Field(str, default="")
-    done  = Field(bool, default=False)
-
-class Score(Model):                 # column() takes a name, a type, or both
-    id     = column("id", primary_key=True)   # optional: every model has one
-    player = column("player", str)
-    points = column("points", "int", index=True)
-
-db = page.database("notes.db")
-Note.bind(db)
-
-Note.create(title="Buy milk")
-open_notes = Note.where(done=False, title__contains="milk").order_by("-id").page(1, 20)
-```
-
-Every model gets an autoincrement `id` for free; declaring it is optional
-and it stays `None` until `save()`, because SQLite allocates it. An
-explicit column name has to match the attribute it is assigned to — the
-attribute is the column name in `where()`, `order_by()` and `to_dict()`.
-
-### Navigation
-
-```python
-router = Router()
-router.define("/", home)
-router.define("/items/:id", details, transition="slide_left")
-router.define("/settings", settings, guard=lambda name, params: signed_in())
-router.initial("/")
-app.attach_router(router)
-
-router.push("/items/42")            # or router.push("/items/:id", id=42)
-app.on_deep_link(router.handle_link)  # myapp://items/42?tab=specs
-```
-
-### Background work
-
-```python
-@page.background.job("sync")
-def sync(inputs):
-    return {"synced": True}
-
-page.background.schedule("sync", every=900, network="unmetered", charging=True)
-```
-
-The job runs through WorkManager even when the app is closed, calling
-`app.main.run_background_job(name, inputs_json)` in your project.
-
-### Secure storage, hardware and push
-
-```python
-page.secure.set("token", jwt)                       # EncryptedSharedPreferences
-page.biometrics.authenticate(title="Unlock").wait()
-page.sensors.listen("accelerometer", on_reading, rate="game")
-page.camera.capture(key="cam", quality=90).then(upload)
-page.audio.speak("Done")
-page.push.subscribe("news")
-```
-
-### PyPI packages on Android
-
-```bash
-pydrud pip add yt-dlp requests     # verified, wired into Chaquopy, Gradle synced
-pydrud pip search qr               # find what is supported
-pydrud pip list --all              # the full catalogue by category
-```
-
-Packages that cannot work on Android (server frameworks, desktop GUI toolkits)
-are rejected with an explanation; anything else can still be forced with
-`--force`.
-
-<details>
-<summary><strong>119 verified packages</strong></summary>
-
-| Category | Count | Packages |
-|----------|-------|----------|
-| **ai** | 8 | `anthropic`, `google-generativeai`, `groq`, `huggingface-hub`, `openai`, `sentencepiece`, `tiktoken`, `transformers` |
-| **database** | 8 | `firebase-admin`, `peewee`, `pymongo`, `pysqlcipher3`, `redis`, `sqlalchemy`, `supabase`, `tinydb` |
-| **documents** | 5 | `et-xmlfile`, `openpyxl`, `pypdf`, `python-docx`, `reportlab` |
-| **media** | 16 | `ffmpeg-python`, `gtts`, `imageio`, `instaloader`, `moviepy`, `mutagen`, `opencv-python`, `pillow`, `pydub`, `python-barcode`, `pytube`, `pyzbar`, `qrcode`, `speechrecognition`, `youtube-search-python`, `yt-dlp` |
-| **network** | 19 | `aiohttp`, `certifi`, `charset-normalizer`, `deep-translator`, `feedparser`, `geopy`, `googletrans`, `httpx`, `idna`, `paho-mqtt`, `praw`, `requests`, `sseclient-py`, `telethon`, `tweepy`, `urllib3`, `websocket-client`, `websockets`, `wikipedia` |
-| **parsing** | 15 | `beautifulsoup4`, `chardet`, `csvkit`, `html5lib`, `jsonschema`, `lxml`, `markdown`, `markdownify`, `orjson`, `pyyaml`, `soupsieve`, `toml`, `tomli`, `ujson`, `xmltodict` |
-| **science** | 10 | `matplotlib`, `mpmath`, `networkx`, `numpy`, `pandas`, `qiskit`, `scikit-learn`, `scipy`, `statsmodels`, `sympy` |
-| **security** | 8 | `bcrypt`, `cryptography`, `keyring`, `passlib`, `pycryptodome`, `pyjwt`, `pyotp`, `python-jose` |
-| **utility** | 30 | `arrow`, `attrs`, `cachetools`, `chevron`, `croniter`, `emoji`, `faker`, `fuzzywuzzy`, `humanize`, `jinja2`, `markupsafe`, `more-itertools`, `phonenumbers`, `psutil`, `pydantic`, `python-dateutil`, `python-dotenv`, `python-slugify`, `pytz`, `qrcode-terminal`, `rapidfuzz`, `regex`, `rich`, `schedule`, `shortuuid`, `tabulate`, `tenacity`, `typing-extensions`, `tzdata`, `validators` |
-
-</details>
-
-### Release workflow
-
-```bash
-pydrud capabilities add haptics notifications  # normal generated capabilities
-pydrud permissions add camera location         # dangerous permissions you use
-pydrud capabilities list --all                 # every capability Pydrud knows
-pydrud permissions list --all                  # every permission Pydrud knows
-pydrud icons --source logo.png                 # every density, round + adaptive icons
-pydrud keygen                            # upload keystore + keystore.properties
-pydrud build --release                   # signed, R8-shrunk APK
-```
-
-**Release builds are exercised, not assumed.** `pydrud build --release` runs
-AGP 8.13.2 + R8 end to end, and the vendored Python runtime
-(`assets/chaquopy/app.imy`) and the native libraries (`libpython3.11.so` for
-every ABI) survive shrinking. Turn shrinking on with `shrink: true` in
-`pydrud.yaml` (or `-PpydrudShrink=true`); the keep rules in
-`android/app/proguard-rules.pro` protect Chaquopy, every renderer class Python
-calls by name, and the `View(Context)` constructors `NativeView` reflects on.
-
-**The APK ships only the runtime.** The bundler strips Pydrud's build-time-only
-modules — `pydrud.commands`, `pydrud.android`, `pydrud.utils`,
-`pydrud.preview`, `pydrud.qr`, `pydrud.compatibility` and `pydrud.packages`
-— from the vendored runtime. Importing one from app code resolves in a
-checkout but raises on device, so `pydrud analyze` reports it as an error
-(DX-003).
-
----
-
-## New in v1.2.0 — the "full Android toolkit" release
-
-v1.1 made the renderer correct. v1.2 makes Pydrud *complete*: the component
-library, the platform APIs and the app architecture you need to ship a real
-product.
-
-| Area | What you get |
-|------|--------------|
-| **21 Material 3 components** | `ListTile`, `ExpansionTile`, `Chip`, `Badge`, `Avatar`, `Banner`, `Tooltip`, `Tabs`, `BottomNavigationBar`, `NavigationRail`, `Drawer`, `SegmentedButton`, `SearchBar`, `Rating`, `CircularProgress`, `Skeleton`, `RefreshIndicator`, `Stepper`, `WebView`, `VideoPlayer`, `Chart` |
-| **Gestures** | `GestureDetector` (tap, double-tap, long-press, 4-way swipe, pan, pinch-scale), `InkWell` ripples, swipe-to-dismiss, `Draggable` |
-| **Animations** | `Animation` specs with 9 curves, implicit `AnimatedContainer` / `AnimatedOpacity` / `AnimatedScale` / `AnimatedRotation` / `AnimatedSwitcher`, entrance effects (`FadeIn`, `SlideIn`, `ScaleIn`), `Hero` shared elements, and `widget.animate(...)` on *any* widget |
-| **Forms & validation** | `Form` + `FormField` with 11 validators (`required`, `email`, `min_length`, `between`, `matches`, `pattern`, `custom`, …), per-field errors, server-side errors, cross-field rules |
-| **Native services** | `page.dialog` (alert/confirm/prompt/choose/bottom-sheet/date/time/colour/progress), `page.storage`, `page.clipboard`, `page.share`, `page.permissions`, `page.notifications`, `page.location`, `page.device`, `page.files`, `page.haptics` |
-| **HTTP client** | `page.http.get/post/put/patch/delete/download` — JSON in/out, retries, timeouts, base URL, never on the UI thread |
-| **Concurrency** | `page.run_task()` (threads *and* `async def`), `page.run_on_ui()`, `page.after()` / `page.every()` timers, `@debounce` / `@throttle` |
-| **App-level state** | `Store` with actions, selectors, middleware, batching and undo; `Computed` cached derivations; `ReactiveList`; all accepted by `app.bind(...)` |
-| **Material You theming** | `ColorScheme.from_seed(...)` (light & dark), the M3 `Typography` scale, `page.set_theme_mode("dark"/"system")` |
-| **More page control** | `open_drawer`, `scroll_to`, `focus`, `hide_keyboard`, `keep_awake`, `set_orientation`, `fullscreen`, `end_refresh` |
-| **Imperative updates** | `page.update(widget)` diffs just that subtree — mutate a control and push it, Flet-style, without re-running the builder |
-| **Richer events** | Handlers now receive an `Event` with `.type`, `.key`, `.value`, `.data`, `.control` (still a dict, so old code works), and `on_<anything>=` works on every widget |
-| **`pydrud.testing`** | `AppTester` — boot your app, `tap("Sign in")`, stub native answers, assert on what the screen shows. 300+ tests in this repo use it |
-
-```python
-from pydrud import Chart, Chip, ListTile, Tabs, Tab, FadeIn
-
-def dashboard(page):
-    page.http.get("https://api.example.com/stats").then(show)
-    page.storage.get("theme", "light").then(page.set_theme_mode)
-
-    page.add(Tabs([
-        Tab("Overview", content=FadeIn(child=Chart([3, 7, 4, 9], kind="bar"))),
-        Tab("Settings", content=ListTile("Account", leading="person",
-                                         on_click=open_account)),
-    ], on_change=lambda e: print("tab", e.value)))
-```
-
-`page.storage` calls are asynchronous native bridge requests. `get()` returns
-`Result`, not the stored value: consume it with
-`page.storage.get("profile", default={}).then(render_profile)`, or call
-`.wait(default={})` only from a worker started with `page.run_task()`.
-
----
-
-## New in v1.1.0
-
-| Feature | Description |
-|---------|-------------|
-| **Stable widget keys** | Auto-generated keys are now deterministic, so `page.update()` really does send tiny patches instead of silently re-rendering everything |
-| **Keyed diffing** | Insert/remove/reorder in a list emits `create` / `delete` / `move` for just that item (with target `index`) |
-| **10 new widgets** | `Stack`, `Positioned`, `SizedBox`, `Padding`, `Card`, `ListView`, `GridView`, `ProgressBar`, `Slider`, `Dropdown`, `Radio` |
-| **Colors / Icons / Theme** | A Material palette, an icon catalogue, and a switchable light/dark theme |
-| **Clicks on any widget** | `on_click` / `on_long_press` now work on Containers, Icons, Images, Cards — not just Buttons |
-| **Working back button** | Android waits for Python's `back_result` before closing the activity — `router.pop()` no longer exits the app |
-| **Scaffold overlays** | `Scaffold(floating_action_button=...)` renders a real floating FAB via absolute positioning |
-| **page.toast / snack_bar / vibrate / close** | Direct access to common Android affordances |
-| **Lifecycle hooks** | `app.on_lifecycle("resume"/"pause"/"stop"/"destroy", cb)` |
-| **Push & audio hooks** | `app.on_push(cb)`, `app.on_push_token(cb)` (FCM token refresh) and `app.on_audio_complete(cb)` |
-| **Error isolation** | An exception in one event handler is reported via `app.on_error(...)` instead of killing the app |
-| **Self-bootstrapping Gradle** | Generated projects build without a checked-in `gradle-wrapper.jar` — the launcher downloads Gradle once |
-| **Unique package names** | `pydrud init app1 --org com.acme` → `com.acme.app1` (apps no longer overwrite each other) |
-| **`pydrud watch` / `devices`** | Rebuild-reinstall-relaunch loop and device listing |
-| **FakeDevice test harness** | `tests/fake_device.py` emulates the Android bridge so whole apps can be tested in CI |
-
----
-
-## New in v1.0.1
-
-| Feature | Description |
-|---------|-------------|
-| **Router + NavigationStack** | Multi-screen navigation with push/pop/replace and Android hardware back-button sync |
-| **Scaffold, AppBar, FAB** | Material-style page layout widgets — Scaffold, AppBar with leading/title/actions |
-| **MediaQuery** | Auto-cached screen metrics: width, height, density, scale factor, phone/tablet detection |
-| **set_system_ui** | Dynamic status bar color and icon brightness control via bridge command |
-| **Hot Reload** | File-watcher pushes updated widget trees instantly — no APK recompilation needed |
-| **Hot Restart** | Reset app state and reload UI from scratch without rebuilding |
-| **Incremental Patches** | TreeDiff now sends only changed widgets via parent_key, not full re-renders |
-| **Async Event Loop** | Non-blocking socket reader with thread-safe event queue — no UI freezes |
-| **WidgetRegistry** | Modular ViewCreator lambdas on Android side — 10x faster rendering pipeline |
-| **pydrud analyze** | Static analysis CLI — checks missing widget keys, invalid styles, unhandled async |
-
----
 
 ## Examples
 
-Two complete apps live in [`examples/`](examples/) and are covered by the test
-suite:
+Runnable example apps ship in [`examples/`](examples/):
 
-| File | Demonstrates |
-|------|--------------|
-| `examples/todo_app.py` | `Store` actions, keyed lists, swipe-to-delete, filtering, persistence, confirm dialog |
-| `examples/weather_app.py` | HTTP client, pull-to-refresh, permissions + GPS, `Chart`, `Skeleton` loading, bottom navigation |
+| Example | Demonstrates |
+|---------|--------------|
+| [`todo_app.py`](examples/todo_app.py) | `Store` reactive state, list CRUD, filters, `SearchField` |
+| [`weather_app.py`](examples/weather_app.py) | Async HTTP, responsive layout, cards and charts |
 
-```bash
-python examples/todo_app.py --tree     # render the widget tree, no device needed
-```
-
----
-
-## Example App
-
-```python
-from pydrud import App, Text, Container, Column, Row, Button, Center
-from pydrud import State, EdgeInsets, Alignment, Responsive
-
-counter = State(0)
-
-def main(page):
-    page.title = "Pydrud Demo"
-    page.bgcolor = "#FFF9FAFB"
-
-    def on_pressed(data):
-        counter.value += 1
-        page.update()
-
-    page.add(
-        Column(scroll=True, children=[
-
-            Container(
-                bg="#FF6366F1", padding=EdgeInsets.symmetric(horizontal=20, vertical=16),
-                child=Text("Pydrud", size=20, weight=700, color="#FFFFFFFF"),
-            ),
-
-            Center(child=Text(str(counter.value), size=72, weight=200, color="#FF6366F1")),
-            Center(child=Text("Tap the button", size=14, color="#FF9CA3AF")),
-
-            Center(
-                child=Button(
-                    "+", bg_color="#FF6366F1", color="#FFFFFFFF",
-                    style={"borderRadius": 28, "width": 56, "height": 56},
-                ).on_click(on_pressed),
-            ),
-
-        ]),
-    )
-
-app = App(target=main)
-app.run()
-```
-
-> State lives outside `main()` so it persists across re-renders.  
-> Update -> `page.update()` -> tree rebuilds -> Android re-renders.
+The `pydrud init` starter app is itself a full showcase (Scaffold, AppBar,
+bottom navigation, forms and theming), and `pydrud docs --serve` generates a
+searchable HTML reference for every widget, prop and service.
 
 ---
-
-## v1.0.1 Example: Router + Scaffold + MediaQuery
-
-```python
-from pydrud import (
-    App, Router, Scaffold, AppBar,
-    Container, Column, Center, Text, Button,
-    Responsive, MediaQuery,
-)
-
-def home(page):
-    page.title = "Pydrud v1.0.1"
-    page.set_system_ui(status_bar_color="#FF6366F1", icon_brightness="light")
-    mq = MediaQuery.of()
-
-    scaffold = Scaffold(
-        app_bar=AppBar(
-            title=Text("Pydrud", size=20, weight=700, color="#FFFFFF"),
-            bg_color="#FF6366F1",
-        ),
-        body=Center(
-            child=Text(f"Screen: {mq['width']}x{mq['height']} dp",
-                       size=18, weight=600, color="#FF1F2937"),
-        ),
-    )
-    page.add(scaffold)
-
-router = Router()
-router.define("home", home).initial("home")
-
-app = App(target=router.build_root(), title="Pydrud")
-app.attach_router(router)
-app.enable_hot_reload()
-app.run()
-```
-
----
-
-## Breakthrough: Incremental Patches
-
-v1.0.0 sent the **entire widget tree** on every state change. v1.0.1 uses an enhanced `TreeDiff` engine that:
-
-- Compares old and new widget trees
-- Generates only the changed operations (create, update, delete, replace)
-- Each patch carries a `parent_key` so the Android ViewFactory can attach new views to the correct parent
-- Falls back to full re-render when >50 patches are needed (e.g., screen transitions)
-
-This means state changes like button taps, text input, toggles, and slider moves now send **kilobytes instead of megabytes** over the bridge.
-
----
-
-## Router & Navigation
-
-```python
-from pydrud import Router
-
-router = Router()
-router.define("home", home_screen)
-router.define("settings", settings_screen)
-router.initial("home")
-
-# In an event handler:
-# router.push("settings")    -- push screen, back returns to home
-# router.pop()               -- go back
-# router.replace("home")     -- replace current screen
-```
-
-The Android hardware back button sends a `"back"` event to Python's event loop. The Router handles it by popping the navigation stack. When the stack reaches the root, Android finishes the activity.
-
----
-
-## Watch mode & Hot Reload
-
-```python
-app = App(target=main)
-app.enable_hot_reload()  # Watch src/ for .py changes
-app.run()
-```
-
-There are two deliberately separate development topologies:
-
-- `pydrud dev` executes Python on the developer machine and serves revisioned
-  UI snapshots/patches to a Pydash-compatible preview renderer over the LAN.
-  No APK is built or installed.
-- `pydrud run` builds/installs the normal Android application, where the
-  embedded Python runtime and generated Android bridge continue to work as
-  before.
-
-## Hot Reload & Interactive Dev Runner
-
-Pydrud features Flutter-style **instant Hot Reload** and **Hot Restart** during `pydrud run`. When you edit Python files under `src/` (screens, components, state, config), changes are synced directly to the running Python runtime on the Android device in milliseconds — **without rebuilding the APK or reinstalling**:
-
-```bash
-pydrud run              # build, install, launch and enter interactive dev runner
-```
-
-### Interactive Flutter-style Key Commands
-
-During `pydrud run`, press single keys in your terminal:
-
-* **`r`** — **Hot Reload**: sync modified Python code, reload modules, preserve active state & forms, fast re-render (30–50ms).
-* **`R` (Shift+r)** — **Hot Restart**: reset all state & router back to root, reload all user modules from scratch.
-* **`t` / `p`** — **Dump Widget Tree**: print the current live widget tree directly in your terminal.
-* **`c`** — **Clear Screen**: clear terminal and refresh the banner.
-* **`h` / `?`** — **Help**: show the interactive key commands menu.
-* **`d`** — **Detach**: exit terminal runner while leaving the app running on device.
-* **`q`** — **Quit**: stop the app on the device and exit.
-
-### Realtime Runtime Error Cards
-
-When a Python runtime exception, syntax error, or unhandled error occurs during development, `pydrud run` captures and formats it with rich colors, exact file path, line number, and stack trace in the terminal TUI:
-
-```text
-  ╭── ❌ Python Runtime Error ──────────────────────────────────
-  │ File "src/app/screens/home.py", line 42, in home_screen
-  │   total = 100 / count.value
-  │ ZeroDivisionError: division by zero
-  ╰─────────────────────────────────────────────────────────────
-```
-
----
-
 ## Installation
 
 ### From PyPI (recommended)
@@ -1958,6 +1206,41 @@ the target child `index`, so the renderer inserts views in the right place:
 {"op": "delete",  "key": "row-bread", "parent_key": "list"}
 ```
 
+
+### Source layout
+
+The Python side is organised into small, single-purpose modules — no file in
+the repository exceeds 1,000 lines.
+
+| Package | Contents |
+|---------|----------|
+| `pydrud/widgets/` | The widget library: `basic`, `layout`, `forms`, `advanced`, `canvas`, `gestures`, `animation`, `conditional`, `responsive`, `presets` — plus `material/` (Material 3 components split into focused modules) and `theme/` (colour maths, `Theme`, `Typography`, `Icons`, `Tokens`) |
+| `pydrud/runtime/` | `App`, `Page` and the bridge event loop, split into focused mixins (`app`, `page`, `navigation`, `_render`, `_bridge`, `_lifecycle`, `_modules`, `_hotreload`) |
+| `pydrud/core/` | The engine: `diff` (TreeDiff), `state`/`store`/`controllers` (reactive state), `bridge`/`protocol` (NDJSON codec), `events`, `responsive`, `tasks`, `watcher` |
+| `pydrud/services/` | `http` (async client) and `native/` — `Dialogs`, `Storage`/`FilePicker`, `Clipboard`, `Share`, `Permissions`, `Notifications`, `Location`, `DeviceInfo`, `Haptics`, `Push`, `Shortcuts`, `Secure`, `Background`, `Camera`, `Sensors`, `Bluetooth`, `Nfc`, `Biometrics`, `Audio` |
+| `pydrud/commands/` | The CLI: `project/` (scaffold, sync, bundle, templates, config), `builder`, `analyzer`, `devrunner`, `doctor`, `docs`, `release`, `inspector` |
+| `pydrud/android/templates/` | Jinja2 templates rendered into the generated Android project (`*.java.j2`, Gradle, manifest, resources) |
+
+### Native renderer
+
+The generated Java renderer follows the same discipline — a thin orchestrator
+plus cohesive collaborator classes:
+
+| Generated class | Responsibility |
+|-----------------|----------------|
+| `ViewFactory` | Orchestrator — shared view/node maps, public API, collaborator wiring |
+| `BuiltinViews` | `createView` dispatch and every built-in widget factory |
+| `ViewStyler` | `applyStyle`, borders, gradients, typography, dimension helpers |
+| `LayoutEngine` | Linear/grid layout params, spacing, child attach/removal |
+| `TreePatcher` | `applyPatch` / `updateProps`, parent indexing |
+| `EventBinder` | Click/change/submit binding, popup menus, touch feedback |
+| `ImageLoader` | Managed image pipeline — decode pool + LRU bitmap cache |
+| `NativeViewFactory` | User-supplied `NativeView` classes — load, create, apply props |
+| `ViewAnimator` | Entrance animations and animated prop changes |
+| `MaterialViews` + `MaterialNavigationViews` | Material 3 components (dispatch point + navigation family) |
+| `BridgeService` | TCP server — NDJSON protocol, transactional renders (port 8595) |
+| `PydrudTheme` | The generated design system on the Java side |
+
 ---
 
 ## Android project configuration
@@ -2140,7 +1423,7 @@ pip install -e ".[dev]"
 python -m pytest tests/ -v
 ```
 
-Current test count: **315 tests**, covering:
+Current test count: **1,237 tests** (plus 2,806 sub-tests), covering:
 
 * unit tests — widgets, state, styling, responsive scaling, diffing, routing,
   the 1.2 component library, gestures, animations, forms and validators;
@@ -2162,79 +1445,26 @@ python -m pytest tests/test_starter_app_e2e.py   # the scaffolded starter app
 ### Project Structure
 
 ```
-pydrud/
+Pydrud/
 +-- pydrud/
-|   +-- main.py                   # App + Page + bridge event loop
-|   +-- navigation.py             # Router, NavigationStack, Route (new)
-|   +-- widgets/
-|   |   +-- base.py               # Widget base class
-|   |   +-- layout.py             # Container, Column, Row, Center, Spacer, Divider
-|   |   +-- basic.py              # Text, Button, TextField, Image, Icon, Checkbox, Switch
-|   |   +-- presets.py            # Flutter-style convenience widgets and compositions
-|   |   +-- styling.py            # Style, EdgeInsets, Alignment, FontStyle
-|   |   +-- app_bar.py            # AppBar (new)
-|   |   +-- scaffold.py           # Scaffold (new)
-|   |   +-- fab.py                # FloatingActionButton (new)
-|   +-- core/
-|   |   +-- state.py              # State[T], ReactiveDict
-|   |   +-- diff.py               # TreeDiff -> Patch list with parent_key
-|   |   +-- events.py             # Event dispatcher
-|   |   +-- bridge.py             # Protocol encoding / decoding
-|   |   +-- responsive.py         # Responsive scaling + MediaQuery
-|   |   +-- watcher.py            # FileWatcher for hot reload (new)
-|   +-- commands/
-|   |   +-- cli.py                # Click CLI
-|   |   +-- project.py            # Jinja2 project scaffold
-|   |   +-- builder.py            # Gradle + ADB
-|   |   +-- doctor.py             # Environment check
-|   |   +-- analyzer.py           # Static analysis (new)
-|   +-- utils/
-|       +-- colors.py             # ANSI CLI colours
-|   +-- android/templates/        # Jinja2 -> Android project
-|       +-- android/
-|           +-- ViewFactory.java.j2       # WidgetRegistry-based rendering
-|           +-- BridgeService.java.j2     # set_system_ui, finish_activity
-|           +-- MainActivity.java.j2      # onBackPressed for Router
-|           +-- ViewCreator.java.j2       # Functional interface (new)
-|           +-- WidgetRegistry.java.j2    # Map-based registry (new)
-+-- tests/                        # pytest test suite
+|   +-- widgets/            # 130+ widgets (basic, layout, forms, material/, theme/, ...)
+|   +-- runtime/            # App, Page, bridge event loop, hot reload
+|   +-- core/               # diff engine, reactive state, bridge protocol, tasks
+|   +-- services/           # async HTTP client + native/ platform services
+|   +-- commands/           # CLI (project/ scaffold+sync, builder, analyzer, ...)
+|   +-- components/         # higher-level compositions
+|   +-- data/               # bundled registries (PyPI catalogue, icon paths)
+|   +-- navigation.py       # Router, NavigationStack
+|   +-- testing.py          # AppTester - run the whole app in CI
+|   +-- android/templates/  # Jinja2 -> Android project (*.java.j2, Gradle, manifest)
++-- examples/               # todo_app.py, weather_app.py
++-- docs/                   # ARCHITECTURE.md, PREVIEW_PROTOCOL.md
++-- tests/                  # 1,237 tests / 2,806 subtests
 +-- pyproject.toml
-+-- README.md
 ```
 
 ---
 
-## Migrating from v1.0.0 to v1.0.1
-
-1. **Update the framework:**
-   ```bash
-   pip install --upgrade pydrud
-   ```
-
-2. **Optional: adopt Router-based navigation**
-   Replace manual `app_state["screen"]` routing with `Router`:
-   ```python
-   router = Router()
-   router.define("home", home_screen).initial("home")
-   app = App(target=router.build_root())
-   app.attach_router(router)
-   ```
-
-3. **Optional: migrate to Scaffold + AppBar**
-   Replace custom `app_bar()` wrappers with the framework `AppBar` widget:
-   ```python
-   Scaffold(
-       app_bar=AppBar(title=Text("Home"), bg_color="#6366F1"),
-       body=...,
-   )
-   ```
-
-4. **Run the analyzer** to check for issues:
-   ```bash
-   pydrud analyze
-   ```
-
----
 
 ## Roadmap
 

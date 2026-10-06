@@ -2,6 +2,26 @@
 
 All notable changes to Pydrud are documented here.
 
+## Release overview
+
+| Version | Theme | Highlights |
+|---------|-------|------------|
+| [2.0.3](#203--2026-10-06) | Production readiness | All QA findings closed, renderer hardening, accessibility, modular structure (no file > 1,000 lines) |
+| [2.0.2](#202--reliable-haptics-and-expanded-widget-catalogue) | Reliability & widgets | Clean logs, reliable haptics, expanded widget catalogue |
+| [2.0.1](#201--starter-capability-and-ui-hardening) | Starter & UI hardening | Capabilities system, the Native Playground starter app |
+| [2.0.0](#200--a-project-you-can-grow-into) | Growing into production | New generated project layout, framework package split |
+| [1.6.0](#160--every-native-command-implemented) | Full native coverage | Every bridge command implemented — no silent unimplemented paths |
+| [1.5.2](#152--build-time-correctness) | Build-time correctness | `javacheck` static analysis, CI and drift regressions fixed |
+| [1.5.1](#151--live-update-fixes) | Live-update fixes | Patch correctness for lists, keys and reordering |
+| [1.5.0](#150--the-responsive-release) | Responsive release | Live device metrics, breakpoints, bottom navigation and tabs |
+| [1.4.0](#140--the-design-release) | Design release | Design system (`Theme`/`Tokens`), 100 % Python-controlled UI |
+| [1.3.0](#130--the-ship-it-release) | Ship it | SQLite data layer, Router navigation, secure storage, PyPI packages |
+| [1.2.0](#120--the-full-android-toolkit) | Full Android toolkit | Material components, camera, push, background work |
+| [1.1.0](#110) / [1.0.1](#101) | Foundation | Stack/Positioned, ListView, GridView, Card, system UI |
+| [1.0.0](#100) | First release | Declarative Python → native Android over a TCP bridge |
+
+---
+
 ## [2.0.3] — 2026-10-06
 
 The production-readiness release. Every finding in the 2.0.2 adversarial QA
