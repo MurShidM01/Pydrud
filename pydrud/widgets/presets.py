@@ -246,13 +246,17 @@ class DataTable(Card):
             raise ValueError("every DataTable row must match columns length")
         pad = 8 if compact else 14
         header = Row(children=[Text(label, weight=700, size=13,
-                                     color=Theme.text) for label in labels],
-                     spacing=pad, style={"tableRow": True, "header": True})
+                                    color=Theme.text, key=f"th-{i}")
+                               for i, label in enumerate(labels)],
+                     spacing=pad)
         body: list[Widget] = [header, Divider()]
         for index, row in enumerate(normalized):
-            cells = [Text(str(value), size=13, color=Theme.text) for value in row]
-            style = {"tableRow": True, "stripe": index % 2 == 1} if striped else {"tableRow": True}
+            cells = [Text(str(value), size=13, color=Theme.text,
+                          key=f"td-{index}-{i}")
+                     for i, value in enumerate(row)]
+            style = {"stripe": index % 2 == 1} if striped else {}
             body.append(Row(children=cells, spacing=pad, style=style,
+                            key=f"tr-{index}",
                             on_click=(lambda _event, i=index: on_row_click(i))
                             if on_row_click else None))
         super().__init__(child=Column(children=body, spacing=0, scroll=True), **kwargs)
@@ -270,19 +274,20 @@ class Timeline(Column):
             if isinstance(event, dict):
                 title = event.get("title", "")
                 subtitle = event.get("subtitle", event.get("time", ""))
-                icon = event.get("icon")
             else:
                 title, subtitle = (list(event) + [""])[:2]
-                icon = None
-            marker = Text("●", size=18, color=color)
-            content = Column(children=[Text(str(title), weight=600),
+            marker = Text("●", size=18, color=color, key=f"tl-dot-{index}")
+            content = Column(children=[Text(str(title), weight=600,
+                                            key=f"tl-title-{index}"),
                                        Text(str(subtitle), size=12,
-                                            color=Theme.text_secondary)],
-                             spacing=3, expand=1)
+                                            color=Theme.text_secondary,
+                                            key=f"tl-sub-{index}")],
+                             spacing=3, expand=1, key=f"tl-body-{index}")
             children.append(Row(children=[marker, content], spacing=12,
-                                style={"timelineIndex": index, "timelineIcon": icon}))
+                                key=f"tl-row-{index}"))
             if index < len(events) - 1:
-                children.append(Divider(indent=10, end_indent=10))
+                children.append(Divider(indent=10, end_indent=10,
+                                        key=f"tl-sep-{index}"))
         super().__init__(children=children, spacing=0, **kwargs)
 
 
