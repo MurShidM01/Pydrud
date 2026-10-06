@@ -103,6 +103,10 @@ and grows the UI layer toward Flutter/React Native parity:
 * **`pydrud.components`** — a pure-Python library of composite widgets
   (stat cards, toolbars, form rows, empty states, …) so the catalogue grows
   without touching the generated Java.
+* **The remaining §15.2 gaps, in Python.** `Flex` (one widget, either axis),
+  `LayoutBuilder`/`Constraints` (build from the live box constraints) and
+  `ExpansionPanelList` (an accordion set) need no native code, so they ship
+  as compositions of the primitives.
 * **Deterministic tests.** `AppTester.settle()` now awaits render
   convergence, so State-driven navigation is reproducible without sleeps.
 
@@ -895,6 +899,7 @@ pydrud build    # proxy forwarded to Gradle automatically
 | `Container` | Box with padding, margin, bg, border-radius | `child`, `padding`, `margin`, `bg`, `border_radius`, `width`, `height`, `alignment`, `expand` |
 | `Column` | Vertical flex layout | `children`, `spacing`, `horizontal_alignment`, `vertical_alignment` (main axis: `top`/`center`/`bottom`), `main_axis_size`, `cross_axis_size`, `scroll`, `expand` |
 | `Row` | Horizontal flex layout | `children`, `spacing`, `vertical_alignment`, `horizontal_alignment` (main axis: `start`/`center`/`end`), `main_axis_size`, `cross_axis_size`, `expand` |
+| **`Flex`** (v2.0.3) | One widget, either axis — `Row` or `Column` by `direction` | `direction` (`row`/`column`/`horizontal`/`vertical`/`x`/`y`), `children`, `spacing`, `main_alignment`, `cross_alignment`, `main_axis_size`, `cross_axis_size` |
 | `Center` | Centres its child | `child`, `expand` |
 | `Spacer` | Flexible empty space | `expand` (default 1) |
 | `Divider` | Horizontal / vertical line | `color`, `thickness` |
@@ -957,6 +962,7 @@ fill, exactly like Flutter — put it between weighted children only when you
 | **`Radio`** (v1.1) | Radio button | `label`, `value`, `group`, `selected` |
 | **`ListTile`** (v1.2) | List row: leading / title / subtitle / trailing | `title`, `subtitle`, `leading`, `trailing`, `dense`, `selected` |
 | **`ExpansionTile`** (v1.2) | Accordion row | `title`, `children`, `expanded`, `on_expand` |
+| **`ExpansionPanelList`** (v2.0.3) | Accordion set built from `ExpansionPanel`s | `panels`, `accordion`, `open_index`, `on_change`, `spacing` |
 | **`Chip`** (v1.2) | Tag / filter / choice | `label`, `variant`, `selected`, `deletable`, `on_change` |
 | **`Badge`** (v1.2) | Count bubble over a child | `label` (int auto-caps at `max_count`), `child`, `color` |
 | **`Avatar`** (v1.2) | Circular image / icon / initials | `source`, `initials`, `icon`, `size`, `bg` |
@@ -1560,10 +1566,15 @@ Responsive.content_width(560)                       # cap long line lengths
 ### Responsive widgets
 
 ```python
-from pydrud import (AdaptiveLayout, ResponsiveBuilder, ResponsiveGrid,
-                    SafeArea, ShowWhen)
+from pydrud import (AdaptiveLayout, LayoutBuilder, ResponsiveBuilder,
+                    ResponsiveGrid, SafeArea, ShowWhen)
 
 ResponsiveBuilder(lambda s: Text(f"{s.width}x{s.height} · {s.breakpoint}"))
+
+LayoutBuilder(lambda c:                  # Flutter's builder, real constraints
+    Row(children=cards) if c.max_width >= 600 else Column(children=cards))
+LayoutBuilder(lambda c: GridView(columns=c.columns(180), children=cards))
+# c.max_width / c.max_height / c.is_tablet / c.breakpoint / c.matches(...)
 
 AdaptiveLayout(                       # a different layout per size class
     compact=Column(children=cards),

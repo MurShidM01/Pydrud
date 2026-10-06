@@ -68,6 +68,20 @@ unlimited-widget and unlimited-icon work.
   key/value rows, info rows, form rows, progress rows, pill buttons and a
   rich empty state) built only from the primitives, so the catalogue grows
   without touching the generated Java. Exported as `pydrud.components`.
+* **`Flex`** — Flutter's full flex model: one widget that picks its axis,
+  so a layout that switches between ``Row`` and ``Column`` no longer has to
+  duplicate its child list. ``direction`` accepts ``"row"``/``"column"``,
+  ``"horizontal"``/``"vertical"`` and ``"x"``/``"y"``, and
+  ``main_alignment``/``cross_alignment`` sit alongside the Pydrud spellings.
+* **`LayoutBuilder`** + **`Constraints`** — build from the live box
+  constraints instead of a hard-coded breakpoint
+  (``c.max_width``, ``c.columns(180)``, ``c.is_tablet``, ``c.matches(...)``),
+  re-run on every rotation, resize and foldable unfold.
+* **`ExpansionPanelList`** / **`ExpansionPanel`** — an accordion set with
+  optional single-open semantics. The list reads ``open_index`` (int,
+  ``State``, ``Computed`` or callable) on every build and reports taps
+  through ``on_change``, so the app owns the state and one ``page.update()``
+  moves the highlight.
 * **`pydrud.icons`** — `available()` / `has()` / `suggest()` / `canonical()`
   so apps and tests can reason about the shipped icon set. The vocabulary is
   now **vendored as `pydrud/core/icon_data.py`** rather than parsed from the
