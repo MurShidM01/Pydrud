@@ -1,0 +1,366 @@
+"""
+``pydrud sync`` — apply ``pydrud.yaml`` to an existing generated project.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import sys
+
+from pydrud.compatibility import COMPATIBILITY
+from pydrud.commands.project_config import load_project_config
+from pydrud.utils import tui
+from pydrud.utils.colors import fail, info
+from pydrud.commands.project.bundle import _bundle_pydrud_source, _copy_icon_resources
+from pydrud.commands.project.config import (
+    ProjectConfigError, _config_bool, _config_int, _config_list, _config_string,
+    _gradle_value, _manifest_permissions, _project_seed, _toml_section,
+    _validate_package,
+)
+from pydrud.commands.project.paths import (
+    _camel, _JAVA_TEMPLATES, _normalise_color, _slugify, _version, _write_template,
+)
+from pydrud.commands.project.templates import _render_managed_android
+
+def _sync_context(project_dir: str, found: dict) -> dict:
+    """Resolve the complete Android template context from ``pydrud.yaml``."""
+    config = load_project_config(project_dir)
+    legacy_app = _toml_section(project_dir, "app")
+
+    display_name = (_config_string(config, "app_name")
+                    or legacy_app.get("name")
+                    or os.path.basename(os.path.abspath(project_dir)))
+    if not display_name:
+        raise ProjectConfigError("'app_name' cannot be empty")
+    package = _validate_package(
+        _config_string(config, "package")
+        or legacy_app.get("package")
+        or found["package"])
+
+    min_sdk = _config_int(config, "min_sdk", COMPATIBILITY.min_sdk, minimum=1)
+    target_sdk = _config_int(config, "target_sdk", COMPATIBILITY.target_sdk,
+                             minimum=1)
+    compile_sdk = _config_int(
+        config, "compile_sdk", max(target_sdk, COMPATIBILITY.compile_sdk),
+        minimum=1)
+    if min_sdk > target_sdk:
+        raise ProjectConfigError("'min_sdk' cannot be greater than 'target_sdk'")
+    if compile_sdk < target_sdk:
+        raise ProjectConfigError("'compile_sdk' cannot be lower than 'target_sdk'")
+
+    version_code_default = int(_gradle_value(
+        project_dir, r"versionCode\s*=\s*(\d+)", "1"))
+    version_name_default = _gradle_value(
+        project_dir, r'versionName\s*=\s*"([^"]+)"', "1.0.0")
+    version_code = _config_int(
+        config, "version_code", version_code_default, minimum=1)
+    version_name = _config_string(
+        config, "version_name", version_name_default) or version_name_default
+
+    pydrud_app_name = _slugify(display_name)
+    android_app_name = _camel(display_name)
+    scheme = (_config_string(config, "scheme")
+              or legacy_app.get("scheme")
+              or pydrud_app_name.replace("_", ""))
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9+.-]*", scheme):
+        raise ProjectConfigError(
+            f"'scheme' must be a valid Android URI scheme, got {scheme!r}")
+
+    permissions = _config_list(
+        config, "permissions",
+        _manifest_permissions(project_dir) if "permissions" not in config else ())
+    from pydrud.commands.release import resolve_permission
+    permissions = list(dict.fromkeys(
+        resolved for name in permissions
+        if (resolved := resolve_permission(name))
+        not in {"INTERNET", "ACCESS_NETWORK_STATE"}
+    ))
+
+    from pydrud.commands.release import (
+        CAPABILITY_PERMISSIONS, KNOWN_CAPABILITIES, resolve_capability,
+    )
+    try:
+        capability_names = {resolve_capability(name)
+                            for name in _config_list(config, "capabilities")}
+    except ValueError as exc:
+        raise ProjectConfigError(str(exc)) from exc
+    known_capabilities = set(KNOWN_CAPABILITIES)
+    generated_permissions = set().union(*(
+        CAPABILITY_PERMISSIONS[name] for name in capability_names
+    )) if capability_names else set()
+    permissions = [name for name in permissions if name not in generated_permissions]
+
+    abi_filters_list = _config_list(
+        config, "abi_filters", ("arm64-v8a", "armeabi-v7a", "x86_64"))
+    if not abi_filters_list:
+        raise ProjectConfigError("'abi_filters' must contain at least one ABI")
+
+    assets_dir = _config_string(config, "assets_dir", "assets") or "assets"
+    assets_dir = assets_dir.replace("\\", "/").strip("/")
+    if not assets_dir or any(part == ".." for part in assets_dir.split("/")):
+        raise ProjectConfigError("'assets_dir' must stay inside the project")
+
+    python_version = _config_string(
+        config, "python_version", COMPATIBILITY.python_version)
+    old_python = _gradle_value(
+        project_dir,
+        r'buildPython\(System\.getenv\("PYDRUD_PYTHON"\)\s*\?:\s*"([^"]+)"\)',
+        sys.executable.replace("\\", "/"))
+    seed = _normalise_color(_project_seed(project_dir))
+
+    from pydrud.commands.packages import Requirements
+
+    return {
+        "project_name": display_name,
+        "app_name": android_app_name,
+        "pydrud_app_name": pydrud_app_name,
+        "package": package,
+        "package_path": package.replace(".", "/"),
+        "min_sdk": min_sdk,
+        "target_sdk": target_sdk,
+        "compile_sdk": compile_sdk,
+        "ndk": _config_string(config, "ndk", COMPATIBILITY.ndk_version),
+        "python_version": python_version,
+        "python_executable": old_python,
+        "pydrud_runtime_version": _config_string(
+            config, "framework_version", COMPATIBILITY.android_runtime_version),
+        "protocol_version": _config_int(
+            config, "protocol_version", COMPATIBILITY.protocol_version,
+            minimum=1),
+        "chaquopy_version": _config_string(
+            config, "chaquopy_version", COMPATIBILITY.chaquopy_version),
+        "agp_version": _config_string(
+            config, "agp_version", COMPATIBILITY.agp_version),
+        "gradle_version": _config_string(
+            config, "gradle_version", COMPATIBILITY.gradle_version),
+        "assets_dir": assets_dir,
+        "version_code": version_code,
+        "version_name": version_name,
+        "scheme": scheme,
+        "app_links_host": _config_string(config, "app_links_host"),
+        "cleartext_traffic": _config_bool(config, "cleartext_traffic", True),
+        "abi_filters_list": abi_filters_list,
+        "abi_filters": ", ".join(f'"{abi}"' for abi in abi_filters_list),
+        "permissions": permissions,
+        "capabilities_list": sorted(capability_names),
+        "capabilities": {name: name in capability_names
+                         for name in known_capabilities},
+        "capability_permissions": sorted(generated_permissions),
+        "firebase": _config_bool(
+            config, "firebase", found.get("firebase", False)
+            or os.path.isfile(os.path.join(project_dir, "google-services.json"))),
+        "shrink": "true" if _config_bool(config, "shrink", False) else "false",
+        "pip_packages": Requirements(project_dir).requirement_strings(),
+        "seed_color": seed,
+    }
+
+
+# ── Upgrading an existing project ────────────────────────────────────────────
+def _remove_generated_java(project_dir: str, found: dict) -> None:
+    """Remove stale generated classes before a package/name migration.
+
+    Only files owned by Pydrud are removed. Any hand-written Java class in the
+    old package is retained, and now-empty package directories are pruned.
+    """
+    java_root = os.path.join(project_dir, "android", "app", "src", "main", "java")
+    old_dir = os.path.join(java_root, *found["package_path"].split("/"))
+    generated = {f"{name}.java" for name in _JAVA_TEMPLATES}
+    generated.update({"PydrudMessagingService.java",
+                      f"{found['app_name']}Activity.java"})
+    for filename in generated:
+        try:
+            os.remove(os.path.join(old_dir, filename))
+        except FileNotFoundError:
+            pass
+    current = old_dir
+    while os.path.normpath(current) != os.path.normpath(java_root):
+        try:
+            os.rmdir(current)
+        except OSError:
+            break
+        current = os.path.dirname(current)
+
+
+def _sync_generated_metadata(project_dir: str, ctx: dict) -> None:
+    """Refresh generated non-app metadata without touching ``src/app``."""
+    _write_template("python/pydrud_config.py.j2",
+                    os.path.join(project_dir, "src", "pydrud_config.py"), ctx)
+    _write_template("python/setup.py.j2",
+                    os.path.join(project_dir, "setup.py"), ctx)
+
+
+def _sync_toml_identity(project_dir: str, ctx: dict) -> None:
+    """Keep the legacy TOML identity mirror aligned with YAML.
+
+    Dependencies, theme settings, comments and unknown TOML sections are
+    preserved verbatim.
+    """
+    path = os.path.join(project_dir, "pydrud.toml")
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return
+
+    replacements = {
+        "name": ctx["project_name"],
+        "package": ctx["package"],
+        "scheme": ctx["scheme"],
+    }
+
+    def assignment(key: str) -> str:
+        escaped = replacements[key].replace("\\", "\\\\").replace('"', '\\"')
+        return f'{key} = "{escaped}"'
+
+    in_app = False
+    app_found = False
+    seen: set[str] = set()
+    app_end: int | None = None
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            if in_app:
+                app_end = index
+            in_app = stripped == "[app]"
+            app_found = app_found or in_app
+            continue
+        if not in_app or "=" not in stripped or stripped.startswith("#"):
+            continue
+        key = stripped.split("=", 1)[0].strip()
+        if key in replacements:
+            lines[index] = assignment(key)
+            seen.add(key)
+    if in_app:
+        app_end = len(lines)
+
+    if app_found and app_end is not None:
+        missing = [key for key in ("name", "package", "scheme") if key not in seen]
+        lines[app_end:app_end] = [assignment(key) for key in missing]
+    elif not app_found:
+        block = ["[app]"] + [assignment(key)
+                             for key in ("name", "package", "scheme")]
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.extend(block)
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+    except OSError:
+        pass
+
+
+def _discover_project(project_dir: str) -> dict | None:
+    """Locate the currently generated package and activity.
+
+    This identifies stale files which may need migrating; desired values are
+    resolved separately from ``pydrud.yaml``.
+    """
+    java_root = os.path.join(project_dir, "android", "app", "src", "main", "java")
+    if not os.path.isdir(java_root):
+        return None
+
+    for root, _dirs, files in os.walk(java_root):
+        if "BridgeService.java" not in files:
+            continue
+        package_path = os.path.relpath(root, java_root).replace(os.sep, "/")
+        activity = next((f for f in files if f.endswith("Activity.java")), None)
+        app_name = activity[: -len("Activity.java")] if activity else _camel(
+            os.path.basename(package_path))
+        return {
+            "package": package_path.replace("/", "."),
+            "package_path": package_path,
+            "app_name": app_name,
+            "firebase": "PydrudMessagingService.java" in files,
+        }
+    return None
+
+
+def sync_project(project_dir: str, *, update_runtime: bool = True) -> bool:
+    """Apply ``pydrud.yaml`` to the complete generated Android project.
+
+    Package, app name, SDK/toolchain versions, release metadata, assets,
+    permissions and deep-link settings all flow from the system-level YAML
+    manifest. The generated Java package is migrated when identity changes.
+    User code under ``src/app/`` is never touched.
+
+        $ pydrud sync && pydrud run
+    """
+    found = _discover_project(project_dir)
+    if not found:
+        print(fail("No generated Android sources found — is this a Pydrud project?"))
+        return False
+
+    try:
+        ctx = _sync_context(project_dir, found)
+    except (ProjectConfigError, ValueError) as exc:
+        print(fail(f"Invalid pydrud.yaml: {exc}"))
+        return False
+
+    print(tui.render_command_header(
+        "sync",
+        f"Syncing {ctx['project_name']}",
+        subtitle="Applying pydrud.yaml to the generated Android project",
+        details=(("Package", ctx["package"]), ("Pydrud", _version()),
+                 ("Runtime", ctx["pydrud_runtime_version"])),
+    ))
+
+    identity_changed = (found["package"] != ctx["package"]
+                        or found["app_name"] != ctx["app_name"])
+    _remove_generated_java(project_dir, found)
+    _render_managed_android(project_dir, ctx)
+    _sync_generated_metadata(project_dir, ctx)
+    _sync_toml_identity(project_dir, ctx)
+    # Fill in any launcher icon files the project is missing (never
+    # overwriting icons the user generated or replaced themselves).
+    _copy_icon_resources(project_dir, overwrite=False)
+
+    count = len(_JAVA_TEMPLATES) + 1 + (1 if ctx["firebase"] else 0)
+    detail = "all Android configuration"
+    if identity_changed:
+        detail += " + package migration"
+    print(info(f"Rewrote {count} Java classes + {detail}"))
+
+    if update_runtime:
+        _bundle_pydrud_source(project_dir)
+
+    _stamp_version(project_dir)
+    print(tui.render_summary(
+        "Project synchronized",
+        (("Java classes", count), ("Package", ctx["package"]),
+         ("Runtime", "updated" if update_runtime else "kept")),
+    ))
+    print(tui.render_next_steps((("pydrud run", "rebuild and launch"),)))
+    return True
+
+
+def _stamp_version(project_dir: str) -> None:
+    """Record which Pydrud generated the native layer, in ``pydrud.yaml``.
+
+    ``pydrud run`` compares this with the installed version and tells the
+    user to ``pydrud sync`` when they drift apart — the generated Java and
+    the Python runtime are two halves of one protocol.
+    """
+    path = os.path.join(project_dir, "pydrud.yaml")
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        return
+    stamp = f'pydrud_version: "{_version()}"'
+    for index, line in enumerate(lines):
+        if line.strip().startswith("pydrud_version:"):
+            lines[index] = stamp
+            break
+    else:
+        insert_at = 1 if lines and lines[0].startswith("#") else 0
+        lines.insert(insert_at, stamp)
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+    except OSError:
+        pass
