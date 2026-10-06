@@ -45,6 +45,7 @@ pydrud.log
 docs/*.html
 CLAUDE.md
 PYDRUD.md
+SPECS.md
 *.zip
 
 # Testing
