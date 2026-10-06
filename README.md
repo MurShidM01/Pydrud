@@ -75,6 +75,44 @@ separate and unchanged.
 
 ---
 
+## New in v2.0.3 — production readiness and a richer UI layer
+
+v2.0.3 is the production-readiness release. It closes every finding in the
+2.0.2 adversarial QA report (`PYDRUD.md`) — the seven confirmed bugs
+(PB-001…PB-007), the developer-experience traps (DX-001…DX-006), the
+doc/API mismatches (DOC-001…DOC-004) and the intermittent race (IC-001) —
+and grows the UI layer toward Flutter/React Native parity:
+
+* **Deep trees can't crash the renderer.** Every tree algorithm
+  (`to_dict`, `walk`, `clone`, `find_by_key`, the whole diff engine) is now
+  iterative, so a 1 000-level tree raises a structured `PydrudError`
+  instead of a bare `RecursionError`.
+* **A huge frame can't wedge the UI.** An oversized snapshot is split into
+  windowed frames, and an encode failure rolls the in-flight transaction
+  back and raises loudly instead of deferring every later render.
+* **`Canvas` animates and `Positioned` moves.** Canvas `ops` and absolute
+  offsets are applied on the update path, not just at creation.
+* **Icons fail loud and cover Material Symbols.** An unknown name logs once
+  under the stable `Pydrud` tag, `pydrud.icons` reports the shipped set, and
+  the names developers copy from the docs (`rocket_launch`, `play_arrow`,
+  `emoji_events`, …) resolve. `Icon.svg("M…")` renders arbitrary 24×24 path
+  data, so the icon set is effectively unlimited.
+* **Scoped theming.** `Theme.scope()`, `TextTheme` and `ThemeExtension`
+  bring Flutter's theming model to Pydrud without giving up build-time
+  resolution.
+* **`pydrud.components`** — a pure-Python library of composite widgets
+  (stat cards, toolbars, form rows, empty states, …) so the catalogue grows
+  without touching the generated Java.
+* **Deterministic tests.** `AppTester.settle()` now awaits render
+  convergence, so State-driven navigation is reproducible without sleeps.
+
+Existing projects should regenerate their managed runtime after upgrading:
+
+```bash
+pydrud sync
+pydrud run
+```
+
 ## New in v2.0.2 — reliable haptics, clean logs and 130+ widgets
 
 v2.0.2 hardens the device experience and expands the Flutter-style UI layer:
@@ -1265,6 +1303,73 @@ Icon(Icons.SETTINGS)
 
 Theme.dark()            # switch the default palette
 Theme.apply(primary="#FF0EA5E9")
+```
+
+### Scoped theming, text roles and extensions (v2.0.3)
+
+Pydrud resolves theme values at build time, so `Theme.scope()` restyles the
+widgets you construct inside it and restores the previous values on exit —
+including on exception, and when nested. This is Flutter's
+`Theme(data: …)` without a per-frame theme lookup.
+
+```python
+from pydrud import Text, TextTheme, Theme, ThemeExtension, Tokens
+
+# Per-subtree overrides — colour roles and design tokens both work.
+with Theme.scope(primary="#FFEC4899", radius_card=4):
+    Card(child=Text("Scoped", color=Theme.primary))
+# Theme.primary and Tokens.radius_card are back to normal here.
+
+# The Material 3 type scale — 15 roles, any spelling.
+Text("Title", style=TextTheme.title_large)
+Text("Body",  style=TextTheme.BODY_MEDIUM)
+Text("Tinted", style=TextTheme.body_medium.with_(color="#FFEF4444"))
+
+# App-specific tokens that travel with the theme.
+Theme.extend(ThemeExtension("brand", accent="#FF22D3EE", hero_radius=28))
+brand = Theme.extension("brand")
+Container(border_radius=brand.hero_radius, bg=brand.accent)
+```
+
+Runtime light/dark switching is a single call and repaints native styles
+*and* Python-resolved colours together:
+
+```python
+page.set_theme_mode("dark")      # light / dark / system
+```
+
+The icon vocabulary is available to code, tests and tooling:
+
+```python
+from pydrud import icons
+
+icons.has("rocket_launch")       # True  (a shipped alias)
+icons.available()                # every supported name
+icons.suggest("rocket_lunch")    # ['rocket_launch', 'rocket', …]
+icons.canonical("rocket_launch") # 'rocket'
+```
+
+### Composite widgets — `pydrud.components` (v2.0.3)
+
+`pydrud.components` is a pure-Python library built only from the primitives,
+so it diffs, keys and animates like any built-in and needs no native code.
+Copy the pattern to grow your own catalogue.
+
+```python
+from pydrud.components import (SectionLabel, StatBlock, StatRow,
+                               Toolbar, GlassPanel, InfoRow, FormRow,
+                               ProgressRow, PillButton, EmptyPlaceholder)
+
+Column(children=[
+    SectionLabel("Today", action=Button("See all", variant="text")),
+    StatRow([
+        StatBlock("Steps", "8,412", icon="trending_up"),
+        StatBlock("Goal",  "78%",   icon="verified"),
+    ]),
+    ProgressRow("Sync", 0.42),
+    EmptyPlaceholder("No results", message="Try another search",
+                     action="Retry", on_action=retry),
+])
 ```
 
 ### Page commands (v1.1)

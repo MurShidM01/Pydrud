@@ -51,18 +51,30 @@ unlimited-widget and unlimited-icon work.
   documented with the three idiomatic recipes.
 
 ### Added — theming, widgets and icons
-* **Runtime theming.** `Theme.scope()` (per-subtree overrides),
-  `ThemeExtension` (custom tokens), a named `TextTheme`, and verified
-  runtime light/dark switching via `page.set_theme_mode()`.
+* **Scoped theming.** `Theme.scope(**overrides)` is Flutter's
+  `Theme(data: …)`: colour roles and design tokens can be overridden for a
+  subtree and are restored on exit, including on exception and when nested.
+  A widget built inside the scope captures the scoped value, so the
+  build-time resolution model stays intact.
+* **`TextTheme`** — the Material 3 type scale (15 roles, `display_large`
+  … `label_small`), each a `style=` dict that resolves as
+  `TextTheme.titleLarge`, `.TITLE_LARGE` or `.title_large` and refines with
+  `.with_(color=…, family=…)`.
+* **`ThemeExtension`** — a named bag of custom design values
+  (`Theme.extend(...)` / `Theme.extension("brand")`), so app-specific
+  tokens travel with the theme.
 * **`pydrud.components`** — a pure-Python library of composite widgets
-  (stat cards, toolbars, form rows, empty states) so the catalogue grows
-  without touching the framework core, plus `NativeView` as an escape hatch
-  for arbitrary Android views.
-* **`pydrud.icons`** — `available()` / `has()` / `closest()` so apps and
-  tests can reason about the shipped icon set.
-* Missing Material-3 components: date/time pickers, a persistent bottom
-  sheet, `RangeSlider`, a rich `PopupMenu`, `Carousel`/`PageView`,
-  `LayoutBuilder`-style breakpoints and `ExpansionPanelList`.
+  (section labels, stat blocks and rows, toolbars, glass panels,
+  key/value rows, info rows, form rows, progress rows, pill buttons and a
+  rich empty state) built only from the primitives, so the catalogue grows
+  without touching the generated Java. Exported as `pydrud.components`.
+* **`pydrud.icons`** — `available()` / `has()` / `suggest()` / `canonical()`
+  so apps and tests can reason about the shipped icon set. The vocabulary is
+  now **vendored as `pydrud/core/icon_data.py`** rather than parsed from the
+  build-time-only Java template, so the API returns the right answer inside
+  the APK too; a test pins the data and the template together.
+* Runtime light/dark switching via `page.set_theme_mode()` is covered by
+  explicit tests.
 
 ### Changed — developer experience
 * **DX-001 / IC-001** — `AppTester.settle()` now awaits render/revision
