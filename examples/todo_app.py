@@ -12,7 +12,7 @@ Or drop it into a scaffolded project as ``src/app/main.py``.
 """
 
 from pydrud import (
-    App, AppBar, Button, Checkbox, Colors, Column, Dismissible, Icons,
+    App, AppBar, Button, Colors, Column, Dismissible, Icons,
     ListTile, ListView, Row, Scaffold, SearchBar, SegmentedButton, Store,
     Text, TextField,
 )
