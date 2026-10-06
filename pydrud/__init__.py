@@ -6,7 +6,7 @@ Python widget tree into native Android Views at runtime. No XML layouts,
 no Kotlin UI code — just Python.
 """
 
-__version__ = "2.0.2"
+__version__ = "2.0.3"
 __app_name__ = "Pydrud"
 
 from pydrud.runtime.app import App

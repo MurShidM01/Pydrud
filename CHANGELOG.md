@@ -2,6 +2,76 @@
 
 All notable changes to Pydrud are documented here.
 
+## [2.0.3] — 2026-10-06
+
+The production-readiness release. Every finding in the 2.0.2 adversarial QA
+report (`PYDRUD.md`) is addressed: the seven confirmed bugs (PB-001…PB-007),
+the developer-experience traps (DX-001…DX-006), the doc/API mismatches
+(DOC-001…DOC-004) and the intermittent race (IC-001), plus the UI/UX,
+unlimited-widget and unlimited-icon work.
+
+### Fixed — silent render failures
+* **PB-002 — an oversized frame no longer wedges rendering forever.**
+  `App._send_desired_tree` now encodes the transaction *before* registering
+  it as in-flight, rolls the in-flight state back when encoding fails, and
+  raises a loud, recoverable error instead of leaving a phantom transaction
+  that defers every later render. Oversized snapshots are automatically
+  split (windowing) so a large list cannot kill the UI.
+* **PB-001 — deep widget trees no longer raise `RecursionError`.**
+  `Widget.to_dict`, `walk`, `clone`, `find_by_key`, `validate_tree_keys`,
+  `assign_stable_keys` and the whole `TreeDiff` engine now use explicit
+  stacks instead of recursion, and a documented maximum depth raises a
+  structured `PydrudError` instead of a bare `RecursionError`.
+* **PB-003 — `Canvas` repaints on the device.** The native `updateProps`
+  path now applies changed `ops` (and `units`) through
+  `AdvancedViews.updateCanvas`, so a canvas/game board animates instead of
+  freezing after the first frame.
+* **PB-004 — `Canvas(on_draw=…)` over shared state now diffs correctly.**
+  Each canvas caches its serialised ops at build time, so the diff compares
+  two snapshots instead of re-running the old painter against the current
+  state and emitting zero patches.
+* **PB-006 — `Positioned(left/top/right/bottom)` moves on update.** The
+  native style applier now re-applies absolute offsets and gravity, so
+  absolute positioning is no longer create-only.
+* **PB-005 — unknown icon names are loud, and the vocabulary is complete.**
+  The renderer logs an unknown icon once per name (never silently drawing
+  “?”), the Python side gained `pydrud.icons.available()` / `has()` and an
+  analyzer rule, and the Material names developers actually copy
+  (`play_arrow`, `rocket_launch`, `emoji_events`, `sports_esports`, `bolt`,
+  `speed`, `replay`, …) are aliased to renderer-backed icons.
+* **PB-007 — layout model parity.** `Row`/`Column` gained
+  `main_axis_size`/`cross_axis_size`, nested layouts no longer default to
+  `MATCH_PARENT`, and a horizontal row of unweighted fill-width children is
+  warned about at build time.
+
+### Added — theming, widgets and icons
+* **Runtime theming.** `Theme.scope()` (per-subtree overrides),
+  `ThemeExtension` (custom tokens), a named `TextTheme`, and verified
+  runtime light/dark switching via `page.set_theme_mode()`.
+* **`pydrud.components`** — a pure-Python library of composite widgets
+  (stat cards, toolbars, form rows, empty states) so the catalogue grows
+  without touching the framework core, plus `NativeView` as an escape hatch
+  for arbitrary Android views.
+* **`pydrud.icons`** — `available()` / `has()` / `closest()` so apps and
+  tests can reason about the shipped icon set.
+* Missing Material-3 components: date/time pickers, a persistent bottom
+  sheet, `RangeSlider`, a rich `PopupMenu`, `Carousel`/`PageView`,
+  `LayoutBuilder`-style breakpoints and `ExpansionPanelList`.
+
+### Changed — developer experience
+* **DX-001 / IC-001** — `AppTester.settle()` now awaits render/revision
+  convergence, so State-driven navigation and renders are deterministic in
+  tests without hand-rolled polling.
+* **DX-002** — the analyzer no longer flags an unkeyed child of a keyed
+  ancestor inside a loop.
+* **DX-004** — framework output uses a stable `Pydrud` log tag.
+* **DX-005** — `pydrud analyze` resolves every icon string against the
+  shipped set and suggests the closest supported name.
+* **DX-006** — dev builds log dropped/unknown native props once per key.
+* **DOC-001…DOC-004** — documented the `permissions list` command, the
+  `Row`/`Column` fill-width default, the icon vocabulary and the corrected
+  Canvas painter contract.
+
 ## [Unreleased]
 
 ### Added — conditional rendering and canvas painters
