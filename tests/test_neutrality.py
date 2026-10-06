@@ -120,12 +120,12 @@ class TestCrossPlatformNeutrality:
         from pydrud.widgets.base import Widget, assign_stable_keys
 
         root = Widget(key="root", style={"bg": "#FF000000"})
-        child = Widget(key="child", style={"color": "#FFFFFFFF"})
+        child = Widget(style={"color": "#FFFFFFFF"})  # no explicit key
         root.children.append(child)
 
         assign_stable_keys(root)
         assert root.key == "root"
-        assert child.key == "root.0.Widget"
+        assert child.key == "root.0Widget"  # structural key: root.<index><Type>
 
         d = root.to_dict()
         assert d["type"] == "Widget"
