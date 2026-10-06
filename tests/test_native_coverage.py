@@ -25,6 +25,8 @@ TEMPLATES = os.path.join(ROOT, "pydrud", "android", "templates", "android")
 #: Python modules that talk to the bridge.
 SENDERS = [
     os.path.join("pydrud", "runtime", "app.py"),
+    os.path.join("pydrud", "runtime", "page.py"),
+    os.path.join("pydrud", "runtime", "_bridge.py"),
     os.path.join("pydrud", "services", "native.py"),
     os.path.join("pydrud", "runtime", "navigation.py"),
     os.path.join("pydrud", "data", "database.py"),
