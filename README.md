@@ -113,6 +113,10 @@ and grows the UI layer toward Flutter/React Native parity:
   as compositions of the primitives.
 * **Deterministic tests.** `AppTester.settle()` now awaits render
   convergence, so State-driven navigation is reproducible without sleeps.
+* **Accessibility is checked, not hoped for.** Any widget takes
+  `semantics=` (Android `contentDescription`), `Colors.contrast()` measures
+  WCAG ratios, and `pydrud analyze` flags unreadable text/background pairs
+  and sub-48 dp touch targets (§14.7).
 
 Existing projects should regenerate their managed runtime after upgrading:
 
@@ -1006,6 +1010,45 @@ the setter it looked for; a class that cannot be loaded logs the reason and
 renders an empty box rather than taking the frame down. The view instance is
 reused across updates, so a custom view keeps its state — a changed class
 name is the one case that rebuilds it.
+
+### Accessibility (v2.0.3)
+
+Three things make an app usable by everyone, and Pydrud now checks all three.
+
+**Screen-reader labels.** Any widget takes `semantics=`, which becomes the
+Android view's `contentDescription`. TalkBack reads it in place of the
+widget's own text, so an icon-only control is announced instead of
+"unlabelled button" — and it works on every supported API level:
+
+```python
+IconButton(icon=Icons.SAVE, semantics="Save the document")
+Image("chart.png", semantics="Revenue, up 12% quarter on quarter")
+```
+
+The label updates live: change it and the next `page.update()` re-announces
+it, including when the label is removed.
+
+**Contrast.** `Colors.contrast(fg, bg)` returns the WCAG 2.1 ratio and
+`Colors.meets_contrast(fg, bg)` the AA verdict — 4.5:1 for normal text, 3:1
+for large text (≥ 18 pt, or ≥ 14 pt bold). `pydrud analyze` applies the same
+check to every literal text/background pair in your source, resolving
+`Colors.X` tokens as well as hex strings, and names the fix:
+
+```
+src/app/home.py:42  Low contrast: #FFFFFFFF on #FFEFEFEF is 1.1:1 —
+WCAG AA needs 4.5:1 for normal text. Try Colors.on('#FFEFEFEF') for a
+readable foreground.
+```
+
+**Touch targets.** `pydrud analyze` also warns when an interactive widget is
+pinned below the 48 dp minimum (WCAG 2.5.5 / Material):
+
+```python
+IconButton(icon=Icons.CLOSE, style={"width": 24, "height": 24})  # flagged
+```
+
+The stock buttons already pad themselves to 48 dp; the check only fires when
+an explicit `width`/`height` overrides that padding.
 
 ### Flutter-style presets and compositions
 

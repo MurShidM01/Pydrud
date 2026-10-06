@@ -104,6 +104,26 @@ unlimited-widget and unlimited-icon work.
 * Runtime light/dark switching via `page.set_theme_mode()` is covered by
   explicit tests.
 
+### Added — accessibility (PYDRUD §14.7)
+* **`semantics=` on every widget** — the label becomes Android's
+  `contentDescription`, so TalkBack announces an icon-only control instead
+  of "unlabelled button". It works on every supported API level (unlike
+  `tooltip`), applies on both the create and the reuse paths, and updates
+  live through the diff (`_semantics`), clearing when the label is removed.
+* **`Colors.contrast(fg, bg)`** and **`Colors.meets_contrast(fg, bg, large=…)`**
+  — WCAG 2.1 relative luminance and the AA verdict (4.5:1 normal, 3:1 large).
+  Ratios are compared at the one-decimal precision reports use, so a pair
+  shown as `4.5:1` is never claimed to fail `4.5:1`.
+* **`pydrud analyze` contrast lint** — flags every literal text/background
+  pair in the source below WCAG AA, resolving `Colors.X` tokens as well as
+  hex strings, including a container's `bg` against a direct text child's
+  colour, and suggests `Colors.on(bg)`.
+* **`pydrud analyze` touch-target lint** — warns when an interactive widget
+  is pinned below the 48 dp minimum (WCAG 2.5.5).
+* The `AppTester` node mirror now exposes `tooltip` and `semantics`, and the
+  fake device applies `_tooltip`/`_semantics` updates exactly as the native
+  `ViewFactory` does.
+
 ### Changed — developer experience
 * **DX-001 / IC-001** — `AppTester.settle()` now awaits render/revision
   convergence, so State-driven navigation and renders are deterministic in
