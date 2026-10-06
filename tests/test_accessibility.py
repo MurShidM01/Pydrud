@@ -223,6 +223,12 @@ class TestTouchTargetLint(unittest.TestCase):
                   'Button("Go", style={"height": "32dp"})\n')
         self.assertTrue(any("touch target" in m for m in messages(source)))
 
+    def test_a_shrunken_menu_trigger_is_flagged(self):
+        source = ('from pydrud import PopupMenu\n'
+                  'PopupMenu(["Open"], style={"width": 24, "height": 24})\n')
+        found = messages(source)
+        self.assertTrue(any("touch target" in m for m in found), found)
+
     def test_a_non_interactive_widget_is_not_flagged(self):
         source = ('from pydrud import Icon, Icons\n'
                   'Icon(Icons.SAVE, style={"width": 24, "height": 24})\n')

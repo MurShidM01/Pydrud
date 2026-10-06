@@ -40,6 +40,7 @@ _WIDGET_CLASSES = {
     "Tooltip", "Tabs", "BottomNavigationBar", "NavigationRail", "Drawer",
     "SegmentedButton", "SearchBar", "Rating", "CircularProgress", "Skeleton",
     "RefreshIndicator", "Stepper", "WebView", "VideoPlayer", "Chart",
+    "PopupMenu", "DropdownMenu", "PopupMenuButton",
     # v1.2 — gestures, animation and forms
     "GestureDetector", "InkWell", "Dismissible", "Draggable",
     # v1.3 — painting, hardware, maps, rich text, big lists
@@ -493,7 +494,7 @@ _INTERACTIVE_WIDGETS = {
     "InputChip", "ActionChip", "ChoiceChip", "AssistChip", "SuggestionChip",
     "Link", "ListTile", "ExpansionTile", "NavigationTile", "SettingsTile",
     "BackButton", "CloseButton", "MenuButton", "SwitchListTile",
-    "CheckboxListTile", "RadioListTile",
+    "CheckboxListTile", "RadioListTile", "PopupMenu", "DropdownMenu",
 }
 
 #: WCAG AA minimum contrast — normal text, then large text.

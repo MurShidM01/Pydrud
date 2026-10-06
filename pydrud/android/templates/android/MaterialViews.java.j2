@@ -77,6 +77,7 @@ public class MaterialViews {
             case "WebView":
             case "VideoPlayer":
             case "Chart":
+            case "PopupMenu":
             case "Form":
             case "FormField":
             case "GestureDetector":
@@ -124,6 +125,7 @@ public class MaterialViews {
                 case "WebView":             return createWebView(key, props);
                 case "VideoPlayer":         return createVideo(key, props);
                 case "Chart":               return new ChartView(activity, props);
+                case "PopupMenu":           return createPopupMenu(key, props);
                 default:
                     // Transparent wrappers: Drawer, Tooltip, gestures,
                     // animations and form containers are plain hosts whose
@@ -993,6 +995,49 @@ public class MaterialViews {
             ? PydrudTheme.onSurfaceVariant
             : parseColor(props.optString("errorColor", ""), PydrudTheme.error));
         ((LinearLayout) view).addView(text);
+    }
+
+    // ── menus ────────────────────────────────────────────────────────────
+
+    /**
+     * The trigger a {@link android.widget.PopupMenu} anchors to.
+     *
+     * <p>Returns a host the factory can also attach a caller-supplied trigger
+     * to. Unless the Python side sent one (``customTrigger``), a 48dp
+     * overflow button is built here — an icon button, or a text button when
+     * a label is given. The menu itself is built and shown by
+     * {@code ViewFactory.bindPopupMenu} when the trigger is tapped, so items
+     * added by a later patch are always the ones shown.
+     */
+    private View createPopupMenu(final String key, JSONObject p) {
+        FrameLayout host = new FrameLayout(activity);
+        host.setClipChildren(false);
+        int tint = parseColor(p.optString("color", ""), PydrudTheme.onSurfaceVariant);
+
+        if (!p.optBoolean("customTrigger", false)) {
+            String label = p.optString("label", "");
+            if (!label.isEmpty()) {
+                TextView trigger = new TextView(activity);
+                trigger.setText(label);
+                PydrudTheme.applyTextDefaults(trigger, 14f, 500, tint);
+                trigger.setGravity(Gravity.CENTER);
+                trigger.setPadding(dp(12), dp(10), dp(12), dp(10));
+                host.addView(trigger, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+            } else {
+                ImageView trigger = new ImageView(activity);
+                trigger.setImageDrawable(factory.icon(
+                    p.optString("icon", "more_vert"), tint, PydrudTheme.adaptive(24)));
+                trigger.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                int box = PydrudTheme.touchTarget();
+                host.addView(trigger, new FrameLayout.LayoutParams(
+                    box, box, Gravity.CENTER));
+            }
+        }
+        host.setMinimumWidth(PydrudTheme.touchTarget());
+        host.setMinimumHeight(PydrudTheme.touchTarget());
+        return host;
     }
 
     // ── helpers ──────────────────────────────────────────────────────────

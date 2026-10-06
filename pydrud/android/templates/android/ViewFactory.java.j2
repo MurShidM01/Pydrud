@@ -1691,8 +1691,17 @@ public class ViewFactory {
             events.add("change");
             events.add("submit");
         }
-        if (events.isEmpty()) return;
-        eventDispatcher.subscribe(key, events.toArray(new String[0]));
+        if (events.isEmpty()) {
+            // A PopupMenu's whole purpose is the menu, so its trigger opens it
+            // even when Python registered no selection handler.
+            if (!"PopupMenu".equals(json.optString("type", ""))) return;
+        } else {
+            eventDispatcher.subscribe(key, events.toArray(new String[0]));
+        }
+        if ("PopupMenu".equals(json.optString("type", ""))) {
+            bindPopupMenu(view, json, key);
+            return;
+        }
 
         if (events.contains("click")) {
             view.setClickable(true);
@@ -1799,6 +1808,96 @@ public class ViewFactory {
                     });
             }
         }
+    }
+
+    // ── PopupMenu (PYDRUD §15.2) ─────────────────────────────────────────
+
+    /**
+     * Wire a {@code PopupMenu}'s trigger to a real native menu.
+     *
+     * <p>The menu is rebuilt from the node's props on every tap, so an item
+     * added or renamed by a later patch is always the one shown. Choosing an
+     * entry dispatches a {@code select} event carrying the item's index and
+     * value. A caller-supplied trigger keeps its own feedback, so the ripple
+     * is only added to the built-in overflow button.
+     */
+    private void bindPopupMenu(View view, JSONObject json, String key) {
+        view.setClickable(true);
+        view.setOnClickListener(v -> showPopupMenu(v, json, key));
+        if (!props(json).optBoolean("customTrigger", false)) {
+            PydrudTheme.addCircleRipple(view, PydrudTheme.rippleOn(PydrudTheme.surface));
+            PydrudTheme.pressFeedback(view, 0.9f, 0f, 0f);
+        }
+    }
+
+    private void showPopupMenu(View anchor, JSONObject json, String key) {
+        JSONObject p = props(json);
+        android.widget.PopupMenu menu = new android.widget.PopupMenu(activity, anchor);
+        android.view.Menu root = menu.getMenu();
+        boolean withIcons = p.optBoolean("itemIcons", true);
+        int tint = parseColor(p.optString("color", ""), PydrudTheme.onSurfaceVariant);
+        populateMenu(root, p.optJSONArray("items"), withIcons, tint, new int[]{0});
+        menu.setOnMenuItemClickListener(item -> {
+            JSONObject d = new JSONObject();
+            try {
+                d.put("index", item.getItemId());
+                d.put("value", item.getTitle() == null ? "" : item.getTitle().toString());
+            } catch (JSONException ignored) {}
+            eventDispatcher.dispatch("select", key, d);
+            return true;
+        });
+        menu.show();
+    }
+
+    /**
+     * Copy a JSON item list into a native menu, recursively.
+     *
+     * <p>An item marked {@code divider} starts a new menu group — Android
+     * draws the separator between groups on API 28+. An item carrying
+     * {@code submenu} becomes a real {@link android.view.SubMenu}. The id an
+     * item is given is its position among the actionable entries, which is
+     * the index reported to Python; {@code nextId} threads that counter
+     * through nested submenus so the ids stay unique.
+     */
+    private void populateMenu(android.view.Menu menu, JSONArray items,
+                              boolean withIcons, int tint, int[] nextId) {
+        if (items == null) return;
+        int group = 0;
+        for (int i = 0; i < items.length(); i++) {
+            JSONObject item = items.optJSONObject(i);
+            if (item == null) continue;
+            if (item.optBoolean("divider", false)) {
+                group++;
+                continue;
+            }
+            int id = nextId[0]++;
+            JSONArray sub = item.optJSONArray("submenu");
+            if (sub != null && sub.length() > 0) {
+                android.view.SubMenu submenu = menu.addSubMenu(group, id, id,
+                    item.optString("label", ""));
+                if (withIcons) applyMenuIcon(submenu, item.optString("icon", ""), tint);
+                populateMenu(submenu, sub, withIcons, tint, nextId);
+                continue;
+            }
+            android.view.MenuItem entry = menu.add(group, id, id,
+                item.optString("label", ""));
+            entry.setEnabled(item.optBoolean("enabled", true));
+            if (item.optBoolean("checkable", false)) {
+                entry.setCheckable(true);
+                entry.setChecked(item.optBoolean("checked", false));
+            }
+            if (withIcons) {
+                applyMenuIcon(entry, item.optString("icon", ""), tint);
+            }
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 28 && group > 0) {
+            menu.setGroupDividerEnabled(true);
+        }
+    }
+
+    private void applyMenuIcon(android.view.MenuItem entry, String icon, int tint) {
+        if (entry == null || icon.isEmpty()) return;
+        entry.setIcon(factory.icon(icon, tint, dp(20)));
     }
 
     /**
@@ -2310,15 +2409,15 @@ public class ViewFactory {
             + "audio autoRequestPermission autofocus autoplay axis badge battery_not_low bg bgImage "
             + "blocks body boldSelected border borderBottom borderLeft borderRadius borderRight "
             + "borderTop bottom breakpoint buttonSize c1x c1y c2x c2y callback_id camera cancel "
-            + "cancellable cap channel characteristic charging checked children circular cmd codeBg "
+            + "cancellable cap channel characteristic charging checkable checked children circular cmd codeBg "
             + "color colors columns content controls count crossAxis crossAxisAlignment current curve "
-            + "cx cy dark dash default deg delay deletable dense density description direction disabled "
+            + "customTrigger cx cy dark danger dash default deg delay deletable dense density description direction disabled "
             + "dismissible distance divider divisions drawerSide duration dx dy elevation enabled error "
             + "errorColor error_image events every expand expanded extended fabPosition facing family "
             + "feedback filename fill fit floating font font_family format gestures gradient h handled "
             + "haptic haptics has_events height heightFactor helper highAccuracy hint html icon "
             + "iconPosition icon_brightness id idle ime importance indeterminate index indicator "
-            + "indicatorSize initial initialPage initials inputs interval italic items javascript join key keyboard "
+            + "indicatorSize initial initialPage initials inputs interval italic itemIcons items javascript join key keyboard "
             + "keyboard_height kind label labelBehavior lat leadingColor leadingIcon left letterSpacing "
             + "level lights lineHeight lines link locale lon long loop mainAxis mainAxisAlignment "
             + "margin markers max maxColumns maxHeight maxLabelLines maxLines maxWidth max_seconds "
@@ -2332,7 +2431,7 @@ public class ViewFactory {
             + "rotation route safeArea safeAreaBottom safeAreaTop sample_rate scale scan scanFormats "
             + "scanOverlay scroll scrollable seconds selectable selected semantics sensor service services shadow "
             + "shortcuts show showGrid showLabels side size source spacing spans src start "
-            + "status_bar_color stepSize steps strike strikethrough style subject subtitle surface_variant sweep "
+            + "status_bar_color stepSize steps strike strikethrough style subject submenu subtitle surface_variant sweep "
             + "swipeThreshold swipeToRemove sx sy tabHeight tabletColumns tabs text textAlign textColor "
             + "textScale text_scale thickness threeLine threshold timeout title tokens tooltip top "
             + "topDivider topic trailingColor trailingIcon transaction_id transition tristate type "
