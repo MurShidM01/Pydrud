@@ -67,6 +67,8 @@ _WIDGET_CLASSES = {
     "Timeline",
     # v2.0.3 — the flex model, the constraint builder and the accordion
     "Flex", "ExpansionPanelList",
+    # v2.0.3 — the native escape hatch
+    "NativeView",
 }
 
 # Style property keys known to be valid.

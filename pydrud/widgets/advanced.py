@@ -654,3 +654,68 @@ class InfiniteList(Widget):
             "virtualized": True,
         }))
         return props
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Escape hatch
+# ──────────────────────────────────────────────────────────────────────────
+
+
+class NativeView(Widget):
+    """Mount an arbitrary Android ``View`` subclass by class name.
+
+    The escape hatch PYDRUD §15.3 asked for: an app team can drop in any
+    native control — a third-party chart, a game surface, an OEM widget —
+    without forking Pydrud or regenerating the Java::
+
+        from pydrud import NativeView
+
+        NativeView("com.example.MyGauge", props={"value": 0.42, "unit": "%"},
+                   style={"width": 240, "height": 240})
+
+    The renderer loads the class with the app's own class loader and
+    constructs it from ``(Context)``. Props are then applied in one of two
+    ways:
+
+    * **Preferred** — if the class declares
+      ``public void applyProps(org.json.JSONObject p)``, it is handed the
+      whole props map and owns its own interpretation.
+    * **Otherwise** — every prop is mapped onto a ``setXxx`` setter
+      (``"value"`` → ``setValue``, ``"text"`` → ``setText``), with the JSON
+      value coerced to the parameter type. A prop with no matching setter
+      logs a warning naming the setter it looked for.
+
+    Because the class name comes from Python, the *view* also has to exist
+    in the APK: add the dependency to ``pydrud.yaml`` (or ``app/``) and
+    ``pydrud sync``. A class that cannot be loaded renders an empty box and
+    logs the reason rather than taking the frame down.
+    """
+
+    _widget_type = "NativeView"
+
+    def __init__(self, view_class: str, *, props: Optional[dict] = None,
+                 key: Optional[str] = None, style: Optional[dict] = None,
+                 expand: Optional[int] = None, visible: bool = True,
+                 **kwargs):
+        super().__init__(key=key, style=style, expand=expand,
+                         visible=visible, **kwargs)
+        name = str(view_class).strip()
+        if not name:
+            raise ValueError("NativeView() needs a fully-qualified View class")
+        if "." not in name:
+            raise ValueError(
+                f"NativeView({name!r}) needs a fully-qualified class name, "
+                f"e.g. 'com.example.MyView'")
+        self.view_class = name
+        self.props: dict = dict(props or {})
+
+    def _serialise_props(self) -> dict:
+        merged = dict(self._extra)
+        merged["viewClass"] = self.view_class
+        # Explicit props win over anything that arrived as a stray kwarg.
+        merged.update(self.props)
+        return merged
+
+    def __repr__(self) -> str:
+        return (f"NativeView({self.view_class!r}, key={self.key!r}, "
+                f"{len(self.props)} props)")

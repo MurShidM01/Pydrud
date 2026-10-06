@@ -371,6 +371,12 @@ public class ViewFactory {
                 case "InfiniteList":
                     view = createRecyclerList(json, key,
                         "ReorderableList".equals(type)); break;
+                case "NativeView":
+                    // Escape hatch (PYDRUD §15.3): mount an arbitrary View
+                    // subclass by name, then host any declared children.
+                    view = createNativeView(json);
+                    if (view instanceof ViewGroup) attachChildren(view, json);
+                    break;
                 default:
                     if (material.handles(type)) {
                         view = material.create(json);
@@ -415,6 +421,148 @@ public class ViewFactory {
             Log.e(TAG, "createView error", e);
             return null;
         }
+    }
+
+    // ── NativeView escape hatch (PYDRUD §15.3) ───────────────────────────
+
+    /**
+     * Mount an arbitrary {@code android.view.View} subclass by class name.
+     *
+     * <p>The class is loaded with the app's own class loader and constructed
+     * from {@code (Context)}. Props are then applied by
+     * {@link #applyNativeProps}. Every failure mode — a missing class, a
+     * class that is not a View, a missing constructor, a throwing
+     * initialiser — logs the reason and falls back to an empty box, so one
+     * bad class name cannot take a whole frame down.
+     */
+    private View createNativeView(JSONObject json) {
+        JSONObject p = props(json);
+        String className = p.optString("viewClass", "").trim();
+        if (className.isEmpty()) {
+            Log.w(TAG, "NativeView without a viewClass — rendering empty box");
+            return new FrameLayout(activity);
+        }
+        try {
+            Class<?> cls = Class.forName(className, true, activity.getClassLoader());
+            if (!View.class.isAssignableFrom(cls)) {
+                Log.w(TAG, "NativeView " + className + " is not an android.view.View");
+                return new FrameLayout(activity);
+            }
+            View view = (View) cls.getConstructor(android.content.Context.class)
+                .newInstance(activity);
+            applyNativeProps(view, p);
+            return view;
+        } catch (Throwable e) {
+            Log.e(TAG, "NativeView " + className + " failed to mount — "
+                + "rendering an empty box. Is the class in the APK?", e);
+            return new FrameLayout(activity);
+        }
+    }
+
+    /**
+     * Push a props map into a NativeView.
+     *
+     * <p>A class that implements {@code public void applyProps(JSONObject)}
+     * owns its own interpretation. Otherwise every prop is mapped onto a
+     * single-argument {@code setXxx} setter, with the JSON value coerced to
+     * the parameter type; a prop with no setter logs the setter it looked
+     * for instead of vanishing silently.
+     */
+    private void applyNativeProps(View view, JSONObject p) {
+        try {
+            java.lang.reflect.Method apply = view.getClass()
+                .getMethod("applyProps", JSONObject.class);
+            apply.invoke(view, p);
+            return;
+        } catch (NoSuchMethodException ignored) {
+            // No applyProps — fall through to the setter mapping.
+        } catch (Throwable e) {
+            Log.w(TAG, "NativeView applyProps() threw on "
+                + view.getClass().getName(), e);
+            return;
+        }
+        for (java.util.Iterator<String> keys = p.keys(); keys.hasNext(); ) {
+            String name = keys.next();
+            if ("viewClass".equals(name)) continue;
+            Object value = p.opt(name);
+            if (value == null || value == JSONObject.NULL) continue;
+            String setter = "set" + Character.toUpperCase(name.charAt(0))
+                + name.substring(1);
+            java.lang.reflect.Method method = findSetter(view.getClass(), setter, value);
+            if (method == null) {
+                Log.w(TAG, "NativeView " + view.getClass().getSimpleName()
+                    + " has no " + setter + "(...) for prop '" + name + "'");
+                continue;
+            }
+            try {
+                method.invoke(view, coerce(value, method.getParameterTypes()[0]));
+            } catch (Throwable e) {
+                Log.w(TAG, "NativeView " + setter + "() failed", e);
+            }
+        }
+    }
+
+    /** A shallow copy of *base* with every key of *patch* written over it. */
+    private static JSONObject mergeProps(JSONObject base, JSONObject patch) {
+        JSONObject merged = new JSONObject();
+        for (JSONObject source : new JSONObject[]{ base, patch }) {
+            if (source == null) continue;
+            for (java.util.Iterator<String> it = source.keys(); it.hasNext(); ) {
+                String name = it.next();
+                try { merged.put(name, source.opt(name)); }
+                catch (JSONException ignored) {}
+            }
+        }
+        return merged;
+    }
+
+    /** The first one-argument {@code setXxx} that can take *value*, or null. */
+    private static java.lang.reflect.Method findSetter(Class<?> cls, String name,
+                                                       Object value) {
+        for (java.lang.reflect.Method method : cls.getMethods()) {
+            if (!method.getName().equals(name) || method.getParameterCount() != 1) {
+                continue;
+            }
+            if (canCoerce(value, method.getParameterTypes()[0])) return method;
+        }
+        return null;
+    }
+
+    /** True when {@link #coerce} can turn *value* into *target*. */
+    private static boolean canCoerce(Object value, Class<?> target) {
+        if (value instanceof String) {
+            return target == String.class || target == CharSequence.class;
+        }
+        if (value instanceof Boolean) {
+            return target == boolean.class || target == Boolean.class;
+        }
+        if (value instanceof Number) {
+            return target == int.class || target == Integer.class
+                || target == float.class || target == Float.class
+                || target == double.class || target == Double.class
+                || target == long.class || target == Long.class
+                || target == short.class || target == Short.class
+                || target == byte.class || target == Byte.class
+                || target == String.class || target == CharSequence.class;
+        }
+        return target.isInstance(value);
+    }
+
+    /** Widen or narrow a JSON number to the setter's parameter type. */
+    private static Object coerce(Object value, Class<?> target) {
+        if (value instanceof Number) {
+            double d = ((Number) value).doubleValue();
+            if (target == int.class || target == Integer.class) return (int) d;
+            if (target == float.class || target == Float.class) return (float) d;
+            if (target == double.class || target == Double.class) return d;
+            if (target == long.class || target == Long.class) return (long) d;
+            if (target == short.class || target == Short.class) return (short) d;
+            if (target == byte.class || target == Byte.class) return (byte) d;
+            if (target == String.class || target == CharSequence.class) {
+                return String.valueOf(value);
+            }
+        }
+        return value;
     }
 
     /** Create a FrameLayout-based box (Container, Center, Card, Stack, …). */
@@ -1588,6 +1736,7 @@ public class ViewFactory {
             case "CameraPreview":
             case "ReorderableList":
             case "InfiniteList":
+            case "NativeView":
                 return true;
             default:
                 return false;
@@ -2046,7 +2195,8 @@ public class ViewFactory {
             + "swipeThreshold swipeToRemove sx sy tabHeight tabletColumns tabs text textAlign textColor "
             + "textScale text_scale thickness threeLine threshold timeout title tokens tooltip top "
             + "topDivider topic trailingColor trailingIcon transaction_id transition tristate type "
-            + "underline units uppercase url use24h v value values variant vibrate virtualized visible "
+            + "underline units uppercase url use24h v value values variant vibrate viewClass "
+            + "virtualized visible "
             + "volume w weight width widthFactor x x1 x2 y y1 y2 zIndex zoom ").trim().split(" ")));
     private static final java.util.Set<String> WARNED_STYLE_KEYS =
         java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
@@ -2308,6 +2458,21 @@ public class ViewFactory {
             // first frame (PB-003). Recreating the view would also work but
             // discards any canvas state and costs a full measure/layout.
             advanced.updateCanvas(view, p);
+            return true;
+        }
+
+        // NativeView: re-apply the props to the live instance so a custom
+        // view keeps its state. A changed class name must rebuild instead,
+        // hence the explicit recreate signal.
+        if (node != null && "NativeView".equals(node.optString("type", ""))) {
+            String wanted = p.optString("viewClass", "").trim();
+            if (!wanted.isEmpty()
+                    && !wanted.equals(view.getClass().getName())) {
+                return false;   // updateProps() -> recreateInPlace()
+            }
+            // applyProps() promises the whole prop set, so hand it the stored
+            // node's props merged with this patch — not the patch alone.
+            applyNativeProps(view, mergeProps(node.optJSONObject("props"), p));
             return true;
         }
 

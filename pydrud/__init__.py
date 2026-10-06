@@ -161,7 +161,7 @@ from pydrud.widgets import (
     custom,
     Canvas, Paint, Path, radial_point,
     CameraPreview, QRScanner, MapView, Marker, RichText, Span, Markdown,
-    ReorderableList, InfiniteList,
+    ReorderableList, InfiniteList, NativeView,
     Expanded, Flexible, FractionallySizedBox, FittedBox, MetricCard, DataTable,
     Timeline, Align, ColoredBox, DecoratedBox, ConstrainedBox, LimitedBox,
     Gap, VerticalDivider,
@@ -360,6 +360,7 @@ __all__ = [
     "Markdown",
     "ReorderableList",
     "InfiniteList",
+    "NativeView",
     # Flutter-style presets and common compositions
     "Expanded",
     "Flexible",

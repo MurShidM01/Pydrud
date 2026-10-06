@@ -41,7 +41,7 @@ from pydrud.widgets.forms import (
 from pydrud.widgets.canvas import Canvas, Paint, Path, radial_point
 from pydrud.widgets.advanced import (
     CameraPreview, QRScanner, InfiniteList, MapView, Markdown, Marker,
-    ReorderableList, RichText, Span,
+    NativeView, ReorderableList, RichText, Span,
 )
 from pydrud.widgets.app_bar import AppBar
 from pydrud.widgets.scaffold import Scaffold
@@ -214,6 +214,7 @@ __all__ = [
     "Markdown",
     "ReorderableList",
     "InfiniteList",
+    "NativeView",
     # v1.5 — responsive layout
     "ResponsiveBuilder",
     "LayoutBuilder",
