@@ -85,6 +85,12 @@ unlimited-widget and unlimited-icon work.
   constraints instead of a hard-coded breakpoint
   (``c.max_width``, ``c.columns(180)``, ``c.is_tablet``, ``c.matches(...)``),
   re-run on every rotation, resize and foldable unfold.
+* **`NativeView`** — the §15.3 escape hatch: mount an arbitrary Android
+  `View` subclass by class name, with props applied through a
+  `applyProps(JSONObject)` method or mapped onto `setXxx` setters. The
+  instance is reused across updates (so a custom view keeps its state), a
+  changed class name rebuilds it, and every failure mode logs the reason
+  and renders an empty box instead of taking the frame down.
 * **`ExpansionPanelList`** / **`ExpansionPanel`** — an accordion set with
   optional single-open semantics. The list reads ``open_index`` (int,
   ``State``, ``Computed`` or callable) on every build and reports taps

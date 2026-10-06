@@ -981,6 +981,31 @@ fill, exactly like Flutter — put it between weighted children only when you
 | **`WebView`** (v1.2) | Embedded browser, 2-way `postMessage` | `url`, `html`, `on_load`, `on_message` |
 | **`VideoPlayer`** (v1.2) | Native video surface | `source`, `autoplay`, `loop`, `controls` |
 | **`Tooltip`** (v1.2) | Long-press hint | `message`, `child` |
+| **`NativeView`** (v2.0.3) | Mount any Android `View` subclass by class name | `view_class`, `props`, `style` |
+
+### Escape hatch — `NativeView`
+
+Any native control an app needs but Pydrud does not ship — a third-party
+chart, a game surface, an OEM widget — mounts by class name. No fork, no
+regenerated Java:
+
+```python
+from pydrud import NativeView
+
+NativeView("com.example.MyGauge",
+           props={"value": 0.42, "unit": "%"},
+           style={"width": 240, "height": 240})
+```
+
+The renderer constructs the class from `(Context)` with the app's own class
+loader, then applies props either through a
+`public void applyProps(org.json.JSONObject)` method (preferred) or by
+mapping each prop onto a `setXxx` setter (`"value"` → `setValue`), coercing
+the JSON value to the parameter type. A prop with no matching setter logs
+the setter it looked for; a class that cannot be loaded logs the reason and
+renders an empty box rather than taking the frame down. The view instance is
+reused across updates, so a custom view keeps its state — a changed class
+name is the one case that rebuilds it.
 
 ### Flutter-style presets and compositions
 
