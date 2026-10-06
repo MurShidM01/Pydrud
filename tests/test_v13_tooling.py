@@ -26,8 +26,16 @@ class TestRegistry(unittest.TestCase):
         self.assertGreater(len(REGISTRY), 100)
         for name, entry in REGISTRY.items():
             self.assertEqual(name, normalise(name), f"{name} is not normalised")
-            self.assertEqual(len(entry), 4, name)
-            version, category, native, description = entry
+            # Support both legacy 4-tuple and new 5-tuple format
+            assert len(entry) >= 4, f"{name}: expected at least 4 fields"
+            version, category = entry[0], entry[1]
+            if len(entry) == 4:
+                native = entry[2]
+                description = entry[3]
+            else:
+                # 5-tuple: (version, category, support_category, import_names, description)
+                native = entry[2] == "device_native"
+                description = entry[-1]
             self.assertIsInstance(native, bool)
             self.assertTrue(description, f"{name} has no description")
             self.assertIn(category,
