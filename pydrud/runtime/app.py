@@ -30,6 +30,15 @@ from pydrud.core.logcat import install as install_logcat
 from pydrud.core.logcat import log_exception
 from pydrud.widgets import Widget, assign_stable_keys, validate_tree_keys
 
+# Module-name helpers live in their own module so hot reload can use them
+# without importing this one. Re-exported here for backwards compatibility
+# (``pydrud.main`` does ``from pydrud.runtime.app import _module_name_for``).
+from pydrud.runtime._modules import (  # noqa: F401
+    _find_user_modules,
+    _module_name_for,
+    _module_name_from_path,
+)
+
 #: Above this many patches a full re-render is cheaper than patching.
 MAX_PATCHES = 60
 
@@ -2163,57 +2172,6 @@ class _Page:
             expand=1,
             children=[content, *self.floating],
         )
-
-
-# ── Helpers ──────────────────────────────────────────────────────────────────
-
-
-def _module_name_from_path(filepath: str) -> str:
-    """Convert relative filepath like 'app/screens/home.py' to 'app.screens.home'."""
-    clean = filepath.replace("\\", "/")
-    if clean.startswith("src/"):
-        clean = clean[4:]
-    if clean.endswith(".py"):
-        clean = clean[:-3]
-    parts = [p for p in clean.split("/") if p]
-    if parts and parts[-1] == "__init__":
-        parts.pop()
-    return ".".join(parts)
-
-
-def _module_name_for(filepath: str, project_root: str) -> str:
-    """Map ``<root>/src/app/main.py`` to the module name ``app.main``."""
-    try:
-        rel = os.path.relpath(os.path.abspath(filepath), os.path.abspath(project_root))
-    except ValueError:  # pragma: no cover — different drives on Windows
-        return ""
-    if rel.startswith(".."):
-        return ""
-    # Sources live under src/, which is the import root on the device.
-    rel = rel.replace(os.sep, "/")
-    if rel.startswith("src/"):
-        rel = rel[len("src/"):]
-    rel = rel[:-3] if rel.endswith(".py") else rel
-    parts = [p for p in rel.split("/") if p]
-    if parts and parts[-1] == "__init__":
-        parts.pop()
-    return ".".join(parts)
-
-
-def _find_user_modules(project_root: str) -> list[str]:
-    """Find all importable module names under the project's src/ directory."""
-    src_dir = os.path.join(project_root, "src")
-    modules: list[str] = []
-    if not os.path.isdir(src_dir):
-        return modules
-    for root, dirs, files in os.walk(src_dir):
-        dirs[:] = [d for d in dirs if d not in ("__pycache__", "pydrud")]
-        for fname in files:
-            if fname.endswith(".py"):
-                mod = _module_name_for(os.path.join(root, fname), project_root)
-                if mod:
-                    modules.append(mod)
-    return modules
 
 
 # ── Entry point for Chaquopy (called from Java) ──────────────────────────────
