@@ -23,7 +23,7 @@ from pydrud.core.tasks import TaskRunner
 from pydrud.core.diff import TreeDiff
 from pydrud.core.events import EventDispatcher
 from pydrud.core.bridge import BridgeProtocol
-from pydrud.core.protocol import MAX_FRAME_BYTES, RenderTransaction
+from pydrud.core.protocol import MAX_FRAME_BYTES, ProtocolError, RenderTransaction
 from pydrud.core.elements import ElementTree
 from pydrud.widgets import Widget, assign_stable_keys, validate_tree_keys
 
@@ -82,6 +82,11 @@ class App:
         self._confirmed_revision = 0
         self._inflight: dict[str, RenderTransaction] = {}
         self._inflight_trees: dict[str, Widget] = {}
+        #: Remaining frames of a chunked snapshot, sent one ACK at a time.
+        self._outbox: list[tuple[dict, str]] = []
+        #: The full tree a chunked snapshot is rebuilding, applied on the
+        #: final chunk's ACK.
+        self._outbox_final_tree: Optional[Widget] = None
         self._render_pending = False
         self._render_pending_force_snapshot = False
         self._native_capabilities: dict = {}
@@ -211,6 +216,8 @@ class App:
         self._snapshot = None
         self._inflight.clear()
         self._inflight_trees.clear()
+        self._outbox.clear()
+        self._outbox_final_tree = None
         self._render_pending = self._render_pending_force_snapshot = False
 
         try:
@@ -247,7 +254,16 @@ class App:
         self._send_desired_tree()
 
     def _send_desired_tree(self, *, force_snapshot: bool = False) -> None:
-        """Send the current desired tree when no render transaction is active."""
+        """Send the current desired tree when no render transaction is active.
+
+        The frame is *encoded before it is registered* as in-flight. When a
+        frame exceeds :data:`~pydrud.core.protocol.MAX_FRAME_BYTES` the old
+        order left a phantom transaction in ``_inflight`` and every later
+        render was deferred forever — a silent, permanent UI freeze. Now the
+        failure is rolled back, reported loudly, and an oversized snapshot is
+        split into a sequence of frames that each fit (see
+        :meth:`_plan_snapshot_frames`).
+        """
         if not (self._connected and self._transport):
             return
         if self._inflight:
@@ -262,10 +278,9 @@ class App:
             return
 
         base_revision = self._confirmed_revision
-        self._desired_revision = max(self._desired_revision, base_revision) + 1
         old = self._snapshot
-        kind = "snapshot"
-        payload = {"tree": desired.to_dict()}
+
+        # 1. Prefer the smallest patch that transforms the confirmed snapshot.
         if not force_snapshot and old is not None:
             try:
                 patches = TreeDiff.diff(old, desired)
@@ -274,21 +289,169 @@ class App:
             else:
                 if not patches:
                     return
-                kind = "patch" if len(patches) <= MAX_PATCHES else "snapshot"
-                payload = (
-                    {"patches": [p.to_dict() for p in patches]}
-                    if kind == "patch" else {"tree": desired.to_dict()}
-                )
+                patch_payload = {"patches": [p.to_dict() for p in patches]}
+                # A large patch batch is still cheaper than a snapshot when
+                # it fits the frame — only fall back to a snapshot when it
+                # does not, so a big list does not bounce into a full render.
+                if len(patches) <= MAX_PATCHES or self._fits_frame(patch_payload):
+                    if self._send_payload(patch_payload, "patch", base_revision,
+                                          snapshot_tree=desired.clone()):
+                        return
 
+        # 2. Full snapshot. Try it whole first, then split it if needed.
+        snapshot_payload = {"tree": desired.to_dict()}
+        if self._send_payload(snapshot_payload, "snapshot", base_revision,
+                              snapshot_tree=desired.clone()):
+            return
+        if self._send_chunked_snapshot(desired, base_revision):
+            return
+
+        # 3. Nothing fit — report loudly rather than wedging the UI.
+        self._report_error(ProtocolError(
+            "render frame exceeds the maximum size of "
+            f"{MAX_FRAME_BYTES} bytes even after splitting; a single widget "
+            "is too large to send"))
+
+    def _fits_frame(self, payload: dict) -> bool:
+        """True when *payload* encodes inside the transport frame limit."""
+        return self._try_encode_payload(payload, 1, 0) is not None
+
+    def _try_encode_payload(self, payload: dict, revision: int,
+                            base_revision: int) -> Optional[str]:
+        """Encode a transaction, returning ``None`` (not raising) when too big."""
         tx = RenderTransaction.create(
-            revision=self._desired_revision,
-            base_revision=base_revision,
-            kind=kind,
+            revision=revision, base_revision=base_revision,
+            kind=("patch" if "patches" in payload else "snapshot"),
             payload=payload,
         )
+        try:
+            return self._bridge.encode_transaction(tx)
+        except ProtocolError:
+            return None
+
+    def _send_payload(self, payload: dict, kind: str, base_revision: int,
+                      *, snapshot_tree: Optional[Widget] = None) -> bool:
+        """Register and send one render transaction.
+
+        Returns ``False`` (leaving no in-flight state behind) when the frame
+        is too large to encode, so the caller can recover.
+        """
+        revision = max(self._desired_revision, base_revision) + 1
+        tx = RenderTransaction.create(
+            revision=revision, base_revision=base_revision,
+            kind=kind, payload=payload,
+        )
+        try:
+            encoded = self._bridge.encode_transaction(tx)
+        except ProtocolError:
+            return False
+        self._desired_revision = revision
         self._inflight[tx.tx_id] = tx
-        self._inflight_trees[tx.tx_id] = desired.clone()
-        self._send(self._bridge.encode_transaction(tx))
+        self._inflight_trees[tx.tx_id] = snapshot_tree
+        self._send(encoded)
+        return True
+
+    def _send_chunked_snapshot(self, desired: Widget, base_revision: int) -> bool:
+        """Send an oversized tree as a shallow snapshot plus create patches.
+
+        The first frame is a snapshot carrying as much of the tree as fits;
+        every omitted subtree is then streamed as ``create`` patches (parents
+        before children) in follow-up frames, one per native ACK. The full
+        tree becomes the confirmed snapshot once the final frame is acked.
+        """
+        frames = self._plan_snapshot_frames(desired.to_dict())
+        if not frames:
+            return False
+        payload, kind = frames[0]
+        if not self._send_payload(payload, kind, base_revision):
+            return False
+        self._outbox = list(frames[1:])
+        self._outbox_final_tree = desired.clone()
+        return True
+
+    def _flush_outbox(self) -> None:
+        """Send the next queued chunked-snapshot frame after an ACK."""
+        if not self._outbox:
+            self._outbox_final_tree = None
+            return
+        payload, kind = self._outbox.pop(0)
+        is_last = not self._outbox
+        tree = self._outbox_final_tree if is_last else None
+        if not self._send_payload(payload, kind, self._confirmed_revision,
+                                  snapshot_tree=tree):
+            self._outbox.clear()
+            self._outbox_final_tree = None
+            self._report_error(ProtocolError(
+                "a widget subtree is too large to stream over the bridge"))
+            return
+        if is_last:
+            self._outbox_final_tree = None
+
+    @staticmethod
+    def _plan_snapshot_frames(tree: dict) -> list[tuple[dict, str]]:
+        """Split a serialised tree into frames that each fit the limit.
+
+        Returns ``[(payload, kind), ...]`` where the first entry is a shallow
+        ``snapshot`` and the rest are ``patch`` frames of ``create`` ops.
+        Children are included breadth-first while they fit; anything left out
+        is materialised later, parents before children, so the native node
+        map stays consistent. A tree that already fits yields a single
+        snapshot frame, so the common case is unchanged.
+        """
+        limit = MAX_FRAME_BYTES
+        # Leave headroom for the transaction envelope and JSON punctuation.
+        budget = max(4096, int(limit * 0.75))
+
+        def shallow(node: dict) -> dict:
+            out = {k: v for k, v in node.items() if k != "children"}
+            out["children"] = []
+            return out
+
+        def size(value) -> int:
+            try:
+                return len(json.dumps(value, separators=(",", ":"), default=str))
+            except Exception:
+                return limit  # treat unserialisable as "too big" — defer it
+
+        root_shallow = shallow(tree)
+        frame_size = size(root_shallow)
+        deferred: list[tuple[str, int, dict]] = []
+        queue = [(tree, root_shallow)]
+        while queue:
+            src, dst = queue.pop(0)
+            for index, child in enumerate(src.get("children") or []):
+                child_size = size(child)
+                if frame_size + child_size <= budget:
+                    child_shallow = shallow(child)
+                    dst["children"].append(child_shallow)
+                    frame_size += child_size
+                    queue.append((child, child_shallow))
+                else:
+                    deferred.append((src.get("key", ""), index, child))
+
+        frames: list[tuple[dict, str]] = [({"tree": root_shallow}, "snapshot")]
+
+        # Stream the omitted subtrees as create patches, parents first.
+        patch: list[dict] = []
+        patch_size = 0
+        work = list(deferred)
+        while work:
+            parent_key, index, child = work.pop(0)
+            child_shallow = shallow(child)
+            entry = {"op": "create", "key": child.get("key", ""),
+                     "parent_key": parent_key, "index": index,
+                     "tree": child_shallow}
+            entry_size = size(entry)
+            if patch and patch_size + entry_size > budget:
+                frames.append(({"patches": patch}, "patch"))
+                patch, patch_size = [], 0
+            patch.append(entry)
+            patch_size += entry_size
+            for grand_index, grand in enumerate(child.get("children") or []):
+                work.append((child.get("key", ""), grand_index, grand))
+        if patch:
+            frames.append(({"patches": patch}, "patch"))
+        return frames
 
     def update_widget(self, *widgets: Widget) -> None:
         """Compatibility API: merge explicit widget mutations into the desired tree."""
@@ -827,6 +990,8 @@ class App:
         self._desired_revision = 0
         self._inflight.clear()
         self._inflight_trees.clear()
+        self._outbox.clear()
+        self._outbox_final_tree = None
 
         # Re-import user modules (parents before children)
         user_modules = [m for m in list(sys.modules.keys()) if m.startswith("app.") or m == "app" or m == "main"]
@@ -1267,6 +1432,8 @@ class App:
             self._cancel_pending()
             self._inflight.clear()
             self._inflight_trees.clear()
+            self._outbox.clear()
+            self._outbox_final_tree = None
             self._render_pending = False
             if self._transport:
                 try:
@@ -1420,6 +1587,11 @@ class App:
             self._confirmed_revision = revision
             if sent_tree is not None:
                 self._snapshot = sent_tree.clone()
+            # A chunked snapshot streams one frame per ACK; only the last
+            # frame carries the full tree, which becomes the new snapshot.
+            if self._outbox:
+                self._flush_outbox()
+                return
             if self._render_pending:
                 self._render_pending = False
                 self._send_desired_tree()
@@ -1428,16 +1600,19 @@ class App:
         self._confirmed_revision = int(data.get("native_revision", 0) or 0)
         if self._desired_tree is None or not (self._connected and self._transport):
             return
-        self._desired_revision = max(self._desired_revision, self._confirmed_revision) + 1
-        recovery = RenderTransaction.create(
-            revision=self._desired_revision,
-            base_revision=self._confirmed_revision,
-            kind="snapshot",
-            payload={"tree": self._desired_tree.to_dict()},
-        )
-        self._inflight[recovery.tx_id] = recovery
-        self._inflight_trees[recovery.tx_id] = self._desired_tree.clone()
-        self._send(self._bridge.encode_transaction(recovery))
+        # A rejected frame invalidates any half-streamed snapshot too.
+        self._outbox.clear()
+        self._outbox_final_tree = None
+        desired = self._desired_tree
+        payload = {"tree": desired.to_dict()}
+        if self._send_payload(payload, "snapshot", self._confirmed_revision,
+                              snapshot_tree=desired.clone()):
+            return
+        if self._send_chunked_snapshot(desired, self._confirmed_revision):
+            return
+        self._report_error(ProtocolError(
+            "render recovery frame exceeds the maximum size of "
+            f"{MAX_FRAME_BYTES} bytes"))
 
     def _handle_ready(self, d: dict) -> None:
         """First contact: negotiate native capabilities, then render."""
