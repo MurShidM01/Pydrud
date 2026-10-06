@@ -290,7 +290,7 @@ def _keyless_fingerprint(widget: Widget) -> str:
         try:
             payload = {
                 "type": node._widget_type,
-                "props": node._serialise_props(),
+                "props": node._current_props(),
                 "style": node.style,
                 "expand": node.expand,
                 "visible": node.visible,
@@ -307,10 +307,16 @@ def _keyless_fingerprint(widget: Widget) -> str:
 
 
 def _changed_props(old: Widget, new: Widget) -> dict:
-    """Return a dict of changed properties, or empty dict if none."""
+    """Return a dict of changed properties, or empty dict if none.
+
+    The *old* side uses its frozen props (PB-004): re-serialising it would
+    re-run a ``Canvas`` painter against the live state and make the two trees
+    look identical. The *new* side is re-serialised fresh so an in-place
+    mutation followed by ``page.update(widget)`` is still detected.
+    """
     changed: dict = {}
-    old_p = old._serialise_props()
-    new_p = new._serialise_props()
+    old_p = old._current_props()
+    new_p = new._freeze_props()
 
     all_keys = set(old_p.keys()) | set(new_p.keys())
     for k in all_keys:

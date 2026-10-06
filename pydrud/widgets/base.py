@@ -182,6 +182,26 @@ class Widget:
         """Override in subclasses to add widget-specific properties."""
         return dict(self._extra)
 
+    def _freeze_props(self) -> dict:
+        """Snapshot this widget's serialised props for the current build.
+
+        The diff engine compares these frozen values (PB-004). Widgets whose
+        serialisation is *dynamic* — a ``Canvas`` re-runs its ``on_draw``
+        painter — would otherwise be re-serialised against the live state at
+        diff time, so the old and new trees would look identical and the diff
+        would emit zero patches (a silent freeze).
+        """
+        frozen = self._serialise_props()
+        self.__dict__["_props_cache"] = frozen
+        return frozen
+
+    def _current_props(self) -> dict:
+        """The props frozen for this build, or a fresh snapshot if unfrozen."""
+        cached = self.__dict__.get("_props_cache")
+        if cached is None:
+            return self._freeze_props()
+        return cached
+
     def _serialise_self(self) -> dict:
         """This node's own serialised fields (``children`` left empty).
 
@@ -189,7 +209,13 @@ class Widget:
         Override this — not :meth:`to_dict` — when a widget renders as a
         different native node (``FloatingActionButton`` serialises as a
         ``Container``), so the tree stays depth-safe.
+
+        ``on_draw``-style painters still run on every serialisation (that is
+        the documented contract), and the result becomes the build's frozen
+        props so the diff compares like with like.
         """
+        props = self._serialise_props()
+        self.__dict__["_props_cache"] = props
         return {
             "type": self._widget_type,
             "key": self.key,
@@ -199,7 +225,7 @@ class Widget:
             "tooltip": self.tooltip,
             "has_events": bool(self.event_handlers),
             "events": sorted(self.event_handlers.keys()),
-            "props": _serialise_value(self._serialise_props()),
+            "props": _serialise_value(props),
             "children": [],
         }
 

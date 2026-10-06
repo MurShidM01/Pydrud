@@ -709,7 +709,9 @@ class App:
         stack: list[tuple[Widget, Optional[str], int]] = [(tree, None, 0)]
         while stack:
             widget, parent_key, index = stack.pop()
-            props = widget._serialise_props()
+            # Freeze the build's props now (PB-004) so the diff compares the
+            # values that were actually rendered, not a fresh re-serialisation.
+            props = widget._freeze_props()
             element, _ = self._elements.upsert(
                 widget.key,
                 widget._widget_type,

@@ -220,6 +220,20 @@ class Canvas(Widget):
 
     ``size``/``w``/``h`` are dp (see :attr:`size`), so pixel-accurate
     drawing no longer means guessing the layout size.
+
+    Painter contract
+    ----------------
+    ``on_draw`` runs once per build and its recorded commands are *frozen*
+    for that build, so a painter may safely read shared mutable state (the
+    game-loop pattern) — the diff compares the frozen frame against the next
+    frame and emits an update when it changes::
+
+        scene = {"x": 0.1}
+        Canvas(on_draw=lambda c: c.circle(scene["x"], 0.5, 0.05))
+        scene["x"] = 0.9        # next rebuild repaints at the new position
+
+    A painter that raises is logged, keeps whatever it drew and leaves the
+    exception on :attr:`last_draw_error`; it never takes down the rebuild.
     """
 
     _widget_type = "Canvas"
