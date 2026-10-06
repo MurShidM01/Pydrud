@@ -1699,7 +1699,7 @@ public class ViewFactory {
             eventDispatcher.subscribe(key, events.toArray(new String[0]));
         }
         if ("PopupMenu".equals(json.optString("type", ""))) {
-            bindPopupMenu(view, json, key);
+            bindPopupMenu(view, json, key, events);
             return;
         }
 
@@ -1818,12 +1818,18 @@ public class ViewFactory {
      * <p>The menu is rebuilt from the node's props on every tap, so an item
      * added or renamed by a later patch is always the one shown. Choosing an
      * entry dispatches a {@code select} event carrying the item's index and
-     * value. A caller-supplied trigger keeps its own feedback, so the ripple
-     * is only added to the built-in overflow button.
+     * value; the tap itself also fires a {@code click} when Python subscribed
+     * to one, so an ``on_click`` handler is not silently dropped. A
+     * caller-supplied trigger keeps its own feedback, so the ripple is only
+     * added to the built-in overflow button.
      */
-    private void bindPopupMenu(View view, JSONObject json, String key) {
+    private void bindPopupMenu(View view, JSONObject json, String key,
+                               List<String> events) {
         view.setClickable(true);
-        view.setOnClickListener(v -> showPopupMenu(v, json, key));
+        view.setOnClickListener(v -> {
+            if (events.contains("click")) eventDispatcher.dispatch("click", key);
+            showPopupMenu(v, json, key);
+        });
         if (!props(json).optBoolean("customTrigger", false)) {
             PydrudTheme.addCircleRipple(view, PydrudTheme.rippleOn(PydrudTheme.surface));
             PydrudTheme.pressFeedback(view, 0.9f, 0f, 0f);
@@ -1895,9 +1901,22 @@ public class ViewFactory {
         }
     }
 
-    private void applyMenuIcon(android.view.MenuItem entry, String icon, int tint) {
-        if (entry == null || icon.isEmpty()) return;
-        entry.setIcon(factory.icon(icon, tint, dp(20)));
+    /**
+     * Give an entry its icon.
+     *
+     * <p>Two overloads because a submenu is a {@link android.view.Menu}, not a
+     * {@link android.view.MenuItem} — they are unrelated types and both expose
+     * a {@code setIcon}. The parameter is named {@code name} so it does not
+     * shadow this class's own {@code icon(...)} helper.
+     */
+    private void applyMenuIcon(android.view.MenuItem entry, String name, int tint) {
+        if (entry == null || name.isEmpty()) return;
+        entry.setIcon(icon(name, tint, dp(20)));
+    }
+
+    private void applyMenuIcon(android.view.SubMenu submenu, String name, int tint) {
+        if (submenu == null || name.isEmpty()) return;
+        submenu.setIcon(icon(name, tint, dp(20)));
     }
 
     /**
