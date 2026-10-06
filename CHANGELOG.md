@@ -34,11 +34,14 @@ unlimited-widget and unlimited-icon work.
   native style applier now re-applies absolute offsets and gravity, so
   absolute positioning is no longer create-only.
 * **PB-005 — unknown icon names are loud, and the vocabulary is complete.**
-  The renderer logs an unknown icon once per name (never silently drawing
-  “?”), the Python side gained `pydrud.icons.available()` / `has()` and an
-  analyzer rule, and the Material names developers actually copy
-  (`play_arrow`, `rocket_launch`, `emoji_events`, `sports_esports`, `bolt`,
-  `speed`, `replay`, …) are aliased to renderer-backed icons.
+  The renderer logs an unknown icon once per name under the stable `Pydrud`
+  tag (never silently drawing “?”), the Python side gained
+  `pydrud.icons.available()` / `has()` / `suggest()` and an analyzer rule,
+  and the Material names developers actually copy (`play_arrow`,
+  `rocket_launch`, `emoji_events`, `sports_esports`, `bolt`, `speed`,
+  `replay`, …) are aliased to renderer-backed icons. The catalogue is now
+  **176 paths + 178 aliases**, and `Icon.svg("M…")` renders arbitrary 24×24
+  path data so the set is effectively unlimited.
 * **PB-007 — layout model parity.** `Row`/`Column` gained
   `main_axis_size`/`cross_axis_size`, nested layouts no longer default to
   `MATCH_PARENT`, and a horizontal row of unweighted fill-width children is

@@ -381,8 +381,28 @@ AppBar(title="Search", density="compact")  # per-screen compact / normal / comfo
 Divider(indent=56)                   # inset rule, theme coloured
 ```
 
-Icons are real vectors now: 172 paths (plus aliases) drawn at any size
-and colour, with 123 named constants on `Icons`.
+Icons are real vectors: **176 paths + 178 aliases** (≈350 names) drawn at any
+size and colour, with 123 named constants on `Icons`. The catalogue now also
+carries the Material Symbols names developers copy from the docs
+(`play_arrow`, `rocket_launch`, `emoji_events`, `sports_esports`, `bolt`,
+`shuffle`, …) and reports unknown names instead of silently rendering "?":
+
+```python
+from pydrud import Icon, icons
+
+icons.has("rocket_launch")      # True
+icons.has("rocket_lunch")       # False
+icons.suggest("rocket_lunch")   # ['rocket_launch', 'rocket']
+sorted(icons.available())[:5]   # the full supported set
+
+Icon("play_arrow")                                  # a shipped name or alias
+Icon.svg("M12,2 L22,12 L12,22 L2,12 Z")            # any 24x24 path data
+```
+
+`Icon.svg(...)` renders arbitrary vector path data, so an app can ship its own
+iconography without touching the framework — the icon set is effectively
+unlimited. An unknown name logs `unknown icon '...'` under the stable `Pydrud`
+logcat tag **and** is flagged by `pydrud analyze`.
 
 ### Upgrading an existing project
 
@@ -856,7 +876,7 @@ pydrud build    # proxy forwarded to Gradle automatically
 | `Button` | Clickable button | `text`, `variant` (filled / outlined / text), `icon`, `bg_color`, `color`, `disabled` |
 | `TextField` | Text input | `value`, `hint`, `multiline`, `password` |
 | `Image` | Display image | `src` (asset or URL), `fit` |
-| `Icon` | Material icon | `name` (star, home, search, ...), `size`, `color` |
+| `Icon` | Material icon, or any 24x24 path via `Icon.svg(...)` | `name` (see `pydrud.icons.available()`), `size`, `color` |
 | `Checkbox` | Checkable box | `label`, `checked` |
 | `Switch` | Toggle switch; labelled switches put text left and control right | `label`, `active`, `full_width` |
 | **`ProgressBar`** (v1.1) | Determinate or spinning progress | `value` (0-1), `indeterminate`, `circular`, `color` |
