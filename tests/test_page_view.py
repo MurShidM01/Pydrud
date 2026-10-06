@@ -13,7 +13,7 @@ import os
 import re
 import unittest
 
-from pydrud import Carousel, Column, PageView, Text
+from pydrud import Carousel, PageView, Text
 from pydrud.core.diff import TreeDiff
 from pydrud.testing import AppTester
 

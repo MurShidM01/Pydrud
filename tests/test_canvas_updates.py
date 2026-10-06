@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from pydrud import App, Canvas, Column
+from pydrud import Canvas, Column
 from pydrud.core.diff import TreeDiff
 from pydrud.testing import AppTester
 

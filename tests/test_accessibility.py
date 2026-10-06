@@ -20,7 +20,7 @@ import os
 import re
 import unittest
 
-from pydrud import (Button, Colors, Column, Container, Icon, IconButton,
+from pydrud import (Button, Colors, Column, Container, IconButton,
                     Icons, State, Text)
 from pydrud.commands.analyzer import _analyze_file
 from pydrud.core.diff import TreeDiff

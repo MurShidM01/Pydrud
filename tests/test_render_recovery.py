@@ -12,7 +12,6 @@ assert that a large tree is streamed (chunked) and that rendering recovers.
 
 from __future__ import annotations
 
-import pytest
 
 from pydrud import App, Column, State, Text
 from pydrud.testing import AppTester

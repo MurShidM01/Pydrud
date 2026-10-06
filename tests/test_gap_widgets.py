@@ -11,7 +11,6 @@ from __future__ import annotations
 import unittest
 
 from pydrud import (
-    Column,
     Constraints,
     ExpansionPanel,
     ExpansionPanelList,

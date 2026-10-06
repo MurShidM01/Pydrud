@@ -12,7 +12,7 @@ import re
 import unittest
 from pathlib import Path
 
-from pydrud import Column, Container, Row
+from pydrud import Column, Row
 from pydrud.commands.analyzer import _analyze_file
 
 VIEW_FACTORY = (Path(__file__).resolve().parent.parent / "pydrud" / "android"

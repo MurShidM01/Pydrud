@@ -14,7 +14,6 @@ from __future__ import annotations
 import unittest
 
 from pydrud import (
-    Colors,
     Text,
     TextTheme,
     Theme,
