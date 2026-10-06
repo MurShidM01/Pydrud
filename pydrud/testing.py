@@ -631,18 +631,29 @@ class AppTester:
         """Wait until the app has handled everything this test has sent.
 
         An empty queue is not enough on its own: an event can still be in
-        flight on the socket, which used to make taps look like no-ops.
-        So we first wait for the app's handled-event counter to catch up
-        with the number of lines the device has written, then for the
-        queue to drain (handlers may enqueue follow-up work).
+        flight on the socket, and a handler may hop back onto the UI thread
+        (``run_on_ui``) or trigger a State-driven render a moment later — so
+        a single quiet check used to read the *previous* frame (IC-001).
+
+        We therefore wait for the app's handled-event counter to catch up,
+        then for two consecutive observations in which nothing is queued,
+        nothing is in flight and the confirmed render revision has not
+        moved. That is render convergence: a late State-driven rebuild
+        changes the revision (or the queues) and keeps us waiting.
         """
         deadline = time.time() + timeout
         target = self.device.events_sent
+        stable = 0
+        previous = None
         while time.time() < deadline:
-            if self._quiet(target):
-                time.sleep(0.01)
-                if self._quiet(target):
+            epoch = self._epoch(target)
+            if self._quiet(target) and epoch == previous:
+                stable += 1
+                if stable >= 2:
                     return self
+            else:
+                stable = 0
+            previous = epoch
             time.sleep(0.005)
         return self
 
@@ -655,8 +666,30 @@ class AppTester:
         """True when the fake device has received a connection from the app."""
         return self.device._connected.is_set() and getattr(self.app, "_running", False)
 
+    def _epoch(self, target: int) -> tuple:
+        """A fingerprint of everything that can still change the UI."""
+        app = self.app
+        ui_queue = getattr(app, "_ui_queue", None)
+        return (
+            app._events_handled >= target,
+            app._event_queue.qsize(),
+            ui_queue.qsize() if ui_queue is not None else 0,
+            getattr(app, "_confirmed_revision", 0),
+            getattr(app, "_desired_revision", 0),
+            bool(getattr(app, "_render_pending", False)),
+            bool(getattr(app, "_inflight", None)),
+        )
+
     def _quiet(self, target: int) -> bool:
-        """True when nothing is in flight in either direction."""
+        """True when nothing is in flight in either direction.
+
+        ``_ui_queue`` is deliberately *not* checked here: a queued UI
+        callback is always paired with a ``__ui__`` wake-up on the event
+        queue, so waiting on the event queue already covers it — and
+        treating the callback queue alone as "busy" could spin forever if
+        the wake-up were ever lost. It still feeds :meth:`_epoch`, so a
+        callback that drains mid-wait keeps us waiting.
+        """
         app = self.app
         if app._events_handled < target or not app._event_queue.empty():
             return False
