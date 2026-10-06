@@ -1,12 +1,14 @@
 """
-Python package management for Android — ``pydrud pip add <name>``.
+Python package management for Pydrud projects.
 
-Apps built with Pydrud embed CPython through Chaquopy, which can install
-packages from PyPI *at build time*. Not everything works: a package has to
-be pure Python, or be one of the native wheels Chaquopy publishes for
-Android ABIs. Installing something unsupported fails deep inside Gradle
-with an unhelpful error, so Pydrud keeps a curated registry and refuses
-early with an explanation.
+Supports two runtimes:
+
+* ``chaquopy`` — packages are bundled into the APK via Chaquopy's
+  Gradle ``pip { install(...) }`` block at build time. Only verified
+  packages can be added without ``--force``.
+* ``pydash`` — packages run on the host side only; they cannot be
+  bundled into an APK. The CLI validates against the registry and
+  prints guidance instead of touching Gradle files.
 
     pydrud pip add yt-dlp requests
     pydrud pip list
@@ -16,184 +18,222 @@ early with an explanation.
 
 Dependencies are recorded in ``pydrud.toml`` under ``[python.packages]``
 and injected into ``app/build.gradle.kts`` inside Chaquopy's
-``python { pip { install(...) } }`` block.
+``python { pip { install(...) } }`` block for chaquopy projects.
 """
 
 from __future__ import annotations
 
 import os
 import re
+from enum import Enum
 from typing import Iterable, Optional
+from dataclasses import dataclass
 
-#: name → (version spec, category, needs ABI wheel, one-line description)
-REGISTRY: dict[str, tuple[str, str, bool, str]] = {
+
+class SupportCategory(Enum):
+    """What category of dependency this package is."""
+    NATIVE_EQUIVALENT = "native_equivalent"   # works on Android via Chaquopy wheel or pure Python
+    HOST_ONLY = "host_only"                    # desktop-only, will never work on device
+    DEVICE_NATIVE = "device_native"            # needs native ABI wheel for Android
+    UNSUPPORTED = "unsupported"                # explicitly blocked
+
+
+#: name → (version spec, category, support_category, import_names, description)
+REGISTRY: dict[str, tuple[str, str, str, tuple[str, ...], str]] = {
     # ── networking & APIs ───────────────────────────────────────────────
-    "requests": ("", "network", False, "The classic HTTP client"),
-    "httpx": ("", "network", False, "Async-capable HTTP client"),
-    "urllib3": ("", "network", False, "Low-level HTTP plumbing"),
-    "certifi": ("", "network", False, "Mozilla CA bundle for TLS"),
-    "charset-normalizer": ("", "network", False, "Encoding detection"),
-    "idna": ("", "network", False, "Internationalised domain names"),
-    "websockets": ("", "network", False, "WebSocket client and server"),
-    "websocket-client": ("", "network", False, "Blocking WebSocket client"),
-    "aiohttp": ("", "network", True, "Async HTTP client/server"),
-    "sseclient-py": ("", "network", False, "Server-sent events"),
-    "paho-mqtt": ("", "network", False, "MQTT client for IoT devices"),
-    "feedparser": ("", "network", False, "RSS and Atom parsing"),
-    "yt-dlp": ("", "media", False, "Download video/audio from 1000+ sites"),
-    "youtube-search-python": ("", "media", False, "Search YouTube without an API key"),
-    "pytube": ("", "media", False, "Lightweight YouTube downloader"),
-    "instaloader": ("", "media", False, "Download Instagram media"),
-    "telethon": ("", "network", False, "Telegram MTProto client"),
-    "tweepy": ("", "network", False, "Twitter/X API client"),
-    "praw": ("", "network", False, "Reddit API client"),
-    "googletrans": ("4.0.0rc1", "network", False, "Unofficial Google Translate"),
-    "deep-translator": ("", "network", False, "Translation via many providers"),
-    "wikipedia": ("", "network", False, "Wikipedia article search"),
-    "geopy": ("", "network", False, "Geocoding and distance maths"),
-    "python-dotenv": ("", "utility", False, "Load .env configuration"),
+    "requests": ("", "network", "native_equivalent", ("requests",), "The classic HTTP client"),
+    "httpx": ("", "network", "native_equivalent", ("httpx",), "Async-capable HTTP client"),
+    "urllib3": ("", "network", "native_equivalent", ("urllib3",), "Low-level HTTP plumbing"),
+    "certifi": ("", "network", "native_equivalent", ("certifi",), "Mozilla CA bundle for TLS"),
+    "charset-normalizer": ("", "network", "native_equivalent", ("charset_normalizer",), "Encoding detection"),
+    "idna": ("", "network", "native_equivalent", ("idna",), "Internationalised domain names"),
+    "websockets": ("", "network", "native_equivalent", ("websockets",), "WebSocket client and server"),
+    "websocket-client": ("", "network", "native_equivalent", ("websocket_client",), "Blocking WebSocket client"),
+    "aiohttp": ("", "network", "device_native", ("aiohttp",), "Async HTTP client/server"),
+    "sseclient-py": ("", "network", "native_equivalent", ("sseclient_py",), "Server-sent events"),
+    "paho-mqtt": ("", "network", "native_equivalent", ("paho",), "MQTT client for IoT devices"),
+    "feedparser": ("", "network", "native_equivalent", ("feedparser",), "RSS and Atom parsing"),
+    "yt-dlp": ("", "media", "device_native", ("yt_dlp",), "Download video/audio from 1000+ sites"),
+    "youtube-search-python": ("", "media", "native_equivalent", ("youtube_search",), "Search YouTube without an API key"),
+    "pytube": ("", "media", "native_equivalent", ("pytube",), "Lightweight YouTube downloader"),
+    "instaloader": ("", "media", "native_equivalent", ("instaloader",), "Download Instagram media"),
+    "telethon": ("", "network", "native_equivalent", ("telethon",), "Telegram MTProto client"),
+    "tweepy": ("", "network", "native_equivalent", ("tweepy",), "Twitter/X API client"),
+    "praw": ("", "network", "native_equivalent", ("praw",), "Reddit API client"),
+    "googletrans": ("4.0.0rc1", "network", "native_equivalent", ("googletrans",), "Unofficial Google Translate"),
+    "deep-translator": ("", "network", "native_equivalent", ("deep_translator",), "Translation via many providers"),
+    "wikipedia": ("", "network", "native_equivalent", ("wikipedia",), "Wikipedia article search"),
+    "geopy": ("", "network", "native_equivalent", ("geopy",), "Geocoding and distance maths"),
+    "python-dotenv": ("", "utility", "native_equivalent", ("dotenv",), "Load .env configuration"),
 
     # ── data & parsing ──────────────────────────────────────────────────
-    "beautifulsoup4": ("", "parsing", False, "HTML/XML scraping"),
-    "soupsieve": ("", "parsing", False, "CSS selectors for BeautifulSoup"),
-    "lxml": ("", "parsing", True, "Fast XML/HTML parser (Chaquopy wheel)"),
-    "html5lib": ("", "parsing", False, "Spec-compliant HTML parser"),
-    "markdownify": ("", "parsing", False, "HTML → Markdown"),
-    "markdown": ("", "parsing", False, "Markdown → HTML"),
-    "pyyaml": ("", "parsing", True, "YAML parsing (Chaquopy wheel)"),
-    "toml": ("", "parsing", False, "TOML reader"),
-    "tomli": ("", "parsing", False, "Fast TOML reader"),
-    "orjson": ("", "parsing", True, "Very fast JSON (Chaquopy wheel)"),
-    "ujson": ("", "parsing", True, "Fast JSON (Chaquopy wheel)"),
-    "jsonschema": ("", "parsing", False, "Validate JSON documents"),
-    "python-dateutil": ("", "utility", False, "Flexible date parsing"),
-    "pytz": ("", "utility", False, "Timezone database"),
-    "tzdata": ("", "utility", False, "IANA timezones for zoneinfo"),
-    "arrow": ("", "utility", False, "Human-friendly datetimes"),
-    "humanize": ("", "utility", False, "Human-readable sizes and durations"),
-    "chardet": ("", "parsing", False, "Character encoding detection"),
-    "xmltodict": ("", "parsing", False, "XML as nested dicts"),
-    "csvkit": ("", "parsing", False, "CSV utilities"),
-    "openpyxl": ("", "documents", False, "Read and write .xlsx workbooks"),
-    "et-xmlfile": ("", "documents", False, "openpyxl dependency"),
-    "python-docx": ("", "documents", False, "Read and write .docx"),
-    "pypdf": ("", "documents", False, "Pure-Python PDF reading/merging"),
-    "reportlab": ("", "documents", True, "Generate PDFs (Chaquopy wheel)"),
-    "qrcode": ("", "media", False, "Generate QR codes"),
-    "python-barcode": ("", "media", False, "Generate barcodes"),
-    "pyzbar": ("", "media", True, "Decode QR/barcodes (needs zbar wheel)"),
+    "beautifulsoup4": ("", "parsing", "native_equivalent", ("bs4",), "HTML/XML scraping"),
+    "soupsieve": ("", "parsing", "native_equivalent", ("soupsieve",), "CSS selectors for BeautifulSoup"),
+    "lxml": ("", "parsing", "device_native", ("lxml",), "Fast XML/HTML parser (Chaquopy wheel)"),
+    "html5lib": ("", "parsing", "native_equivalent", ("html5lib",), "Spec-compliant HTML parser"),
+    "markdownify": ("", "parsing", "native_equivalent", ("markdownify",), "HTML → Markdown"),
+    "markdown": ("", "parsing", "native_equivalent", ("markdown",), "Markdown → HTML"),
+    "pyyaml": ("", "parsing", "device_native", ("yaml",), "YAML parsing (Chaquopy wheel)"),
+    "toml": ("", "parsing", "native_equivalent", ("toml",), "TOML reader"),
+    "tomli": ("", "parsing", "native_equivalent", ("tomli",), "Fast TOML reader"),
+    "orjson": ("", "parsing", "device_native", ("orjson",), "Very fast JSON (Chaquopy wheel)"),
+    "ujson": ("", "parsing", "device_native", ("ujson",), "Fast JSON (Chaquopy wheel)"),
+    "jsonschema": ("", "parsing", "native_equivalent", ("jsonschema",), "Validate JSON documents"),
+    "python-dateutil": ("", "utility", "native_equivalent", ("dateutil",), "Flexible date parsing"),
+    "pytz": ("", "utility", "native_equivalent", ("pytz",), "Timezone database"),
+    "tzdata": ("", "utility", "native_equivalent", ("tzdata",), "IANA timezones for zoneinfo"),
+    "arrow": ("", "utility", "native_equivalent", ("arrow",), "Human-friendly datetimes"),
+    "humanize": ("", "utility", "native_equivalent", ("humanize",), "Human-readable sizes and durations"),
+    "chardet": ("", "parsing", "native_equivalent", ("chardet",), "Character encoding detection"),
+    "xmltodict": ("", "parsing", "native_equivalent", ("xmltodict",), "XML as nested dicts"),
+    "csvkit": ("", "parsing", "native_equivalent", ("csvkit",), "CSV utilities"),
+    "openpyxl": ("", "documents", "native_equivalent", ("openpyxl",), "Read and write .xlsx workbooks"),
+    "et-xmlfile": ("", "documents", "native_equivalent", (), "openpyxl dependency"),
+    "python-docx": ("", "documents", "native_equivalent", ("docx",), "Read and write .docx"),
+    "pypdf": ("", "documents", "native_equivalent", ("pypdf",), "Pure-Python PDF reading/merging"),
+    "reportlab": ("", "documents", "device_native", ("reportlab",), "Generate PDFs (Chaquopy wheel)"),
+    "qrcode": ("", "media", "native_equivalent", ("qrcode",), "Generate QR codes"),
+    "python-barcode": ("", "media", "native_equivalent", ("barcode",), "Generate barcodes"),
+    "pyzbar": ("", "media", "device_native", ("pyzbar",), "Decode QR/barcodes (needs zbar wheel)"),
 
     # ── science & numerics ──────────────────────────────────────────────
-    "numpy": ("", "science", True, "Arrays and linear algebra"),
-    "scipy": ("", "science", True, "Scientific computing"),
-    "pandas": ("", "science", True, "DataFrames and analysis"),
-    "matplotlib": ("", "science", True, "Plotting (render to PNG, not a window)"),
-    "scikit-learn": ("", "science", True, "Classical machine learning"),
-    "statsmodels": ("", "science", True, "Statistical models"),
-    "sympy": ("", "science", False, "Symbolic mathematics"),
-    "mpmath": ("", "science", False, "Arbitrary-precision arithmetic"),
-    "networkx": ("", "science", False, "Graph algorithms"),
-    "opencv-python": ("", "media", True, "Computer vision (large: ~40 MB)"),
-    "pillow": ("", "media", True, "Image processing (Chaquopy wheel)"),
-    "imageio": ("", "media", False, "Read/write image formats"),
-    "qiskit": ("", "science", True, "Quantum computing SDK (large)"),
+    "numpy": ("", "science", "device_native", ("numpy",), "Arrays and linear algebra"),
+    "scipy": ("", "science", "device_native", ("scipy",), "Scientific computing"),
+    "pandas": ("", "science", "device_native", ("pandas",), "DataFrames and analysis"),
+    "matplotlib": ("", "science", "device_native", ("matplotlib",), "Plotting (render to PNG, not a window)"),
+    "scikit-learn": ("", "science", "device_native", ("sklearn",), "Classical machine learning"),
+    "statsmodels": ("", "science", "device_native", ("statsmodels",), "Statistical models"),
+    "sympy": ("", "science", "native_equivalent", ("sympy",), "Symbolic mathematics"),
+    "mpmath": ("", "science", "native_equivalent", ("mpmath",), "Arbitrary-precision arithmetic"),
+    "networkx": ("", "science", "native_equivalent", ("networkx",), "Graph algorithms"),
+    "opencv-python": ("", "media", "device_native", ("cv2",), "Computer vision (large: ~40 MB)"),
+    "pillow": ("", "media", "device_native", ("PIL",), "Image processing (Chaquopy wheel)"),
+    "imageio": ("", "media", "native_equivalent", ("imageio",), "Read/write image formats"),
+    "qiskit": ("", "science", "device_native", ("qiskit",), "Quantum computing SDK (large)"),
 
     # ── AI / ML clients ─────────────────────────────────────────────────
-    "openai": ("", "ai", False, "OpenAI API client"),
-    "anthropic": ("", "ai", False, "Anthropic API client"),
-    "google-generativeai": ("", "ai", False, "Gemini API client"),
-    "groq": ("", "ai", False, "Groq API client"),
-    "tiktoken": ("", "ai", True, "BPE tokeniser (Chaquopy wheel)"),
-    "transformers": ("", "ai", False, "Hugging Face models (needs a backend)"),
-    "huggingface-hub": ("", "ai", False, "Download models and datasets"),
-    "sentencepiece": ("", "ai", True, "Subword tokenisation"),
+    "openai": ("", "ai", "native_equivalent", ("openai",), "OpenAI API client"),
+    "anthropic": ("", "ai", "native_equivalent", ("anthropic",), "Anthropic API client"),
+    "google-generativeai": ("", "ai", "native_equivalent", ("google.generativeai",), "Gemini API client"),
+    "groq": ("", "ai", "native_equivalent", ("groq",), "Groq API client"),
+    "tiktoken": ("", "ai", "device_native", ("tiktoken",), "BPE tokeniser (Chaquopy wheel)"),
+    "transformers": ("", "ai", "device_native", ("transformers",), "Hugging Face models (needs a backend)"),
+    "huggingface-hub": ("", "ai", "native_equivalent", ("huggingface_hub",), "Download models and datasets"),
+    "sentencepiece": ("", "ai", "device_native", ("sentencepiece",), "Subword tokenisation"),
 
     # ── crypto & security ───────────────────────────────────────────────
-    "cryptography": ("", "security", True, "Modern crypto primitives"),
-    "pycryptodome": ("", "security", True, "AES, RSA, hashing"),
-    "bcrypt": ("", "security", True, "Password hashing"),
-    "passlib": ("", "security", False, "Password hashing framework"),
-    "pyjwt": ("", "security", False, "JSON Web Tokens"),
-    "pyotp": ("", "security", False, "TOTP/HOTP two-factor codes"),
-    "python-jose": ("", "security", False, "JOSE/JWT implementation"),
-    "keyring": ("", "security", False, "Credential storage frontend"),
+    "cryptography": ("", "security", "device_native", ("cryptography",), "Modern crypto primitives"),
+    "pycryptodome": ("", "security", "device_native", ("Crypto",), "AES, RSA, hashing"),
+    "bcrypt": ("", "security", "device_native", ("bcrypt",), "Password hashing"),
+    "passlib": ("", "security", "native_equivalent", ("passlib",), "Password hashing framework"),
+    "pyjwt": ("", "security", "native_equivalent", ("jwt",), "JSON Web Tokens"),
+    "pyotp": ("", "security", "native_equivalent", ("pyotp",), "TOTP/HOTP two-factor codes"),
+    "python-jose": ("", "security", "native_equivalent", ("jose",), "JOSE/JWT implementation"),
+    "keyring": ("", "security", "native_equivalent", ("keyring",), "Credential storage frontend"),
 
     # ── databases ───────────────────────────────────────────────────────
-    "sqlalchemy": ("", "database", False, "SQL toolkit and ORM"),
-    "peewee": ("", "database", False, "Tiny ORM over SQLite"),
-    "tinydb": ("", "database", False, "Document database in a JSON file"),
-    "pysqlcipher3": ("", "database", True, "Encrypted SQLite"),
-    "redis": ("", "database", False, "Redis client"),
-    "pymongo": ("", "database", True, "MongoDB client"),
-    "supabase": ("", "database", False, "Supabase client"),
-    "firebase-admin": ("", "database", False, "Firebase admin SDK"),
+    "sqlalchemy": ("", "database", "native_equivalent", ("sqlalchemy",), "SQL toolkit and ORM"),
+    "peewee": ("", "database", "native_equivalent", ("peewee",), "Tiny ORM over SQLite"),
+    "tinydb": ("", "database", "native_equivalent", ("tinydb",), "Document database in a JSON file"),
+    "pysqlcipher3": ("", "database", "device_native", ("Cipher",), "Encrypted SQLite"),
+    "redis": ("", "database", "native_equivalent", ("redis",), "Redis client"),
+    "pymongo": ("", "database", "device_native", ("pymongo",), "MongoDB client"),
+    "supabase": ("", "database", "native_equivalent", ("supabase",), "Supabase client"),
+    "firebase-admin": ("", "database", "native_equivalent", ("firebase_admin",), "Firebase admin SDK"),
 
     # ── utilities ───────────────────────────────────────────────────────
-    "attrs": ("", "utility", False, "Classes without boilerplate"),
-    "pydantic": ("", "utility", True, "Typed data validation (v2 needs a wheel)"),
-    "typing-extensions": ("", "utility", False, "Back-ported typing features"),
-    "cachetools": ("", "utility", False, "In-memory caches"),
-    "tenacity": ("", "utility", False, "Retrying with backoff"),
-    "more-itertools": ("", "utility", False, "Iterator recipes"),
-    "rich": ("", "utility", False, "Pretty text rendering (also to strings)"),
-    "tabulate": ("", "utility", False, "Render tables as text"),
-    "faker": ("", "utility", False, "Generate fake data"),
-    "shortuuid": ("", "utility", False, "Short unique IDs"),
-    "emoji": ("", "utility", False, "Emoji lookup and stripping"),
-    "phonenumbers": ("", "utility", False, "Parse and format phone numbers"),
-    "validators": ("", "utility", False, "Common value validators"),
-    "python-slugify": ("", "utility", False, "URL-safe slugs"),
-    "fuzzywuzzy": ("", "utility", False, "Fuzzy string matching"),
-    "rapidfuzz": ("", "utility", True, "Fast fuzzy matching"),
-    "regex": ("", "utility", True, "Extended regular expressions"),
-    "chevron": ("", "utility", False, "Mustache templating"),
-    "jinja2": ("", "utility", False, "Templating engine"),
-    "markupsafe": ("", "utility", False, "Jinja2 dependency"),
-    "schedule": ("", "utility", False, "Human-friendly job scheduling"),
-    "croniter": ("", "utility", False, "Cron expression maths"),
-    "psutil": ("", "utility", True, "Process and system metrics"),
-    "qrcode-terminal": ("", "utility", False, "QR codes as text"),
-    "mutagen": ("", "media", False, "Audio metadata tags"),
-    "pydub": ("", "media", False, "Audio slicing (needs ffmpeg for mp3)"),
-    "ffmpeg-python": ("", "media", False, "ffmpeg command builder"),
-    "moviepy": ("", "media", False, "Video editing (needs ffmpeg)"),
-    "gtts": ("", "media", False, "Google text-to-speech (online)"),
-    "speechrecognition": ("", "media", False, "Speech-to-text frontends"),
+    "attrs": ("", "utility", "native_equivalent", ("attr", "aiohttp"), "Classes without boilerplate"),
+    "pydantic": ("", "utility", "device_native", ("pydantic",), "Typed data validation (v2 needs a wheel)"),
+    "typing-extensions": ("", "utility", "native_equivalent", ("typing_extensions",), "Back-ported typing features"),
+    "cachetools": ("", "utility", "native_equivalent", ("cachetools",), "In-memory caches"),
+    "tenacity": ("", "utility", "native_equivalent", ("tenacity",), "Retrying with backoff"),
+    "more-itertools": ("", "utility", "native_equivalent", ("more_itertools",), "Iterator recipes"),
+    "rich": ("", "utility", "native_equivalent", ("rich",), "Pretty text rendering (also to strings)"),
+    "tabulate": ("", "utility", "native_equivalent", ("tabulate",), "Render tables as text"),
+    "faker": ("", "utility", "native_equivalent", ("faker",), "Generate fake data"),
+    "shortuuid": ("", "utility", "native_equivalent", ("shortuuid",), "Short unique IDs"),
+    "emoji": ("", "utility", "native_equivalent", ("emoji",), "Emoji lookup and stripping"),
+    "phonenumbers": ("", "utility", "native_equivalent", ("phonenumbers",), "Parse and format phone numbers"),
+    "validators": ("", "utility", "native_equivalent", ("validators",), "Common value validators"),
+    "python-slugify": ("", "utility", "native_equivalent", ("slugify",), "URL-safe slugs"),
+    "fuzzywuzzy": ("", "utility", "native_equivalent", ("fuzzywuzzy",), "Fuzzy string matching"),
+    "rapidfuzz": ("", "utility", "device_native", ("rapidfuzz",), "Fast fuzzy matching"),
+    "regex": ("", "utility", "device_native", ("regex",), "Extended regular expressions"),
+    "chevron": ("", "utility", "native_equivalent", ("chevron",), "Mustache templating"),
+    "jinja2": ("", "utility", "native_equivalent", ("jinja2",), "Templating engine"),
+    "markupsafe": ("", "utility", "native_equivalent", ("markupsafe",), "Jinja2 dependency"),
+    "schedule": ("", "utility", "native_equivalent", ("schedule",), "Human-friendly job scheduling"),
+    "croniter": ("", "utility", "native_equivalent", ("croniter",), "Cron expression maths"),
+    "psutil": ("", "utility", "host_only", ("psutil",), "Process and system metrics"),
+    "qrcode-terminal": ("", "utility", "native_equivalent", ("qrcode_terminal",), "QR codes as text"),
+    "mutagen": ("", "media", "native_equivalent", ("mutagen",), "Audio metadata tags"),
+    "pydub": ("", "media", "native_equivalent", (), "Audio slicing (needs ffmpeg for mp3)"),
+    "ffmpeg-python": ("", "media", "native_equivalent", ("ffmpeg_python",), "ffmpeg command builder"),
+    "moviepy": ("", "media", "native_equivalent", ("moviepy",), "Video editing (needs ffmpeg)"),
+    "gtts": ("", "media", "native_equivalent", ("gTTS",), "Google text-to-speech (online)"),
+    "speechrecognition": ("", "media", "native_equivalent", ("speech_recognition",), "Speech-to-text frontends"),
 }
 
 #: Packages that will *never* work on Android, with the reason why.
-BLOCKED: dict[str, str] = {
-    "tkinter": "desktop-only GUI toolkit; use Pydrud widgets",
-    "tk": "desktop-only GUI toolkit; use Pydrud widgets",
-    "pyqt5": "Qt does not run under Chaquopy; use Pydrud widgets",
-    "pyqt6": "Qt does not run under Chaquopy; use Pydrud widgets",
-    "pyside6": "Qt does not run under Chaquopy; use Pydrud widgets",
-    "kivy": "another Android UI framework — it cannot share the process",
-    "flet": "another UI framework — use Pydrud widgets instead",
-    "pygame": "needs SDL; no Android wheel for Chaquopy",
-    "pyautogui": "needs a desktop display server",
-    "selenium": "needs a desktop browser driver",
-    "playwright": "ships desktop browser binaries",
-    "tensorflow": "too large for an APK; use TensorFlow Lite via Java",
-    "torch": "no Android wheel; use ExecuTorch or a server",
-    "scrapy": "relies on Twisted's reactor and desktop networking",
-    "django": "server framework; run it on a server, not on the phone",
-    "flask": "server framework; nothing can reach a localhost port on a phone",
-    "fastapi": "server framework; use page.http to call your API instead",
-    "uvicorn": "ASGI server; not useful inside an app",
-    "psycopg2": "needs libpq; no Android build",
-    "mysqlclient": "needs libmysqlclient; no Android build",
-    "pyaudio": "needs PortAudio; use page.audio instead",
-    "sounddevice": "needs PortAudio; use page.audio instead",
-    "wxpython": "desktop-only GUI toolkit",
-    "pywin32": "Windows-only",
-    "pyobjc": "macOS-only",
+BLOCKED: dict[str, tuple[str, tuple[str, ...]]] = {
+    "tkinter": ("desktop-only GUI toolkit; use Pydrud widgets", ("tkinter",)),
+    "tk": ("desktop-only GUI toolkit; use Pydrud widgets", ("tk",)),
+    "pyqt5": ("Qt does not run under Chaquopy; use Pydrud widgets", ("PyQt5",)),
+    "pyqt6": ("Qt does not run under Chaquopy; use Pydrud widgets", ("PyQt6",)),
+    "pyside6": ("Qt does not run under Chaquopy; use Pydrud widgets", ("PySide6",)),
+    "kivy": ("another Android UI framework — it cannot share the process", ("kivy",)),
+    "flet": ("another UI framework — use Pydrud widgets instead", ("flet",)),
+    "pygame": ("needs SDL; no Android wheel for Chaquopy", ("pygame",)),
+    "pyautogui": ("needs a desktop display server", ("pyautogui",)),
+    "selenium": ("needs a desktop browser driver", ("selenium",)),
+    "playwright": ("ships desktop browser binaries", ("playwright",)),
+    "tensorflow": ("too large for an APK; use TensorFlow Lite via Java", ("tensorflow",)),
+    "torch": ("no Android wheel; use ExecuTorch or a server", ("torch",)),
+    "scrapy": ("relies on Twisted's reactor and desktop networking", ("scrapy",)),
+    "django": ("server framework; run it on a server, not on the phone", ("django",)),
+    "flask": ("server framework; nothing can reach a localhost port on a phone", ("flask",)),
+    "fastapi": ("server framework; use page.http to call your API instead", ("fastapi",)),
+    "uvicorn": ("ASGI server; not useful inside an app", ("uvicorn",)),
+    "psycopg2": ("needs libpq; no Android build", ("psycopg2",)),
+    "mysqlclient": ("needs libmysqlclient; no Android build", ("MySQLdb",)),
+    "pyaudio": ("needs PortAudio; use page.audio instead", ("pyaudio",)),
+    "sounddevice": ("needs PortAudio; use page.audio instead", ("sounddevice",)),
+    "wxpython": ("desktop-only GUI toolkit", ("wx",)),
+    "pywin32": ("Windows-only", ("win32com", "win32api")),
+    "pyobjc": ("macOS-only", ("objc",)),
 }
 
 CATEGORIES = ("network", "media", "parsing", "documents", "science", "ai",
               "security", "database", "utility")
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _parse_registry_entry(raw: tuple) -> dict:
+    """Normalise a raw REGISTRY entry into a dict.
+
+    Handles both the legacy 4-tuple format and the new 5-tuple format
+    gracefully so the module continues to work during migration.
+    """
+    if len(raw) == 4:
+        version, category, native, description = raw
+        return {
+            "name": "",  # filled in by caller
+            "version": version,
+            "category": category,
+            "support_category": "device_native" if native else "native_equivalent",
+            "import_names": (),
+            "description": description,
+        }
+    version, category, support_category, import_names, description = raw
+    return {
+        "name": "",  # filled in by caller
+        "version": version,
+        "category": category,
+        "support_category": support_category,
+        "import_names": import_names,
+        "description": description,
+    }
 
 
 class PackageError(RuntimeError):
@@ -228,7 +268,7 @@ def info(name: str) -> dict:
     key = normalise(name)
     if key in BLOCKED:
         raise PackageError(
-            f"{key} cannot run on Android: {BLOCKED[key]}.")
+            f"{key} cannot run on Android: {BLOCKED[key][0]}.")
     if key not in REGISTRY:
         suggestions = search(key, limit=3)
         hint = (f" Did you mean: {', '.join(s['name'] for s in suggestions)}?"
@@ -238,16 +278,18 @@ def info(name: str) -> dict:
             f"Run 'pydrud pip list --all' to see the {len(REGISTRY)} "
             f"supported packages, or add it anyway with --force "
             f"(the Gradle build may fail).")
-    version, category, native, description = REGISTRY[key]
-    return {"name": key, "version": version, "category": category,
-            "native": native, "description": description}
+    entry = _parse_registry_entry(REGISTRY[key])
+    entry["name"] = key
+    return entry
 
 
 def search(query: str, *, limit: int = 20) -> list[dict]:
     """Fuzzy search over names, categories and descriptions."""
     needle = normalise(query)
     scored: list[tuple[int, dict]] = []
-    for name, (version, category, native, description) in REGISTRY.items():
+    for name, raw in REGISTRY.items():
+        entry = _parse_registry_entry(raw)
+        entry["name"] = name
         score = 0
         if needle == name:
             score = 100
@@ -255,14 +297,12 @@ def search(query: str, *, limit: int = 20) -> list[dict]:
             score = 70
         elif needle in name:
             score = 50
-        elif needle in category:
+        elif needle in entry["category"]:
             score = 30
-        elif needle in description.lower():
+        elif needle in entry["description"].lower():
             score = 20
         if score:
-            scored.append((score, {"name": name, "version": version,
-                                   "category": category, "native": native,
-                                   "description": description}))
+            scored.append((score, entry))
     scored.sort(key=lambda item: (-item[0], item[1]["name"]))
     return [entry for _, entry in scored[:limit]]
 
@@ -270,10 +310,10 @@ def search(query: str, *, limit: int = 20) -> list[dict]:
 def by_category() -> dict[str, list[dict]]:
     """The whole registry grouped by category, for docs and ``pip list``."""
     grouped: dict[str, list[dict]] = {c: [] for c in CATEGORIES}
-    for name, (version, category, native, description) in sorted(REGISTRY.items()):
-        grouped.setdefault(category, []).append(
-            {"name": name, "version": version, "native": native,
-             "description": description})
+    for name, raw in REGISTRY.items():
+        entry = _parse_registry_entry(raw)
+        entry["name"] = name
+        grouped.setdefault(entry["category"], []).append(entry)
     return {k: v for k, v in grouped.items() if v}
 
 
@@ -361,7 +401,8 @@ class Requirements:
                 spec = f"=={entry['version']}"
         else:
             entry = {"name": name, "version": "", "category": "unverified",
-                     "native": False,
+                     "support_category": "host_only",
+                     "import_names": (),
                      "description": "forced; not verified on Android"}
         packages = self.load()
         packages[name] = spec
@@ -388,6 +429,173 @@ class Requirements:
 
     def __len__(self) -> int:
         return len(self.load())
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Pluggable package backends
+# ──────────────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class PackageResult:
+    """The result of a package operation."""
+    success: bool
+    message: str
+    details: dict | None = None
+
+
+class PackageBackend:
+    """Base class for runtime-aware package management.
+
+    Subclasses implement the behaviour for a specific runtime
+    (chaquopy bundles into APK, pydash runs on host only).
+    """
+
+    def supports(self, runtime: str) -> bool:
+        """Whether this backend handles *runtime*."""
+        return False
+
+    def add(self, project_dir: str, requirement: str, *, force: bool = False) -> PackageResult:
+        raise NotImplementedError
+
+    def remove(self, project_dir: str, name: str) -> PackageResult:
+        raise NotImplementedError
+
+    def list_packages(self, project_dir: str) -> list[dict]:
+        raise NotImplementedError
+
+    def search(self, query: str) -> list[dict]:
+        raise NotImplementedError
+
+    def sync_gradle(self, project_dir: str) -> PackageResult:
+        raise NotImplementedError
+
+
+class ChaquopyBackend(PackageBackend):
+    """Handles package management for chaquopy projects.
+
+    Reads/writes ``pydrud.toml`` and injects requirements into
+    ``build.gradle.kts`` so Chaquopy installs them into the APK at
+    build time.
+    """
+
+    def supports(self, runtime: str) -> bool:
+        return runtime == "chaquopy"
+
+    def add(self, project_dir: str, requirement: str, *, force: bool = False) -> PackageResult:
+        reqs = Requirements(project_dir)
+        try:
+            entry = reqs.add(requirement, force=force)
+        except PackageError as exc:
+            return PackageResult(success=False, message=str(exc))
+        return PackageResult(
+            success=True,
+            message=f"Added {entry['name']}{entry.get('spec', '')}",
+            details=entry,
+        )
+
+    def remove(self, project_dir: str, name: str) -> PackageResult:
+        reqs = Requirements(project_dir)
+        removed = reqs.remove(name)
+        if not removed:
+            return PackageResult(success=False, message=f"{name} was not installed")
+        return PackageResult(success=True, message=f"Removed {name}")
+
+    def list_packages(self, project_dir: str) -> list[dict]:
+        return installed_summary(project_dir)
+
+    def search(self, query: str) -> list[dict]:
+        return search(query)
+
+    def sync_gradle(self, project_dir: str) -> PackageResult:
+        try:
+            path = sync_gradle(project_dir)
+            return PackageResult(success=True, message=f"Synced to {path}")
+        except PackageError as exc:
+            return PackageResult(success=False, message=str(exc))
+
+
+class PydashBackend(PackageBackend):
+    """Handles package management for pydash projects.
+
+    Validates against the registry and records packages in
+    ``pydrud.toml`` but never touches Gradle files (there is none).
+    """
+
+    def supports(self, runtime: str) -> bool:
+        return runtime == "pydash"
+
+    def add(self, project_dir: str, requirement: str, *, force: bool = False) -> PackageResult:
+        name, spec = split_requirement(requirement)
+        reqs = Requirements(project_dir)
+
+        if name in BLOCKED:
+            reason, _ = BLOCKED[name]
+            return PackageResult(
+                success=False,
+                message=f"{name} cannot be used: {reason}",
+            )
+
+        try:
+            entry = info(name)
+        except PackageError as exc:
+            if force:
+                entry = {"name": name, "version": "", "category": "unverified",
+                         "support_category": "host_only",
+                         "import_names": (),
+                         "description": "forced; not verified on host"}
+            else:
+                return PackageResult(success=False, message=str(exc))
+
+        if not force and not spec and entry.get("version"):
+            spec = f"=={entry['version']}"
+
+        # Record in toml
+        packages = reqs.load()
+        packages[name] = spec
+        reqs.save(packages)
+
+        cat = entry.get("support_category", "native_equivalent")
+        if cat == "host_only":
+            hint = " (host-only package — cannot be bundled into an APK)"
+        else:
+            hint = ""
+        return PackageResult(
+            success=True,
+            message=f"Added {name}{spec}{hint}",
+            details={**entry, "spec": spec},
+        )
+
+    def remove(self, project_dir: str, name: str) -> PackageResult:
+        reqs = Requirements(project_dir)
+        removed = reqs.remove(name)
+        if not removed:
+            return PackageResult(success=False, message=f"{name} was not installed")
+        return PackageResult(success=True, message=f"Removed {name}")
+
+    def list_packages(self, project_dir: str) -> list[dict]:
+        return installed_summary(project_dir)
+
+    def search(self, query: str) -> list[dict]:
+        return search(query)
+
+    def sync_gradle(self, project_dir: str) -> PackageResult:
+        return PackageResult(
+            success=False,
+            message=(
+                "No Gradle file to sync — pydash projects have no APK build. "
+                "Switch to runtime: chaquopy in pydrud.toml to use Gradle."
+            ),
+        )
+
+
+def get_backend(runtime: str) -> PackageBackend:
+    """Return the appropriate backend for *runtime*."""
+    for cls in (ChaquopyBackend, PydashBackend):
+        inst = cls()
+        if inst.supports(runtime):
+            return inst
+    raise PackageError(f"Unknown runtime: {runtime}")
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -454,7 +662,8 @@ def installed_summary(project_dir: str = ".") -> list[dict]:
         try:
             entry = info(name)
         except PackageError:
-            entry = {"name": name, "category": "unverified", "native": False,
+            entry = {"name": name, "category": "unverified",
+                     "support_category": "host_only", "import_names": (),
                      "description": "not in the verified registry"}
         entry["spec"] = spec or "latest"
         rows.append(entry)

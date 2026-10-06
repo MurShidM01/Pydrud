@@ -143,7 +143,7 @@ class TestProjectIntegration(unittest.TestCase):
         cls.tmp = tempfile.mkdtemp(prefix="pydrud-pip-")
         cls.cwd = os.getcwd()
         os.chdir(cls.tmp)
-        create_project("pipdemo", org="com.example")
+        create_project("pipdemo", org="com.example", runtime="chaquopy")
         cls.project = os.path.join(cls.tmp, "pipdemo")
 
     @classmethod
@@ -322,7 +322,7 @@ class TestCliCommands(unittest.TestCase):
         self.tmp = tempfile.mkdtemp(prefix="pydrud-cli-")
         self.cwd = os.getcwd()
         os.chdir(self.tmp)
-        create_project("clidemo", org="com.example")
+        create_project("clidemo", org="com.example", runtime="chaquopy")
         os.chdir(os.path.join(self.tmp, "clidemo"))
         self.runner = CliRunner()
 
@@ -427,7 +427,7 @@ class TestBuildPython(unittest.TestCase):
         cwd = os.getcwd()
         try:
             os.chdir(tmp)
-            create_project("envdemo", org="com.example")
+            create_project("envdemo", org="com.example", runtime="chaquopy")
             builder = Builder(os.path.join(tmp, "envdemo"))
             with mock.patch("pydrud.commands.project._detect_build_python",
                             return_value="/opt/py311") as detect:
@@ -446,7 +446,7 @@ class TestBuildPython(unittest.TestCase):
         cwd = os.getcwd()
         try:
             os.chdir(tmp)
-            create_project("envdemo2", org="com.example")
+            create_project("envdemo2", org="com.example", runtime="chaquopy")
             builder = Builder(os.path.join(tmp, "envdemo2"))
             with mock.patch.dict(os.environ,
                                  {"PYDRUD_PYTHON": "/custom/python"}), \

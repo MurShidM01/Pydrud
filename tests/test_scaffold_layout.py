@@ -45,7 +45,7 @@ class TestScaffoldLayout(unittest.TestCase):
         cls.tmp = tempfile.mkdtemp(prefix="pydrud-layout-")
         cls.cwd = os.getcwd()
         os.chdir(cls.tmp)
-        create_project("layout_app", org="com.example")
+        create_project("layout_app", org="com.example", runtime="chaquopy")
         cls.root = os.path.join(cls.tmp, "layout_app")
 
     @classmethod

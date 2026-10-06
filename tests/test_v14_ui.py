@@ -316,7 +316,7 @@ class TestProjectSync(unittest.TestCase):
         cls.tmp = tempfile.mkdtemp(prefix="pydrud-sync-")
         cls.cwd = os.getcwd()
         os.chdir(cls.tmp)
-        create_project("sync_app", org="com.example")
+        create_project("sync_app", org="com.example", runtime="chaquopy")
         cls.project = os.path.join(cls.tmp, "sync_app")
 
     @classmethod
