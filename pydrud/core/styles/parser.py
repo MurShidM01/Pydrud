@@ -171,13 +171,31 @@ class Parser:
                 widget_type = tok.value
                 self.advance()
             elif tok.kind == TokenKind.CLASS_SEL:
-                classes.append(tok.value)
-                self.advance()
+                # If we've already seen a type or id in this compound, and
+                # the class starts with uppercase, treat it as part of a
+                # compound selector (e.g. ".btn.Button"). Otherwise keep it
+                # as a pure class selector.
+                if (widget_type is not None or id_val is not None) and \
+                        tok.value and tok.value[0].isupper():
+                    widget_type = tok.value
+                    self.advance()
+                else:
+                    classes.append(tok.value)
+                    self.advance()
             elif tok.kind == TokenKind.ID_SEL:
                 id_val = tok.value
                 self.advance()
             else:
                 break
+
+        # Post-process: when a compound starts with classes only and the last
+        # class looks like a widget type (uppercase start), promote it.
+        # This handles patterns like ".btn.Button" where both tokens are
+        # CLASS_SEL but the intent is "class btn on a Button widget".
+        if not widget_type and classes and len(classes) > 1 \
+                and classes[-1][0].isupper():
+            widget_type = classes.pop()
+
         if widget_type is None and not classes and id_val is None:
             return None
         return CompoundSelector(
@@ -195,13 +213,24 @@ class Parser:
                 self.advance()
                 continue
             self.advance()
-            self.expect(TokenKind.COLON)
+            tok = self.current()
+            if tok.kind == TokenKind.COLON:
+                self.advance()
+            else:
+                self.error("Expected ':' after property name")
+                # Skip to semicolon or brace to recover
+                while self.current().kind not in (TokenKind.SEMI, TokenKind.RBRACE, TokenKind.EOF):
+                    self.advance()
+                if self.current().kind == TokenKind.SEMI:
+                    self.advance()
+                continue
             # value runs until semicolon or brace
             parts: list[str] = []
             while self.current().kind not in (TokenKind.SEMI, TokenKind.RBRACE, TokenKind.EOF):
                 t = self.advance()
                 parts.append(t.value)
-            self.expect(TokenKind.SEMI)
+            if self.current().kind == TokenKind.SEMI:
+                self.advance()
             decls.append((prop_tok.value, " ".join(parts)))
         return DeclarationBlock(declarations=decls)
 

@@ -55,6 +55,8 @@ _PATTERNS = [
     ("CLASS",     re.compile(r'\.[A-Za-z_][A-Za-z0-9_-]*')),
     ("TYPE",      re.compile(r'[A-Z][A-Za-z0-9]*')),
     ("PROP",      re.compile(r'[A-Za-z_][A-Za-z0-9_-]*')),
+    ("NUMBER",    re.compile(r'-?[0-9]+(\.[0-9]+)?')),
+    ("STRING",    re.compile(r'"[^"]*"|\'[^\']*\'')),
 ]
 
 
@@ -98,6 +100,12 @@ def lex(source: str, filename: str = "") -> list[Token]:
                     tokens.append(Token(tkind, value, line, col - len(value)))
                 elif name == "COMBINATOR":
                     tokens.append(Token(TokenKind.COMBINATOR, consumed, line, col))
+                elif name == "NUMBER":
+                    tokens.append(Token(TokenKind.PROP, consumed, line, col - len(consumed)))
+                elif name in ("STRING",):
+                    # Strip quotes
+                    val = consumed.strip('"').strip("'")
+                    tokens.append(Token(TokenKind.PROP, val, line, col - len(consumed)))
                 else:
                     tkind = {
                         "LBRACE": TokenKind.LBRACE,

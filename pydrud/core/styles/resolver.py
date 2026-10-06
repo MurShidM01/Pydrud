@@ -120,20 +120,28 @@ def resolve_styles(
 
     for w in widgets:
         key = w.key
-        if w._auto_key:
-            # Id selectors only match explicitly-supplied keys
+        # Extract class names from the widget's style dict.
+        widget_classes = {
+            k[len("class_"):]
+            for k in w.style
+            if k.startswith("class_")
+        }
+        if getattr(w, "_auto_key", True):
+            # Id selectors only match explicitly-supplied keys.
+            # Auto-keyed widgets still match type and class selectors.
             matched_rules: list[tuple[tuple[int, int, int, int], DeclarationBlock]] = []
-            # Include type-rules for auto-keyed widgets too
             for sel, body in type_rules.get(w._widget_type, []):
                 matched_rules.append((_specificity(sel), body))
-            for sel, body in class_rules.get(key, []):
-                matched_rules.append((_specificity(sel), body))
+            for cls in widget_classes:
+                for sel, body in class_rules.get(cls, []):
+                    matched_rules.append((_specificity(sel), body))
         else:
             matched_rules = []
             for sel, body in type_rules.get(w._widget_type, []):
                 matched_rules.append((_specificity(sel), body))
-            for sel, body in class_rules.get(key, []):
-                matched_rules.append((_specificity(sel), body))
+            for cls in widget_classes:
+                for sel, body in class_rules.get(cls, []):
+                    matched_rules.append((_specificity(sel), body))
             for sel, body in id_rules.get(key, []):
                 matched_rules.append((_specificity(sel), body))
 
@@ -144,24 +152,26 @@ def resolve_styles(
             for k, v in body.declarations:
                 merged[k] = v
 
-        # Warn about known conflicts
-        for p1, p2 in profile.conflict_pairs:
-            if p1 in merged and p2 in merged:
-                warnings.append(
-                    f"Conflicting properties '{p1}' and '{p2}' on widget {key!r}"
-                )
+        # Only include widgets that actually matched rules.
+        if matched_rules:
+            result[key] = merged
 
-        # Warn about background nesting on Android
-        if isinstance(profile, AndroidRendererProfile):
-            if "bg" in merged and w._widget_type in profile.background_owners:
-                for child in w.children:
-                    if "bg" in child.style:
-                        warnings.append(
-                            f"Child {child._widget_type} sets 'bg' inside "
-                            f"{w._widget_type} which owns its own background."
-                        )
-                        break
+            # Warn about known conflicts
+            for p1, p2 in profile.conflict_pairs:
+                if p1 in merged and p2 in merged:
+                    warnings.append(
+                        f"Conflicting properties '{p1}' and '{p2}' on widget {key!r}"
+                    )
 
-        result[key] = merged
+            # Warn about background nesting on Android
+            if isinstance(profile, AndroidRendererProfile):
+                if "bg" in merged and w._widget_type in profile.background_owners:
+                    for child in w.children:
+                        if "bg" in child.style:
+                            warnings.append(
+                                f"Child {child._widget_type} sets 'bg' inside "
+                                f"{w._widget_type} which owns its own background."
+                            )
+                            break
 
     return result, warnings
