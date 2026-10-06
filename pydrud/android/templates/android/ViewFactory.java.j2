@@ -2076,6 +2076,28 @@ public class ViewFactory {
                 }
             }
 
+            // Absolute positioning (Positioned inside a Stack). The create
+            // path builds the offsets in frameParams(); re-apply them here or
+            // a sprite/badge/FAB only ever moves on the frame it was created
+            // (PB-006). Mirrors frameParams() exactly.
+            if ("absolute".equals(s.optString("position", ""))
+                    && view.getLayoutParams() instanceof FrameLayout.LayoutParams) {
+                FrameLayout.LayoutParams flp =
+                    (FrameLayout.LayoutParams) view.getLayoutParams();
+                int grav = Gravity.NO_GRAVITY;
+                if (s.has("left"))   { grav |= Gravity.START; flp.leftMargin = dp(s.optInt("left", 0)); }
+                if (s.has("right"))  { grav |= Gravity.END;   flp.rightMargin = dp(s.optInt("right", 0)); }
+                if (s.has("top"))    { grav |= Gravity.TOP;   flp.topMargin = dp(s.optInt("top", 0)); }
+                if (s.has("bottom")) {
+                    grav |= Gravity.BOTTOM;
+                    flp.bottomMargin = dp(s.optInt("bottom", 0))
+                        + (s.optBoolean("safeAreaBottom", true) ? PydrudTheme.insetBottom : 0);
+                }
+                if (grav == Gravity.NO_GRAVITY) grav = Gravity.TOP | Gravity.START;
+                flp.gravity = grav;
+                view.setLayoutParams(flp);
+            }
+
             // Gravity for layout containers / text
             if (s.has("alignment")) {
                 int g = gravity(s.optString("alignment", ""));
@@ -2218,6 +2240,15 @@ public class ViewFactory {
                 ((PydrudNavigation.PydrudTabBar) strip).applyProps(p);
                 return true;
             }
+        }
+
+        if (view instanceof AdvancedViews.PydrudCanvas) {
+            // Canvas ops arrive as props. Re-apply them in place so a game
+            // board, gauge or chart animates instead of freezing after its
+            // first frame (PB-003). Recreating the view would also work but
+            // discards any canvas state and costs a full measure/layout.
+            advanced.updateCanvas(view, p);
+            return true;
         }
 
         if (view instanceof Spinner) {
