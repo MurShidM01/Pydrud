@@ -140,14 +140,14 @@ CTX = {
 
 
 class TestGeneratedProject(unittest.TestCase):
-    """A freshly scaffolded project is complete and valid."""
+    """A freshly scaffolded chaquopy project is complete and valid."""
 
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.mkdtemp(prefix="pydrud-scaffold-")
         cls.cwd = os.getcwd()
         os.chdir(cls.tmp)
-        create_project("demo_app", org="com.example")
+        create_project("demo_app", org="com.example", runtime="chaquopy")
         cls.project = os.path.join(cls.tmp, "demo_app")
 
     @classmethod
@@ -396,7 +396,7 @@ class TestGeneratedProject(unittest.TestCase):
 
     def test_duplicate_project_is_refused(self):
         with self.assertRaises(SystemExit):
-            create_project("demo_app", org="com.example")
+            create_project("demo_app", org="com.example", runtime="chaquopy")
 
 
 class TestJavaTemplates(unittest.TestCase):

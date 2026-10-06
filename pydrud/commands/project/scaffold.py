@@ -1,5 +1,8 @@
 """
-``pydrud init`` — scaffold a complete new Android + Python project.
+``pydrud init`` — scaffold a new Pydrud project.
+
+By default creates a pydash project (no Android toolchain needed).
+Pass ``runtime="chaquopy"`` to generate a full standalone Android project.
 """
 
 from __future__ import annotations
@@ -8,6 +11,7 @@ import os
 import sys
 
 from pydrud.compatibility import COMPATIBILITY
+from pydrud.runtime.runtime import Runtime
 from pydrud.utils import tui
 from pydrud.utils.colors import fail
 from pydrud.commands.project.bundle import _bundle_pydrud_source, _copy_icon_resources
@@ -18,11 +22,14 @@ from pydrud.commands.project.paths import (
 from pydrud.commands.project.python_runtime import _detect_build_python
 from pydrud.commands.project.templates import _render_app_package, _render_native_layer
 
+
 def create_project(
     name: str,
     org: str = "com.example",
+    *,
     min_sdk: int = 24,
     target_sdk: int = COMPATIBILITY.target_sdk,
+    runtime: str = "pydash",
     pip_packages=None,
     firebase: bool = False,
     permissions=None,
@@ -33,7 +40,23 @@ def create_project(
     ``accent`` is the brand colour the whole design system is generated
     from — the Python palette, the generated ``themes.xml`` and the
     starter app all start from it.
+
+    ``runtime`` controls whether an Android project is generated::
+
+        pydash (default) — no Android directory; use ``pydrud dev`` for
+            live preview in the Pydash client.
+        chaquopy — full Android project with embedded CPython; use
+            ``pydrud run`` / ``pydrud build`` to produce an APK.
     """
+    # Validate early so a typo never silently falls through to chaquopy.
+    try:
+        chosen = Runtime(runtime).value
+    except ValueError:
+        valid = ", ".join(r.value for r in Runtime)
+        print(fail(
+            f"Unknown runtime {runtime!r}. Valid values are: {valid}."
+        ))
+        sys.exit(1)
 
     project_dir = os.path.join(os.getcwd(), _slugify(name))
     if os.path.exists(project_dir):
@@ -44,21 +67,17 @@ def create_project(
     package = _sanitize_package(org, pydrud_app_name)
     android_app_name = _camel(name)
     package_path = package.replace(".", "/")
-
-    # Build the package path for the generated Java source.
     java_package_path = package_path  # e.g. "com/example/my_app"
 
-    # Detect SDK for local.properties
-    sdk_dir = _detect_sdk()
-    # Detect Python executable for Chaquopy buildPython
-    python_exe = _detect_build_python()
+    is_chaquopy = chosen == "chaquopy"
 
-    # Normalise paths — Windows users get backslashes, but Gradle Kotlin DSL
-    # and .properties files treat ``\`` as an escape character.
-    sdk_dir = sdk_dir.replace("\\", "/")
-
-    # Detect NDK version for pydrud.yaml
-    ndk_version = _detect_ndk(sdk_dir)
+    # Chaquopy-only setup: SDK, Python interpreter, NDK detection.
+    if is_chaquopy:
+        sdk_dir = _detect_sdk().replace("\\", "/")
+        python_exe = _detect_build_python()
+        ndk_version = _detect_ndk(sdk_dir)
+    else:
+        sdk_dir = python_exe = ndk_version = ""
 
     from pydrud.widgets.theme import Colors as _Colors
 
@@ -116,14 +135,20 @@ def create_project(
         "app_links_host": "",
         "cleartext_traffic": True,
         "assets_dir": "assets",
+        "runtime": chosen,
     }
 
+    subtitle = (
+        "Live preview via Pydash client (no Android toolchain required)"
+        if not is_chaquopy
+        else "Scaffolding a native Android application powered by Python"
+    )
     print(tui.render_command_header(
         "init",
         f"Creating {name}",
-        subtitle="Scaffolding a native Android application powered by Python",
+        subtitle=subtitle,
         details=(("Package", package), ("Directory", project_dir),
-                 ("Android", f"API {min_sdk} → {target_sdk}")),
+                 ("Runtime", chosen)),
     ))
 
     # ── 1.  Python source ────────────────────────────────────────────────
@@ -131,46 +156,48 @@ def create_project(
 
     # ── 1b. Bundle pydrud source into the project so Chaquopy can import
     #        it at runtime without needing pip install or network access.
-    _bundle_pydrud_source(project_dir)
+    if is_chaquopy:
+        _bundle_pydrud_source(project_dir)
 
     # ── 2.  Android / Gradle ─────────────────────────────────────────────
-    _render_native_layer(project_dir, java_package_path, ctx)
+    if is_chaquopy:
+        _render_native_layer(project_dir, java_package_path, ctx)
 
-    # AndroidManifest.xml
-    _ensure_dir(f"{project_dir}/android/app/src/main")
-    _write_template("android/AndroidManifest.xml.j2",
-                    f"{project_dir}/android/app/src/main/AndroidManifest.xml", ctx)
+        # AndroidManifest.xml
+        _ensure_dir(f"{project_dir}/android/app/src/main")
+        _write_template("android/AndroidManifest.xml.j2",
+                        f"{project_dir}/android/app/src/main/AndroidManifest.xml", ctx)
 
-    # Build files
-    _write_template("android/build.gradle.kts.j2",
-                    f"{project_dir}/android/build.gradle.kts", ctx)
-    _write_template("android/app/build.gradle.kts.j2",
-                    f"{project_dir}/android/app/build.gradle.kts", ctx)
-    _write_template("android/proguard-rules.pro.j2",
-                    f"{project_dir}/android/app/proguard-rules.pro", ctx)
-    _write_template("android/settings.gradle.kts.j2",
-                    f"{project_dir}/android/settings.gradle.kts", ctx)
-    _write_template("android/gradle.properties.j2",
-                    f"{project_dir}/android/gradle.properties", ctx)
-    _write_template("android/local.properties.j2",
-                    f"{project_dir}/android/local.properties", ctx)
+        # Build files
+        _write_template("android/build.gradle.kts.j2",
+                        f"{project_dir}/android/build.gradle.kts", ctx)
+        _write_template("android/app/build.gradle.kts.j2",
+                        f"{project_dir}/android/app/build.gradle.kts", ctx)
+        _write_template("android/proguard-rules.pro.j2",
+                        f"{project_dir}/android/app/proguard-rules.pro", ctx)
+        _write_template("android/settings.gradle.kts.j2",
+                        f"{project_dir}/android/settings.gradle.kts", ctx)
+        _write_template("android/gradle.properties.j2",
+                        f"{project_dir}/android/gradle.properties", ctx)
+        _write_template("android/local.properties.j2",
+                        f"{project_dir}/android/local.properties", ctx)
 
-    # Launcher icons — copy from the pydrud package res/ directory.
-    _copy_icon_resources(project_dir)
+        # Launcher icons — copy from the pydrud package res/ directory.
+        _copy_icon_resources(project_dir)
 
-    # Gradle wrapper
-    _ensure_dir(f"{project_dir}/android/gradle/wrapper")
-    _ensure_dir(f"{project_dir}/android/gradle")
-    _write_template("android/gradlew.j2",
-                    f"{project_dir}/android/gradlew", ctx)
-    _write_template("android/gradlew.bat.j2",
-                    f"{project_dir}/android/gradlew.bat", ctx)
-    _write_template("android/gradle/wrapper/gradle-wrapper.properties.j2",
-                    f"{project_dir}/android/gradle/wrapper/gradle-wrapper.properties", ctx)
+        # Gradle wrapper
+        _ensure_dir(f"{project_dir}/android/gradle/wrapper")
+        _ensure_dir(f"{project_dir}/android/gradle")
+        _write_template("android/gradlew.j2",
+                        f"{project_dir}/android/gradlew", ctx)
+        _write_template("android/gradlew.bat.j2",
+                        f"{project_dir}/android/gradlew.bat", ctx)
+        _write_template("android/gradle/wrapper/gradle-wrapper.properties.j2",
+                        f"{project_dir}/android/gradle/wrapper/gradle-wrapper.properties", ctx)
 
-    # Make gradlew executable
-    gradlew_path = os.path.join(project_dir, "android", "gradlew")
-    os.chmod(gradlew_path, 0o755)
+        # Make gradlew executable
+        gradlew_path = os.path.join(project_dir, "android", "gradlew")
+        os.chmod(gradlew_path, 0o755)
 
     # ── 3.  Assets directory ──────────────────────────────────────────────
     _ensure_dir(f"{project_dir}/assets")
@@ -181,8 +208,9 @@ def create_project(
                     f"{project_dir}/src/pydrud_config.py", ctx)
 
     # ── 3b. Python setup for Chaquopy ─────────────────────────────────────
-    _write_template("python/setup.py.j2",
-                    f"{project_dir}/setup.py", ctx)
+    if is_chaquopy:
+        _write_template("python/setup.py.j2",
+                        f"{project_dir}/setup.py", ctx)
 
     # ── 4.  Top-level config ──────────────────────────────────────────────
     _write_template("pydrud.yaml.j2", f"{project_dir}/pydrud.yaml", ctx)
@@ -202,11 +230,16 @@ def create_project(
     with open(f"{project_dir}/tests/__init__.py", "w", encoding="utf-8") as f:
         f.write("")
 
-    print(tui.render_summary(
-        f"Project '{name}' created",
-        (("Package", package), ("Files", "Android + Python scaffold")),
-    ))
-    print(tui.render_next_steps((
+    next_steps = (
+        (f"cd {_slugify(name)}", "enter the project"),
+        ("pydrud dev", "start live preview in Pydash"),
+    ) if not is_chaquopy else (
         (f"cd {_slugify(name)}", "enter the project"),
         ("pydrud run", "build, install and start Hot Reload"),
-    )))
+    )
+    print(tui.render_summary(
+        f"Project '{name}' created",
+        (("Package", package),
+         ("Files", "Python source" if not is_chaquopy else "Android + Python scaffold")),
+    ))
+    print(tui.render_next_steps(next_steps))
