@@ -113,6 +113,16 @@ unlimited-widget and unlimited-icon work.
   `{"index": page}`. `Carousel` is the same widget with a `peek` default.
   Its adapter extends the virtualised-list adapter, so page add/move/remove
   patches reuse the existing list path unchanged.
+* **`PopupMenu`** / **`MenuItem`** (aliases `DropdownMenu`,
+  `PopupMenuButton`) — an overflow menu anchored to its trigger, backed by a
+  real `android.widget.PopupMenu`. Entries take a label, `(label, icon)`
+  tuple, dict or `MenuItem`, and may carry an `icon`, a `value` (reported by
+  `on_select`, the label by default), `enabled`, `checkable`/`checked`,
+  `danger` and a nested `submenu`; `MenuDivider()` separates groups. The
+  trigger defaults to a 48 dp overflow button, or a text button with
+  `label=`, or your own widget via `trigger=`. The menu is rebuilt from the
+  node's props on every tap, so an item added or renamed by a later patch is
+  always the one shown, and `on_select` receives `{"index", "value"}`.
 
 ### Added — accessibility (PYDRUD §14.7)
 * **`semantics=` on every widget** — the label becomes Android's

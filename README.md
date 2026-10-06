@@ -120,6 +120,9 @@ and grows the UI layer toward Flutter/React Native parity:
 * **Two more §15.2 widgets.** `RangeSlider` (a two-thumb range, backed by
   Material's `RangeSlider`) and `PageView`/`Carousel` (swipeable, snapping
   pages, backed by a snapping RecyclerView that reuses the list patch path).
+* **The overflow menu, natively.** `PopupMenu`/`DropdownMenu` shows a real
+  `android.widget.PopupMenu` anchored to its trigger, with icons, groups,
+  checkable entries and submenus; `on_select` reports the chosen entry.
 * **The release build is verified (BT-002).** `pydrud build --release` was
   run end to end with R8 shrinking on: the vendored Python runtime and the
   native libraries survive, and the build wiring is now pinned by tests.
@@ -1009,6 +1012,7 @@ fill, exactly like Flutter — put it between weighted children only when you
 | **`WebView`** (v1.2) | Embedded browser, 2-way `postMessage` | `url`, `html`, `on_load`, `on_message` |
 | **`VideoPlayer`** (v1.2) | Native video surface | `source`, `autoplay`, `loop`, `controls` |
 | **`Tooltip`** (v1.2) | Long-press hint | `message`, `child` |
+| **`PopupMenu`** / `MenuItem` (v2.0.3) | Overflow menu anchored to its trigger (real native `PopupMenu`) | `items`, `trigger`, `icon`, `label`, `item_icons`, `on_select`; aliases `DropdownMenu`, `PopupMenuButton` |
 | **`NativeView`** (v2.0.3) | Mount any Android `View` subclass by class name | `view_class`, `props`, `style` |
 
 ### Escape hatch — `NativeView`
@@ -1103,6 +1107,33 @@ that leaves the neighbouring pages visible:
 Carousel([PosterCard(p) for p in posters], peek=24)
 ```
 
+### Menus (v2.0.3)
+
+**`PopupMenu`** is an overflow menu anchored to its trigger — a real
+`android.widget.PopupMenu`, not a WebView or a hand-drawn overlay. Tapping
+the trigger opens it; choosing an entry fires `on_select` with the entry's
+`index` and `value`:
+
+```python
+PopupMenu(
+    [MenuItem("Rename", icon=Icons.EDIT),
+     MenuItem("Duplicate", icon=Icons.COPY),
+     MenuDivider(),
+     MenuItem("Delete", icon=Icons.DELETE, danger=True)],
+    on_select=lambda e: delete() if e["value"] == "Delete" else None,
+)
+```
+
+Entries accept a bare label, a `(label, icon)` tuple, a dict, or a full
+`MenuItem`. A `MenuItem` can carry an `icon`, a `value` (what the event
+reports — the label by default), `enabled`, `checkable`/`checked`, `danger`
+(an error-tinted icon) and a nested `submenu`. `MenuDivider()` separates two
+groups.
+
+The trigger defaults to a 48 dp overflow (⋮) button; pass `label=` for a text
+button or `trigger=` to anchor the menu to your own widget. `DropdownMenu`
+and `PopupMenuButton` are aliases.
+
 ### Flutter-style presets and compositions
 
 These constructors reuse the native primitives above, so they add ergonomics
@@ -1129,6 +1160,7 @@ widget.on_long_press(callback) # Any widget
 widget.on_change(callback)     # TextField, Checkbox, Switch, Slider, RangeSlider, Dropdown, PageView
 widget.on_submit(callback)     # TextField (IME action)
 widget.on_focus(callback)      # Focus gain / loss
+widget.on("select", callback)  # PopupMenu / DropdownMenu ({"index", "value"})
 widget.on("scroll", callback)  # Any event name
 ```
 
