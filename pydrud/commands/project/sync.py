@@ -8,7 +8,7 @@ import os
 import re
 import sys
 
-from pydrud.compatibility import COMPATIBILITY
+from pydrud.compatibility import COMPATIBILITY, HOST_COMPATIBILITY
 from pydrud.commands.project_config import load_project_config
 from pydrud.runtime.runtime import Runtime, resolve_runtime
 from pydrud.utils import tui
@@ -103,7 +103,7 @@ def _sync_context(project_dir: str, found: dict) -> dict:
         raise ProjectConfigError("'assets_dir' must stay inside the project")
 
     python_version = _config_string(
-        config, "python_version", COMPATIBILITY.python_version)
+        config, "python_version", HOST_COMPATIBILITY.python_version)
     old_python = _gradle_value(
         project_dir,
         r'buildPython\(System\.getenv\("PYDRUD_PYTHON"\)\s*\?:\s*"([^"]+)"\)',
@@ -125,9 +125,9 @@ def _sync_context(project_dir: str, found: dict) -> dict:
         "python_version": python_version,
         "python_executable": old_python,
         "pydrud_runtime_version": _config_string(
-            config, "framework_version", COMPATIBILITY.android_runtime_version),
+            config, "framework_version", HOST_COMPATIBILITY.framework_version),
         "protocol_version": _config_int(
-            config, "protocol_version", COMPATIBILITY.protocol_version,
+            config, "protocol_version", HOST_COMPATIBILITY.protocol_version,
             minimum=1),
         "chaquopy_version": _config_string(
             config, "chaquopy_version", COMPATIBILITY.chaquopy_version),

@@ -8,7 +8,7 @@ import os
 import shutil
 import sys
 
-from pydrud.compatibility import COMPATIBILITY
+from pydrud.compatibility import HOST_COMPATIBILITY
 from pydrud.utils.colors import info
 
 #: CPython versions Chaquopy accepts as ``buildPython``, newest first.
@@ -16,7 +16,7 @@ BUILD_PYTHON_VERSIONS = ("3.13", "3.12", "3.11", "3.10")
 
 
 #: The Python version the app itself runs on the device.
-APP_PYTHON_VERSION = COMPATIBILITY.python_version
+APP_PYTHON_VERSION = HOST_COMPATIBILITY.python_version
 
 
 def _python_version_of(exe: str, args: list[str] | None = None) -> str:
