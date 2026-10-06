@@ -80,6 +80,7 @@ class Widget:
         semantics: Optional[str] = None,
         on_click: Optional[Callable] = None,
         on_long_press: Optional[Callable] = None,
+        class_: Optional[list[str]] = None,
         **kwargs,
     ):
         #: Whether ``key`` was auto-generated (eligible for key stabilisation).
@@ -88,6 +89,11 @@ class Widget:
         self.key: str = key or _gen_key()
         #: Style dictionary (see pydrud.widgets.styling for helpers).
         self.style: dict = dict(style) if style else {}
+        #: CSS-like class names applied to this widget.
+        #: Stored as ``class_<name>`` keys in style for renderer access.
+        self.class_: list[str] = list(class_) if class_ else []
+        for cls in self.class_:
+            self.style[f"class_{cls}"] = True
         #: Flex / weight factor inside a Row or Column.
         self.expand: Optional[int] = expand
         #: Whether the widget is visible.
