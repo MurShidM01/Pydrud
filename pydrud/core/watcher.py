@@ -22,7 +22,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 
-_EXTENSIONS = (".py",)
+_EXTENSIONS = (".py", ".pss")
 
 #: Directories that never need watching.
 _IGNORED_DIRS = {"__pycache__", ".git", ".venv", "venv", "build", "dist", ".idea"}
