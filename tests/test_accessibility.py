@@ -27,13 +27,11 @@ from pydrud.core.diff import TreeDiff
 from pydrud.testing import AppTester
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VIEW_FACTORY = os.path.join(ROOT, "pydrud", "android", "templates",
-                            "android", "ViewFactory.java.j2")
+from tests import all_java_templates  # noqa: E402
 
 
 def _java() -> str:
-    with open(VIEW_FACTORY, encoding="utf-8") as handle:
-        return handle.read()
+    return all_java_templates()
 
 
 def messages(source: str) -> list:
@@ -265,7 +263,7 @@ class TestGeneratedJava(unittest.TestCase):
         self.assertIn("semantics", known)
 
     def test_it_clears_the_description_when_the_label_is_removed(self):
-        body = re.search(r"private void applySemantics"
+        body = re.search(r"void applySemantics"
                          r"\(.*?\n    \}", self.source, re.S).group(0)
         self.assertIn("isNull", body)
 

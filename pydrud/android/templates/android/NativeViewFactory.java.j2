@@ -1,0 +1,150 @@
+package {{ package }};
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.util.Log;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.*;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import org.json.JSONException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * NativeViewFactory — collaborator extracted from ViewFactory.
+ *
+ * Holds a back-reference to the owning {@link ViewFactory} and owns one
+ * cohesive slice of the rendering responsibility (styling, layout, events,
+ * image loading, tree patching, native views or built-in widget factories).
+ */
+public class NativeViewFactory {
+
+    final ViewFactory vf;
+
+    NativeViewFactory(ViewFactory vf) {
+        this.vf = vf;
+    }
+
+    View createNativeView(JSONObject json) {
+        JSONObject p = vf.props(json);
+        String className = p.optString("viewClass", "").trim();
+        if (className.isEmpty()) {
+            Log.w(ViewFactory.TAG, "NativeView without a viewClass — rendering empty box");
+            return new FrameLayout(vf.activity);
+        }
+        try {
+            Class<?> cls = Class.forName(className, true, vf.activity.getClassLoader());
+            if (!View.class.isAssignableFrom(cls)) {
+                Log.w(ViewFactory.TAG, "NativeView " + className + " is not an android.view.View");
+                return new FrameLayout(vf.activity);
+            }
+            View view = (View) cls.getConstructor(android.content.Context.class)
+                .newInstance(vf.activity);
+            applyNativeProps(view, p);
+            return view;
+        } catch (Throwable e) {
+            Log.e(ViewFactory.TAG, "NativeView " + className + " failed to mount — "
+                + "rendering an empty box. Is the class in the APK?", e);
+            return new FrameLayout(vf.activity);
+        }
+    }
+
+    void applyNativeProps(View view, JSONObject p) {
+        try {
+            java.lang.reflect.Method apply = view.getClass()
+                .getMethod("applyProps", JSONObject.class);
+            apply.invoke(view, p);
+            return;
+        } catch (NoSuchMethodException ignored) {
+            // No applyProps — fall through to the setter mapping.
+        } catch (Throwable e) {
+            Log.w(ViewFactory.TAG, "NativeView applyProps() threw on "
+                + view.getClass().getName(), e);
+            return;
+        }
+        for (java.util.Iterator<String> keys = p.keys(); keys.hasNext(); ) {
+            String name = keys.next();
+            if ("viewClass".equals(name)) continue;
+            Object value = p.opt(name);
+            if (value == null || value == JSONObject.NULL) continue;
+            String setter = "set" + Character.toUpperCase(name.charAt(0))
+                + name.substring(1);
+            java.lang.reflect.Method method = findSetter(view.getClass(), setter, value);
+            if (method == null) {
+                Log.w(ViewFactory.TAG, "NativeView " + view.getClass().getSimpleName()
+                    + " has no " + setter + "(...) for prop '" + name + "'");
+                continue;
+            }
+            try {
+                method.invoke(view, coerce(value, method.getParameterTypes()[0]));
+            } catch (Throwable e) {
+                Log.w(ViewFactory.TAG, "NativeView " + setter + "() failed", e);
+            }
+        }
+    }
+
+    static JSONObject mergeProps(JSONObject base, JSONObject patch) {
+        JSONObject merged = new JSONObject();
+        for (JSONObject source : new JSONObject[]{ base, patch }) {
+            if (source == null) continue;
+            for (java.util.Iterator<String> it = source.keys(); it.hasNext(); ) {
+                String name = it.next();
+                try { merged.put(name, source.opt(name)); }
+                catch (JSONException ignored) {}
+            }
+        }
+        return merged;
+    }
+
+    static java.lang.reflect.Method findSetter(Class<?> cls, String name,
+                                                       Object value) {
+        for (java.lang.reflect.Method method : cls.getMethods()) {
+            if (!method.getName().equals(name) || method.getParameterCount() != 1) {
+                continue;
+            }
+            if (canCoerce(value, method.getParameterTypes()[0])) return method;
+        }
+        return null;
+    }
+
+    static boolean canCoerce(Object value, Class<?> target) {
+        if (value instanceof String) {
+            return target == String.class || target == CharSequence.class;
+        }
+        if (value instanceof Boolean) {
+            return target == boolean.class || target == Boolean.class;
+        }
+        if (value instanceof Number) {
+            return target == int.class || target == Integer.class
+                || target == float.class || target == Float.class
+                || target == double.class || target == Double.class
+                || target == long.class || target == Long.class
+                || target == short.class || target == Short.class
+                || target == byte.class || target == Byte.class
+                || target == String.class || target == CharSequence.class;
+        }
+        return target.isInstance(value);
+    }
+
+    static Object coerce(Object value, Class<?> target) {
+        if (value instanceof Number) {
+            double d = ((Number) value).doubleValue();
+            if (target == int.class || target == Integer.class) return (int) d;
+            if (target == float.class || target == Float.class) return (float) d;
+            if (target == double.class || target == Double.class) return d;
+            if (target == long.class || target == Long.class) return (long) d;
+            if (target == short.class || target == Short.class) return (short) d;
+            if (target == byte.class || target == Byte.class) return (byte) d;
+            if (target == String.class || target == CharSequence.class) {
+                return String.valueOf(value);
+            }
+        }
+        return value;
+    }
+
+}

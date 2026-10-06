@@ -1,0 +1,486 @@
+package {{ package }};
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.util.Log;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.*;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import org.json.JSONException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * LayoutEngine — collaborator extracted from ViewFactory.
+ *
+ * Holds a back-reference to the owning {@link ViewFactory} and owns one
+ * cohesive slice of the rendering responsibility (styling, layout, events,
+ * image loading, tree patching, native views or built-in widget factories).
+ */
+public class LayoutEngine {
+
+    final ViewFactory vf;
+
+    LayoutEngine(ViewFactory vf) {
+        this.vf = vf;
+    }
+
+    public void refreshInsets() {
+        for (Map.Entry<View, int[]> entry : vf.safeAreaViews.entrySet()) {
+            applySafeAreaPadding(entry.getKey(), entry.getValue());
+        }
+        // Navigation bars size themselves from the gesture inset and the
+        // window metrics, so they have to recompute after a rotation.
+        for (View view : vf.viewMap.values()) {
+            if (view instanceof PydrudNavigation.PydrudNavBar) {
+                ((PydrudNavigation.PydrudNavBar) view).refreshMetrics();
+            }
+        }
+    }
+
+    void applySafeAreaPadding(View view, int[] spec) {
+        if (view == null) return;
+        int top = spec[2] + (spec[0] == 1 ? PydrudTheme.insetTop : 0);
+        int bottom = spec[3] + (spec[1] == 1 ? PydrudTheme.insetBottom : 0);
+        view.setPadding(view.getPaddingLeft(), top, view.getPaddingRight(), bottom);
+    }
+
+    void applySafeArea(View view, JSONObject s) {
+        if (s == null) return;
+        boolean top = s.optBoolean("safeAreaTop", false);
+        boolean bottom = s.optBoolean("safeAreaBottom", false);
+        if (!top && !bottom) return;
+        int[] spec = {top ? 1 : 0, bottom ? 1 : 0,
+                      view.getPaddingTop(), view.getPaddingBottom()};
+        vf.safeAreaViews.put(view, spec);
+        applySafeAreaPadding(view, spec);
+    }
+
+    View createLinear(JSONObject json, int orientation) throws JSONException {
+        LinearLayout ll = new LinearLayout(vf.activity);
+        ll.setOrientation(orientation);
+
+        JSONObject s = json.optJSONObject("style");
+        boolean scroll = s != null && s.optBoolean("scroll", false);
+        if (s != null && "horizontal".equals(s.optString("mainAxis", "")) &&
+            "ListView".equals(json.optString("type", ""))) {
+            ll.setOrientation(LinearLayout.HORIZONTAL);
+            orientation = LinearLayout.HORIZONTAL;
+        }
+        int spacing = (s != null) ? vf.mStyler.dp(s.optInt("spacing", 0)) : 0;
+        applyLinearGravity(ll, s, orientation);
+
+        // Spacing is applied as a margin on each child rather than as
+        // interleaved Space views: a Space would sit between the children
+        // and shift every native index, so an insert/remove patch (which
+        // addresses children by logical index) would land in the wrong
+        // place — or leave an orphaned gap behind.
+        if (spacing > 0) vf.linearSpacing.put(ll, spacing);
+        String parentKey = json != null ? json.optString("key", "") : "";
+
+        JSONArray arr = json.optJSONArray("children");
+        if (arr != null) {
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject childJson = arr.optJSONObject(i);
+                View c = vf.mBuiltin.createView(childJson);
+                if (c == null) continue;
+                if (childJson != null && !parentKey.isEmpty()) {
+                    String childKey = childJson.optString("key", "");
+                    if (!childKey.isEmpty()) vf.parentMap.put(childKey, parentKey);
+                }
+                ll.addView(c, linearParams(childJson, orientation));
+            }
+        }
+        applySpacing(ll);
+
+        PydrudTheme.animateLayout(ll);
+
+        if (!scroll) return ll;
+
+        if (orientation == LinearLayout.VERTICAL) {
+            ScrollView sv = new ScrollView(vf.activity);
+            sv.setFillViewport(true);
+            sv.setVerticalScrollBarEnabled(false);
+            sv.setClipToPadding(false);
+            sv.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+            sv.addView(ll, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT));
+            return sv;
+        }
+        HorizontalScrollView hsv = new HorizontalScrollView(vf.activity);
+        hsv.setFillViewport(true);
+        hsv.setHorizontalScrollBarEnabled(false);
+        hsv.setClipToPadding(false);
+        hsv.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        hsv.addView(ll, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.MATCH_PARENT));
+        return hsv;
+    }
+
+    void applyLinearGravity(LinearLayout ll, JSONObject s, int orientation) {
+        if (s == null) return;
+        String cross = s.optString("crossAxisAlignment", "");
+        String main = s.optString("mainAxisAlignment", "");
+        if (cross.isEmpty() && main.isEmpty()) return;
+        if (main.isEmpty()) {
+            ll.setGravity(vf.mStyler.gravity(cross));      // legacy both-axis behaviour
+            return;
+        }
+        boolean vertical = orientation == LinearLayout.VERTICAL;
+        int g = cross.isEmpty() ? 0 : axisBits(vf.mStyler.gravity(cross), !vertical);
+        g |= axisBits(vf.mStyler.gravity(main), vertical);
+        if (g != 0) ll.setGravity(g);
+    }
+
+    static int axisBits(int grav, boolean horizontal) {
+        int mask = horizontal ? Gravity.HORIZONTAL_GRAVITY_MASK
+                              : Gravity.VERTICAL_GRAVITY_MASK;
+        return grav & mask;
+    }
+
+    View createGrid(JSONObject json) throws JSONException {
+        JSONObject s = json.optJSONObject("style");
+        int spacing = PydrudTheme.adaptive(s != null ? (float) s.optDouble("spacing", 8) : 8f);
+        int columns = gridColumns(s);
+
+        LinearLayout grid = new LinearLayout(vf.activity);
+        grid.setOrientation(LinearLayout.VERTICAL);
+
+        JSONArray arr = json.optJSONArray("children");
+        int count = arr != null ? arr.length() : 0;
+        LinearLayout row = null;
+        for (int i = 0; i < count; i++) {
+            if (i % columns == 0) {
+                row = new LinearLayout(vf.activity);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+                if (i > 0) rlp.topMargin = spacing;
+                grid.addView(row, rlp);
+            }
+            View c = vf.mBuiltin.createView(arr.optJSONObject(i));
+            if (c == null || row == null) continue;
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+            if (i % columns != 0) clp.leftMargin = spacing;
+            row.addView(c, clp);
+        }
+        // Pad the final row so cells keep their width.
+        if (row != null && count % columns != 0) {
+            for (int i = count % columns; i < columns; i++) {
+                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+                clp.leftMargin = spacing;
+                row.addView(new Space(vf.activity), clp);
+            }
+        }
+        PydrudTheme.animateLayout(grid);
+        return grid;
+    }
+
+    int gridColumns(JSONObject s) {
+        if (s == null) return 2;
+        Object raw = s.opt("columns");
+        int screen = PydrudTheme.screenWidthDp();
+
+        boolean auto = raw == null
+            || (raw instanceof String && "auto".equals(raw))
+            || (raw instanceof Number && ((Number) raw).intValue() <= 0);
+        int maxColumns = Math.max(1, Math.min(12, s.optInt("maxColumns", 6)));
+        if (auto) {
+            int minItem = (int) s.optDouble("minItemWidth", 160);
+            if (minItem <= 0) minItem = 160;
+            return Math.max(1, Math.min(maxColumns, screen / minItem));
+        }
+        int columns = Math.max(1, Math.min(maxColumns, s.optInt("columns", 2)));
+        if (s.has("tabletColumns") && screen >= 600) {
+            columns = Math.max(1, s.optInt("tabletColumns", columns));
+        } else if (screen >= 840) {
+            columns = Math.min(6, columns + 2);   // large tablet / foldable
+        } else if (screen >= 600) {
+            columns = Math.min(6, columns + 1);
+        }
+        return columns;
+    }
+
+    LinearLayout.LayoutParams linearParams(JSONObject json, int orientation) {
+        ViewGroup.LayoutParams base = sizeFor(json);
+        // Inside a horizontal layout a full-width child (a Card, a Column,
+        // an input…) would swallow the whole row and starve its siblings —
+        // the classic symptom was an app bar whose title vanished behind
+        // one oversized action slot. Block widgets hug their content here
+        // unless they declare a width or expand to claim the space.
+        if (orientation == LinearLayout.HORIZONTAL
+                && base.width == ViewGroup.LayoutParams.MATCH_PARENT
+                && !vf.mStyler.declaresWidth(json)) {
+            base.width = ViewGroup.LayoutParams.WRAP_CONTENT;
+        }
+        LinearLayout.LayoutParams lp =
+            new LinearLayout.LayoutParams(base.width, base.height);
+        vf.mStyler.applyMargins(lp, json);
+
+        int expand = json != null && !json.isNull("expand") ? json.optInt("expand", 0) : 0;
+        boolean isSpacer = json != null && "Spacer".equals(json.optString("type", ""));
+        if (isSpacer && expand == 0) expand = 1;
+        if (expand > 0) {
+            lp.weight = expand;
+            // A weighted child must give up its main-axis size.
+            if (orientation == LinearLayout.VERTICAL) lp.height = 0;
+            else lp.width = 0;
+        }
+        if (isSpacer) {
+            if (orientation == LinearLayout.VERTICAL) lp.width = LinearLayout.LayoutParams.MATCH_PARENT;
+            else lp.height = LinearLayout.LayoutParams.MATCH_PARENT;
+        }
+        // A width-capped child centres itself in the leftover space instead
+        // of hugging the start edge — the "readable column" layout.
+        JSONObject cs = json != null ? json.optJSONObject("style") : null;
+        if (cs != null && cs.has("maxWidth") && !cs.has("alignment")
+                && orientation == LinearLayout.VERTICAL
+                && lp.width != LinearLayout.LayoutParams.MATCH_PARENT) {
+            lp.gravity = Gravity.CENTER_HORIZONTAL;
+        }
+        return lp;
+    }
+
+    FrameLayout.LayoutParams frameParams(JSONObject json, int parentGravity) {
+        ViewGroup.LayoutParams base = sizeFor(json);
+        FrameLayout.LayoutParams lp =
+            new FrameLayout.LayoutParams(base.width, base.height);
+        vf.mStyler.applyMargins(lp, json);
+
+        JSONObject s = json != null ? json.optJSONObject("style") : null;
+        int grav = parentGravity;
+        if (s != null && "absolute".equals(s.optString("position", ""))) {
+            grav = Gravity.NO_GRAVITY;
+            if (s.has("left"))   { grav |= Gravity.START;  lp.leftMargin = vf.mStyler.dp(s.optInt("left", 0)); }
+            if (s.has("right"))  { grav |= Gravity.END;    lp.rightMargin = vf.mStyler.dp(s.optInt("right", 0)); }
+            if (s.has("top"))    { grav |= Gravity.TOP;    lp.topMargin = vf.mStyler.dp(s.optInt("top", 0)); }
+            if (s.has("bottom")) {
+                grav |= Gravity.BOTTOM;
+                // Floating elements clear the gesture bar as well as their
+                // own offset, otherwise a FAB sits on top of it.
+                lp.bottomMargin = vf.mStyler.dp(s.optInt("bottom", 0))
+                    + (s.optBoolean("safeAreaBottom", true) ? PydrudTheme.insetBottom : 0);
+            }
+            if (grav == Gravity.NO_GRAVITY) grav = Gravity.TOP | Gravity.START;
+        } else if (s != null && s.has("alignment")) {
+            grav = vf.mStyler.gravity(s.optString("alignment", ""));
+        }
+        if (grav != Gravity.NO_GRAVITY) lp.gravity = grav;
+        return lp;
+    }
+
+    ViewGroup.LayoutParams sizeFor(JSONObject json) {
+        int w = ViewGroup.LayoutParams.WRAP_CONTENT;
+        int h = ViewGroup.LayoutParams.WRAP_CONTENT;
+        if (json == null) return new ViewGroup.LayoutParams(w, h);
+
+        String type = json.optString("type", "");
+        if (vf.mStyler.fillsWidthByDefault(type)) w = ViewGroup.LayoutParams.MATCH_PARENT;
+        if ("Center".equals(type) || "Stack".equals(type)) {
+            w = ViewGroup.LayoutParams.MATCH_PARENT;
+            h = ViewGroup.LayoutParams.MATCH_PARENT;
+        }
+        if ("Divider".equals(type)) {
+            JSONObject ds = json.optJSONObject("style");
+            h = vf.mStyler.dp(ds != null ? ds.optInt("thickness", 1) : 1);
+        }
+
+        JSONObject s = json.optJSONObject("style");
+        if (s != null) {
+            if (s.has("width"))  w = vf.mStyler.dimension(s, "width", w);
+            if (s.has("height")) h = vf.mStyler.dimension(s, "height", h);
+            // maxWidth / maxHeight cap a stretched child on big screens, so
+            // a form on a tablet stays readable instead of spanning 1200dp.
+            if (s.has("maxWidth")) {
+                int max = vf.mStyler.dimension(s, "maxWidth", -1);
+                int current = (w == ViewGroup.LayoutParams.MATCH_PARENT)
+                    ? PydrudTheme.screenWidthPx() : w;
+                if (max > 0 && current > max) w = max;
+            }
+            if (s.has("maxHeight")) {
+                int max = vf.mStyler.dimension(s, "maxHeight", -1);
+                int current = (h == ViewGroup.LayoutParams.MATCH_PARENT)
+                    ? PydrudTheme.screenHeightPx() : h;
+                if (max > 0 && current > max) h = max;
+            }
+        }
+        return new ViewGroup.LayoutParams(w, h);
+    }
+
+    void addChild(ViewGroup parent, View child, JSONObject json, int index) {
+        // A RecyclerView-backed (virtualised) ListView owns its rows through
+        // the adapter — RecyclerView.addView would throw and the node tree
+        // is patched *after* this call. Defer a full row rebuild until the
+        // patch has been applied to the node map.
+        if (parent instanceof androidx.recyclerview.widget.RecyclerView
+                && ((androidx.recyclerview.widget.RecyclerView) parent).getAdapter()
+                        instanceof AdvancedViews.ViewAdapter) {
+            final androidx.recyclerview.widget.RecyclerView list =
+                (androidx.recyclerview.widget.RecyclerView) parent;
+            list.post(() -> vf.mBuiltin.rebuildListRows(list));
+            return;
+        }
+        // Replacement rows land inside an adapter holder wrapper — swap the
+        // adapter's backing view so the recycled cell never resurrects the
+        // pre-replace view on rebind.
+        ViewGroup grand = parent.getParent() instanceof ViewGroup
+            ? (ViewGroup) parent.getParent() : null;
+        if (grand instanceof androidx.recyclerview.widget.RecyclerView
+                && ((androidx.recyclerview.widget.RecyclerView) grand).getAdapter()
+                        instanceof AdvancedViews.ViewAdapter) {
+            androidx.recyclerview.widget.RecyclerView list =
+                (androidx.recyclerview.widget.RecyclerView) grand;
+            int pos = list.getChildAdapterPosition(parent);
+            if (pos != androidx.recyclerview.widget.RecyclerView.NO_POSITION) {
+                AdvancedViews.ViewAdapter adapter =
+                    (AdvancedViews.ViewAdapter) list.getAdapter();
+                if (pos < adapter.views.size()) {
+                    adapter.views.set(pos, child);
+                    adapter.notifyItemChanged(pos);
+                } else {
+                    adapter.views.add(child);
+                    adapter.notifyItemInserted(adapter.views.size() - 1);
+                }
+                return;
+            }
+        }
+        ViewGroup.LayoutParams lp;
+        if (parent instanceof LinearLayout) {
+            lp = linearParams(json, ((LinearLayout) parent).getOrientation());
+        } else if (parent instanceof FrameLayout) {
+            lp = frameParams(json, Gravity.NO_GRAVITY);
+        } else {
+            lp = sizeFor(json);
+        }
+        int at = (index < 0 || index > parent.getChildCount()) ? parent.getChildCount() : index;
+        parent.addView(child, at, lp);
+        applySpacing(parent);
+    }
+
+    int baseMargin(View child, boolean vertical) {
+        Object tag = child.getTag();
+        if (!(tag instanceof String)) return 0;
+        JSONObject node = vf.nodeMap.get((String) tag);
+        JSONObject style = node != null ? node.optJSONObject("style") : null;
+        JSONObject margin = style != null ? style.optJSONObject("margin") : null;
+        if (margin == null) return 0;
+        if (margin.has("all")) return vf.mStyler.dp(margin.optInt("all", 0));
+        return vf.mStyler.dp(margin.optInt(vertical ? "top" : "left", 0));
+    }
+
+    void applySpacing(ViewGroup parent) {
+        if (parent == null || !(parent instanceof LinearLayout)) return;
+        Integer gap = vf.linearSpacing.get(parent);
+        if (gap == null || gap <= 0) return;
+        LinearLayout ll = (LinearLayout) parent;
+        boolean vertical = ll.getOrientation() == LinearLayout.VERTICAL;
+        int visibleIndex = 0;
+        for (int i = 0; i < ll.getChildCount(); i++) {
+            View child = ll.getChildAt(i);
+            ViewGroup.LayoutParams lp = child.getLayoutParams();
+            if (!(lp instanceof ViewGroup.MarginLayoutParams)) continue;
+            ViewGroup.MarginLayoutParams mlp = (ViewGroup.MarginLayoutParams) lp;
+            boolean gone = child.getVisibility() == View.GONE;
+            int lead = (visibleIndex == 0 || gone) ? 0 : gap;
+            // The child keeps its own style margin; the gap is added on top.
+            lead += baseMargin(child, vertical);
+            if (vertical) mlp.topMargin = lead; else mlp.leftMargin = lead;
+            child.setLayoutParams(mlp);
+            if (!gone) visibleIndex++;
+        }
+    }
+
+    ViewGroup containerFor(String parentKey) {
+        View parent = vf.viewMap.get(parentKey);
+        if (parent instanceof ScrollView || parent instanceof HorizontalScrollView) {
+            ViewGroup sv = (ViewGroup) parent;
+            if (sv.getChildCount() > 0 && sv.getChildAt(0) instanceof ViewGroup) {
+                return (ViewGroup) sv.getChildAt(0);
+            }
+        }
+        return childHost(parent);
+    }
+
+    static ViewGroup childHost(View view) {
+        if (view == null) return null;
+        Object tag = view.getTag(R.id.pydrud_tag_children);
+        if (tag instanceof ViewGroup) return (ViewGroup) tag;
+        return view instanceof ViewGroup ? (ViewGroup) view : null;
+    }
+
+    void attachChildren(View view, JSONObject json) {
+        JSONArray arr = json != null ? json.optJSONArray("children") : null;
+        if (arr == null || arr.length() == 0) return;
+        ViewGroup host = childHost(view);
+        if (host == null) return;
+        String parentKey = json.optString("key", "");
+        for (int i = 0; i < arr.length(); i++) {
+            JSONObject childJson = arr.optJSONObject(i);
+            View child = vf.mBuiltin.createView(childJson);
+            if (child == null) continue;
+            if (childJson != null) {
+                String childKey = childJson.optString("key", "");
+                if (!childKey.isEmpty()) vf.parentMap.put(childKey, parentKey);
+            }
+            addChild(host, child, childJson, -1);
+        }
+    }
+
+    void removeViewTree(String key) {
+        View v = vf.viewMap.remove(key);
+        vf.nodeMap.remove(key);
+        vf.parentMap.remove(key);
+        List<String> orphans = new ArrayList<>();
+        for (Map.Entry<String, String> e : vf.parentMap.entrySet()) {
+            if (key.equals(e.getValue())) orphans.add(e.getKey());
+        }
+        for (String child : orphans) removeViewTree(child);
+        if (v != null && v.getParent() instanceof ViewGroup) {
+            ((ViewGroup) v.getParent()).removeView(v);
+        }
+    }
+
+    void mergeInto(JSONObject node, String section, JSONObject values) {
+        if (node == null || values == null) return;
+        JSONObject target = node.optJSONObject(section);
+        try {
+            if (target == null) {
+                node.put(section, values);
+                return;
+            }
+            java.util.Iterator<String> it = values.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                if (values.isNull(k)) target.remove(k);
+                else target.put(k, values.get(k));
+            }
+        } catch (JSONException ignored) {}
+    }
+
+    void recreateInPlace(String key, JSONObject node) {
+        View old = vf.viewMap.get(key);
+        if (old == null || node == null) return;
+        ViewGroup parent = old.getParent() instanceof ViewGroup
+            ? (ViewGroup) old.getParent() : null;
+        if (parent == null) return;
+        int at = parent.indexOfChild(old);
+        String parentKey = vf.parentMap.get(key);
+
+        removeViewTree(key);
+        View fresh = vf.mBuiltin.createView(node);
+        if (fresh == null) return;
+        if (parentKey != null) vf.parentMap.put(key, parentKey);
+        addChild(parent, fresh, node, at);
+    }
+
+}

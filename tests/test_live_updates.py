@@ -157,7 +157,8 @@ class TestViewFactoryTemplate(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.factory = _java("ViewFactory")
+        from tests import all_java_templates
+        cls.factory = all_java_templates()
         cls.material = _java("MaterialViews")
         cls.bridge = _java("BridgeService")
 
@@ -166,7 +167,7 @@ class TestViewFactoryTemplate(unittest.TestCase):
         # on the first frame because only the built-in layouts attached
         # children.
         self.assertIn("attachChildren(view, json);", self.factory)
-        self.assertIn("private void attachChildren(", self.factory)
+        self.assertIn("void attachChildren(", self.factory)
 
     def test_child_host_tag_is_honoured_by_patches(self):
         self.assertIn("static ViewGroup childHost(View view)", self.factory)
@@ -222,10 +223,10 @@ class TestViewFactoryTemplate(unittest.TestCase):
         # Interleaved Space views shifted every native child index, so
         # insert/remove patches landed in the wrong place.
         self.assertNotIn("Space gap = new Space(activity);", self.factory)
-        self.assertIn("private void applySpacing(ViewGroup parent)", self.factory)
+        self.assertIn("void applySpacing(ViewGroup parent)", self.factory)
 
     def test_unhandled_prop_updates_rebuild_the_view(self):
-        self.assertIn("private boolean updateProps(", self.factory)
+        self.assertIn("boolean updateProps(", self.factory)
         self.assertIn("recreateInPlace(key, node);", self.factory)
 
     def test_image_source_updates_reload_the_bitmap(self):

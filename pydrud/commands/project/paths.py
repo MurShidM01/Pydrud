@@ -195,6 +195,9 @@ _JAVA_TEMPLATES = (
     "PydrudNavigation", "GestureBinder", "NativeServices", "PlatformServices", "AdvancedViews",
     "PydrudWorker", "PydrudForegroundService",
     "CaptureServices", "ConnectivityServices",
+    # ViewFactory collaborators (extracted to keep every renderer file small).
+    "ImageLoader", "ViewStyler", "LayoutEngine", "TreePatcher",
+    "EventBinder", "NativeViewFactory", "ViewAnimator", "BuiltinViews",
 )
 
 

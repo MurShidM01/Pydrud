@@ -151,8 +151,8 @@ class TestPreviewParity(unittest.TestCase):
     SPECIAL = {"Stack", "Center"}
 
     def test_fill_width_lists_match(self):
-        java = read(os.path.join(
-            "pydrud", "android", "templates", "android", "ViewFactory.java.j2"))
+        from tests import all_java_templates
+        java = all_java_templates()
         body = re.search(
             r"fillsWidthByDefault\(String type\) \{(.*?)\n    \}",
             java, re.S)

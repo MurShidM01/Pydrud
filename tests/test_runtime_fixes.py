@@ -109,14 +109,19 @@ def test_main_activity_dismisses_keyboard_on_outside_tap():
 
 
 def test_viewfactory_lists_virtualize_beyond_threshold():
-    text = (TEMPLATES / "ViewFactory.java.j2").read_text(encoding="utf-8")
+    from tests import all_java_templates
+    text = all_java_templates()
     assert "VIRTUALIZE_THRESHOLD" in text
     assert "RecyclerView" in text
     assert "rebuildListRows" in text
 
 
 def test_viewfactory_image_pipeline_is_managed():
-    text = (TEMPLATES / "ViewFactory.java.j2").read_text(encoding="utf-8")
+    from tests import read_template
+    # The image pipeline lives in its own ImageLoader collaborator class;
+    # scope the raw-thread ban to it (worker/bridge threads elsewhere are
+    # unrelated to image decoding).
+    text = read_template("ImageLoader.java.j2")
     assert "IMAGE_EXECUTOR" in text and "newFixedThreadPool" in text
     assert "IMAGE_CACHE" in text and "LruCache" in text
     assert "inSampleSize" in text           # downsampling

@@ -1,0 +1,277 @@
+package {{ package }};
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.util.Log;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.*;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import org.json.JSONException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * EventBinder — collaborator extracted from ViewFactory.
+ *
+ * Holds a back-reference to the owning {@link ViewFactory} and owns one
+ * cohesive slice of the rendering responsibility (styling, layout, events,
+ * image loading, tree patching, native views or built-in widget factories).
+ */
+public class EventBinder {
+
+    final ViewFactory vf;
+
+    EventBinder(ViewFactory vf) {
+        this.vf = vf;
+    }
+
+    void bindEvents(View view, JSONObject json) {
+        final String key = json.optString("key", "");
+        if (key.isEmpty() || vf.eventDispatcher == null) return;
+
+        List<String> events = new ArrayList<>();
+        JSONArray arr = json.optJSONArray("events");
+        if (arr != null) {
+            for (int i = 0; i < arr.length(); i++) events.add(arr.optString(i, ""));
+        } else if (json.optBoolean("has_events", false)) {
+            // Older protocol: assume the natural event for the widget type.
+            events.add("click");
+            events.add("change");
+            events.add("submit");
+        }
+        if (events.isEmpty()) {
+            // A PopupMenu's whole purpose is the menu, so its trigger opens it
+            // even when Python registered no selection handler.
+            if (!"PopupMenu".equals(json.optString("type", ""))) return;
+        } else {
+            vf.eventDispatcher.subscribe(key, events.toArray(new String[0]));
+        }
+        if ("PopupMenu".equals(json.optString("type", ""))) {
+            bindPopupMenu(view, json, key, events);
+            return;
+        }
+
+        if (events.contains("click")) {
+            view.setClickable(true);
+            view.setOnClickListener(v -> vf.eventDispatcher.dispatch("click", key));
+            addTouchFeedback(view, json);
+        }
+        if (events.contains("long_press")) {
+            view.setLongClickable(true);
+            view.setOnLongClickListener(v -> {
+                vf.eventDispatcher.dispatch("long_press", key);
+                return true;
+            });
+        }
+        if (events.contains("focus")) {
+            view.setOnFocusChangeListener((v, hasFocus) ->
+                vf.eventDispatcher.dispatch("focus", key, vf.mBuiltin.data("focused", hasFocus)));
+        }
+
+        if (view instanceof EditText) {
+            final EditText et = (EditText) view;
+            if (events.contains("change")) {
+                et.addTextChangedListener(new android.text.TextWatcher() {
+                    @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+                    @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
+                    @Override public void afterTextChanged(android.text.Editable s) {
+                        vf.eventDispatcher.dispatch("change", key, vf.mBuiltin.data("value", s.toString()));
+                    }
+                });
+            }
+            if (events.contains("submit")) {
+                et.setOnEditorActionListener((v, actionId, event) -> {
+                    if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE
+                        || actionId == android.view.inputmethod.EditorInfo.IME_ACTION_GO
+                        || actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEND
+                        || actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) {
+                        vf.eventDispatcher.dispatch("submit", key,
+                            vf.mBuiltin.data("value", et.getText().toString()));
+                        // Close the keyboard on submit, consistent with the
+                        // tap-outside dismissal in MainActivity.
+                        android.view.inputmethod.InputMethodManager imm =
+                            (android.view.inputmethod.InputMethodManager)
+                                vf.activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE);
+                        if (imm != null) imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
+                        return true;
+                    }
+                    return false;
+                });
+            }
+        } else if (view instanceof CompoundButton) {
+            if (events.contains("change")) {
+                CompoundButton.OnCheckedChangeListener listener = (btn, isChecked) ->
+                    vf.eventDispatcher.dispatch("change", key, vf.mBuiltin.data("value", isChecked));
+                ((CompoundButton) view).setOnCheckedChangeListener(listener);
+                // Application-specific tag key (framework ids are rejected
+                // by setTag and used to crash switch/checkbox/chip builds).
+                view.setTag(R.id.pydrud_tag_listener, listener);
+            }
+        } else if (view instanceof SeekBar) {
+            final SeekBar sb = (SeekBar) view;
+            if (events.contains("change")) {
+                sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                    @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                        if (!fromUser) return;
+                        double[] range = vf.mBuiltin.rangeOf(bar);
+                        double value = range[0] + (range[1] - range[0]) * (progress / 1000.0);
+                        vf.eventDispatcher.dispatch("change", key, vf.mBuiltin.data("value", value));
+                    }
+                    @Override public void onStartTrackingTouch(SeekBar bar) {}
+                    @Override public void onStopTrackingTouch(SeekBar bar) {}
+                });
+            }
+        } else if (view instanceof com.google.android.material.slider.RangeSlider) {
+            final com.google.android.material.slider.RangeSlider rs =
+                (com.google.android.material.slider.RangeSlider) view;
+            if (events.contains("change")) {
+                rs.addOnChangeListener((slider, value, fromUser) -> {
+                    // Ignore the echo from a programmatic setValues().
+                    if (!fromUser) return;
+                    java.util.List<Float> pair = slider.getValues();
+                    if (pair.size() < 2) return;
+                    try {
+                        JSONObject d = new JSONObject();
+                        JSONArray pairArray = new JSONArray();
+                        pairArray.put(pair.get(0).doubleValue());
+                        pairArray.put(pair.get(1).doubleValue());
+                        d.put("values", pairArray);
+                        vf.eventDispatcher.dispatch("change", key, d);
+                    } catch (JSONException ignored) {}
+                });
+            }
+        } else if (view instanceof Spinner) {
+            if (events.contains("change")) {
+                ((Spinner) view).setOnItemSelectedListener(
+                    new AdapterView.OnItemSelectedListener() {
+                        @Override public void onItemSelected(AdapterView<?> parent, View v, int pos, long id) {
+                            try {
+                                JSONObject d = new JSONObject();
+                                d.put("value", String.valueOf(parent.getItemAtPosition(pos)));
+                                d.put("index", pos);
+                                vf.eventDispatcher.dispatch("change", key, d);
+                            } catch (JSONException ignored) {}
+                        }
+                        @Override public void onNothingSelected(AdapterView<?> parent) {}
+                    });
+            }
+        }
+    }
+
+    void bindPopupMenu(View view, JSONObject json, String key,
+                               List<String> events) {
+        view.setClickable(true);
+        view.setOnClickListener(v -> {
+            if (events.contains("click")) vf.eventDispatcher.dispatch("click", key);
+            showPopupMenu(v, json, key);
+        });
+        if (!vf.props(json).optBoolean("customTrigger", false)) {
+            PydrudTheme.addCircleRipple(view, PydrudTheme.rippleOn(PydrudTheme.surface));
+            PydrudTheme.pressFeedback(view, 0.9f, 0f, 0f);
+        }
+    }
+
+    void showPopupMenu(View anchor, JSONObject json, String key) {
+        JSONObject p = vf.props(json);
+        android.widget.PopupMenu menu = new android.widget.PopupMenu(vf.activity, anchor);
+        android.view.Menu root = menu.getMenu();
+        boolean withIcons = p.optBoolean("itemIcons", true);
+        int tint = vf.mStyler.parseColor(p.optString("color", ""), PydrudTheme.onSurfaceVariant);
+        populateMenu(root, p.optJSONArray("items"), withIcons, tint, new int[]{0});
+        menu.setOnMenuItemClickListener(item -> {
+            JSONObject d = new JSONObject();
+            try {
+                d.put("index", item.getItemId());
+                d.put("value", item.getTitle() == null ? "" : item.getTitle().toString());
+            } catch (JSONException ignored) {}
+            vf.eventDispatcher.dispatch("select", key, d);
+            return true;
+        });
+        menu.show();
+    }
+
+    void populateMenu(android.view.Menu menu, JSONArray items,
+                              boolean withIcons, int tint, int[] nextId) {
+        if (items == null) return;
+        int group = 0;
+        for (int i = 0; i < items.length(); i++) {
+            JSONObject item = items.optJSONObject(i);
+            if (item == null) continue;
+            if (item.optBoolean("divider", false)) {
+                group++;
+                continue;
+            }
+            int id = nextId[0]++;
+            JSONArray sub = item.optJSONArray("submenu");
+            if (sub != null && sub.length() > 0) {
+                android.view.SubMenu submenu = menu.addSubMenu(group, id, id,
+                    item.optString("label", ""));
+                if (withIcons) applyMenuIcon(submenu, item.optString("icon", ""), tint);
+                populateMenu(submenu, sub, withIcons, tint, nextId);
+                continue;
+            }
+            android.view.MenuItem entry = menu.add(group, id, id,
+                item.optString("label", ""));
+            entry.setEnabled(item.optBoolean("enabled", true));
+            if (item.optBoolean("checkable", false)) {
+                entry.setCheckable(true);
+                entry.setChecked(item.optBoolean("checked", false));
+            }
+            if (withIcons) {
+                applyMenuIcon(entry, item.optString("icon", ""), tint);
+            }
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 28 && group > 0) {
+            menu.setGroupDividerEnabled(true);
+        }
+    }
+
+    void applyMenuIcon(android.view.MenuItem entry, String name, int tint) {
+        if (entry == null || name.isEmpty()) return;
+        entry.setIcon(vf.icon(name, tint, vf.mStyler.dp(20)));
+    }
+
+    void applyMenuIcon(android.view.SubMenu submenu, String name, int tint) {
+        if (submenu == null || name.isEmpty()) return;
+        submenu.setIcon(vf.icon(name, tint, vf.mStyler.dp(20)));
+    }
+
+    void addTouchFeedback(View view, JSONObject json) {
+        if (view == null) return;
+        if (view instanceof Button || view instanceof CompoundButton
+            || view instanceof EditText || view instanceof SeekBar
+            || view instanceof com.google.android.material.slider.RangeSlider
+            || view instanceof Spinner) {
+            return;
+        }
+        String type = json != null ? json.optString("type", "") : "";
+        JSONObject s = json != null ? json.optJSONObject("style") : null;
+        if (s != null && !s.optBoolean("feedback", true)) return;
+
+        int tint = PydrudTheme.rippleOn(vf.mStyler.parseColor(
+            s != null ? s.optString("bg", "") : "", PydrudTheme.surface));
+
+        boolean circular = "Icon".equals(type) || "Avatar".equals(type)
+            || (s != null && s.optBoolean("circular", false))
+            || (s != null && "FAB".equals(s.optString("role", "")));
+
+        if (circular) {
+            PydrudTheme.addCircleRipple(view, tint);
+            PydrudTheme.pressFeedback(view, 0.88f, 0f, 0f);
+            PydrudTheme.expandTouch(view, PydrudTheme.touchTarget());
+        } else {
+            float radius = s != null && s.has("borderRadius")
+                ? vf.mStyler.dp(s.optInt("borderRadius", 0)) : 0f;
+            PydrudTheme.addRipple(view, tint, radius);
+            if ("Card".equals(type)) {
+                PydrudTheme.pressFeedback(view, 0.985f, 0f, 2f);
+            }
+        }
+    }
+
+}

@@ -106,17 +106,18 @@ class TestNativeMitigation(unittest.TestCase):
     """The renderer hugs content instead of collapsing inside a Row."""
 
     def setUp(self):
-        self.source = VIEW_FACTORY.read_text(encoding="utf-8")
+        from tests import all_java_templates
+        self.source = all_java_templates()
 
     def test_horizontal_row_downgrades_unweighted_fill_children(self):
-        body = re.search(r"private LinearLayout\.LayoutParams linearParams"
+        body = re.search(r"LinearLayout\.LayoutParams linearParams"
                          r"\(.*?\n    \}", self.source, re.S).group(0)
         self.assertIn("orientation == LinearLayout.HORIZONTAL", body)
         self.assertIn("base.width = ViewGroup.LayoutParams.WRAP_CONTENT", body)
         self.assertIn("declaresWidth(json)", body)
 
     def test_row_and_column_still_fill_by_default(self):
-        body = re.search(r"private static boolean fillsWidthByDefault"
+        body = re.search(r"static boolean fillsWidthByDefault"
                          r"\(.*?\n    \}", self.source, re.S).group(0)
         self.assertIn('case "Column": case "Row"', body)
 

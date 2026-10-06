@@ -17,13 +17,11 @@ from pydrud.core.diff import TreeDiff
 from pydrud.testing import AppTester
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VIEW_FACTORY = os.path.join(ROOT, "pydrud", "android", "templates",
-                            "android", "ViewFactory.java.j2")
+from tests import all_java_templates  # noqa: E402
 
 
 def _java() -> str:
-    with open(VIEW_FACTORY, encoding="utf-8") as handle:
-        return handle.read()
+    return all_java_templates()
 
 
 class TestSerialisation(unittest.TestCase):
@@ -102,7 +100,7 @@ class TestGeneratedJava(unittest.TestCase):
         self.assertIn('case "NativeView":', self.source)
 
     def test_it_loads_the_class_from_the_app_loader(self):
-        self.assertIn("Class.forName(className, true, activity.getClassLoader())",
+        self.assertIn("Class.forName(className, true, vf.activity.getClassLoader())",
                       self.source)
 
     def test_it_requires_the_class_to_be_a_view(self):
@@ -150,7 +148,7 @@ class TestGeneratedJava(unittest.TestCase):
                       self.source)
 
     def test_children_are_attached_for_a_viewgroup(self):
-        self.assertIn("if (view instanceof ViewGroup) attachChildren(view, json);",
+        self.assertIn("if (view instanceof ViewGroup) vf.mLayout.attachChildren(view, json);",
                       self.source)
 
 

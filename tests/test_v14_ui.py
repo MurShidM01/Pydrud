@@ -250,7 +250,8 @@ class TestEdgeToEdgeLayout(unittest.TestCase):
         self.assertNotIn("safeAreaTop", slots["s._body"])
 
     def test_native_layer_reapplies_insets(self):
-        factory = template("ViewFactory.java.j2")
+        from tests import all_java_templates
+        factory = all_java_templates()
         self.assertIn("refreshInsets", factory)
         self.assertIn("safeAreaTop", factory)
         activity = template("MainActivity.java.j2")
@@ -280,7 +281,11 @@ class TestGeneratedNativeLayer(unittest.TestCase):
             "0xFF9BA6B8", "0xFFB91C1C",                 # dark hint, fatal red
         }
         for name in ("ViewFactory.java.j2", "MaterialViews.java.j2",
-                     "AdvancedViews.java.j2"):
+                     "AdvancedViews.java.j2", "BuiltinViews.java.j2",
+                     "ViewStyler.java.j2", "LayoutEngine.java.j2",
+                     "TreePatcher.java.j2", "EventBinder.java.j2",
+                     "NativeViewFactory.java.j2", "ViewAnimator.java.j2",
+                     "ImageLoader.java.j2"):
             found = {m for m in pattern.findall(template(name))} - allowed
             self.assertEqual(found, set(), f"{name} hardcodes colours")
 
@@ -407,7 +412,8 @@ class TestPythonControlledTokens(unittest.TestCase):
         self.assertEqual(missing, [], f"not applied on device: {missing}")
 
     def test_renderers_read_metrics_from_the_theme(self):
-        factory = template("ViewFactory.java.j2")
+        from tests import all_java_templates
+        factory = all_java_templates()
         for field in ("PydrudTheme.radiusCard", "PydrudTheme.radiusButton",
                       "PydrudTheme.radiusInput", "PydrudTheme.inputHeight",
                       "PydrudTheme.buttonHeightMd", "PydrudTheme.elevationFab",

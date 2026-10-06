@@ -340,9 +340,11 @@ class TestGeneratedProject(unittest.TestCase):
         # must only use ids declared in the app's own resources.
         ids = open(self.path("android/app/src/main/res/values/ids.xml"),
                    encoding="utf-8").read()
-        factory = open(
-            self.path("android/app/src/main/java/com/example/demo_app/ViewFactory.java"),
-            encoding="utf-8").read()
+        import glob
+        java_dir = self.path("android/app/src/main/java/com/example/demo_app")
+        factory = "\n".join(
+            open(p, encoding="utf-8").read()
+            for p in sorted(glob.glob(os.path.join(java_dir, "*.java"))))
         for name in ("pydrud_tag_range", "pydrud_tag_listener",
                      "pydrud_tag_children"):
             self.assertIn(f'name="{name}"', ids, f"{name} missing from ids.xml")
@@ -446,8 +448,9 @@ class TestJavaTemplates(unittest.TestCase):
     def test_view_factory_handles_every_widget_type(self):
         """Each Python widget type must have a branch in the renderer."""
         from pydrud import widgets as widget_pkg
+        from tests import all_java_templates
 
-        source = self.render("android/ViewFactory.java.j2")
+        source = all_java_templates()
         rendered_types = {
             "Container", "Center", "Padding", "SizedBox", "Positioned", "Card",
             "Stack", "Column", "ListView", "Row", "GridView", "Spacer",

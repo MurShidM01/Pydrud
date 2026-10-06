@@ -94,15 +94,15 @@ class TestUnknownStyleKeys(unittest.TestCase):
     """DX-006 — the renderer reports style keys no branch consumes."""
 
     def setUp(self):
-        self.view_factory = (TEMPLATES / "ViewFactory.java.j2").read_text(
-            encoding="utf-8")
+        from tests import all_java_templates
+        self.view_factory = all_java_templates()
 
     def test_applystyle_warns_about_unknown_keys(self):
         self.assertIn("warnUnknownStyleKeys(s)", self.view_factory)
         self.assertIn("unhandled style key", self.view_factory)
 
     def test_warning_is_once_per_key(self):
-        body = re.search(r"private void warnUnknownStyleKeys"
+        body = re.search(r"void warnUnknownStyleKeys"
                          r"\(.*?\n    \}", self.view_factory, re.S).group(0)
         self.assertIn("WARNED_STYLE_KEYS.add(k)", body)
 

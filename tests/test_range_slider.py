@@ -18,13 +18,11 @@ from pydrud.core.diff import TreeDiff
 from pydrud.testing import AppTester
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VIEW_FACTORY = os.path.join(ROOT, "pydrud", "android", "templates",
-                            "android", "ViewFactory.java.j2")
+from tests import all_java_templates  # noqa: E402
 
 
 def _java() -> str:
-    with open(VIEW_FACTORY, encoding="utf-8") as handle:
-        return handle.read()
+    return all_java_templates()
 
 
 class TestSerialisation(unittest.TestCase):
@@ -140,7 +138,7 @@ class TestGeneratedJava(unittest.TestCase):
         self.assertIn("com.google.android.material.slider.RangeSlider", self.source)
 
     def test_the_view_is_reused_across_updates(self):
-        body = re.search(r"private static boolean isReusableType"
+        body = re.search(r"static boolean isReusableType"
                          r"\(String type\) \{(.*?)\n    \}", self.source, re.S)
         self.assertIn('case "RangeSlider":', body.group(1))
 
@@ -156,7 +154,7 @@ class TestGeneratedJava(unittest.TestCase):
         self.assertIn('d.put("values", pairArray);', self.source)
 
     def test_off_grid_values_are_snapped_and_guarded(self):
-        body = re.search(r"private void applyRangeValues"
+        body = re.search(r"void applyRangeValues"
                          r"\(.*?\n    \}", self.source, re.S).group(0)
         self.assertIn("Math.round((lo - min) / step)", body)
         self.assertIn("catch (RuntimeException e)", body)

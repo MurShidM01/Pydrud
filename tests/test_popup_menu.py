@@ -209,7 +209,8 @@ class TestGeneratedJava(unittest.TestCase):
 
     def setUp(self):
         self.material = _read("MaterialViews.java.j2")
-        self.factory = _read("ViewFactory.java.j2")
+        from tests import all_java_templates
+        self.factory = all_java_templates()
 
     def test_the_material_class_handles_the_type(self):
         self.assertIn('case "PopupMenu":', self.material)
@@ -219,18 +220,18 @@ class TestGeneratedJava(unittest.TestCase):
         self.assertIn('p.optBoolean("customTrigger", false)', self.material)
 
     def test_the_trigger_is_a_48dp_target(self):
-        body = re.search(r"private View createPopupMenu\(.*?\n    \}",
+        body = re.search(r"View createPopupMenu\(.*?\n    \}",
                          self.material, re.S).group(0)
         self.assertIn("touchTarget()", body)
         self.assertIn("more_vert", body)
 
     def test_the_menu_is_a_real_native_popup(self):
-        self.assertIn("new android.widget.PopupMenu(activity, anchor)",
+        self.assertIn("new android.widget.PopupMenu(vf.activity, anchor)",
                       self.factory)
         self.assertIn("menu.show();", self.factory)
 
     def test_a_selection_dispatches_index_and_value(self):
-        body = re.search(r"private void showPopupMenu\(.*?\n    \}",
+        body = re.search(r"void showPopupMenu\(.*?\n    \}",
                          self.factory, re.S).group(0)
         self.assertIn('d.put("index", item.getItemId());', body)
         self.assertIn('d.put("value",', body)
@@ -243,7 +244,7 @@ class TestGeneratedJava(unittest.TestCase):
 
     def test_a_subscribed_click_still_fires(self):
         # An on_click handler must not be silently dropped by the menu branch.
-        self.assertIn('if (events.contains("click")) eventDispatcher.dispatch("click", key);',
+        self.assertIn('if (events.contains("click")) vf.eventDispatcher.dispatch("click", key);',
                       self.factory)
 
     def test_submenus_are_native(self):
@@ -252,16 +253,16 @@ class TestGeneratedJava(unittest.TestCase):
     def test_a_submenu_icon_uses_the_submenu_overload(self):
         # SubMenu extends Menu, not MenuItem — the two are unrelated types,
         # so the icon has to be set through an overload or it will not compile.
-        self.assertIn("private void applyMenuIcon(android.view.SubMenu", self.factory)
-        self.assertIn("private void applyMenuIcon(android.view.MenuItem", self.factory)
+        self.assertIn("void applyMenuIcon(android.view.SubMenu", self.factory)
+        self.assertIn("void applyMenuIcon(android.view.MenuItem", self.factory)
 
     def test_the_menu_icon_uses_the_factorys_own_helper(self):
         # Inside ViewFactory the icon helper is `icon(...)`, not
         # `factory.icon(...)` — `factory` is MaterialViews' field. A real
         # javac caught this; javacheck cannot see framework symbols.
-        body = re.search(r"private void applyMenuIcon\(android.view.MenuItem"
+        body = re.search(r"void applyMenuIcon\(android.view.MenuItem"
                          r".*?\n    \}", self.factory, re.S).group(0)
-        self.assertIn("setIcon(icon(name, tint, dp(20)))", body)
+        self.assertIn("setIcon(vf.icon(name, tint, vf.mStyler.dp(20)))", body)
         self.assertNotIn("factory.", body)
 
     def test_dividers_start_a_new_group(self):

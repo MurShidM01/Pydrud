@@ -1,0 +1,136 @@
+package {{ package }};
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.util.Log;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.*;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import org.json.JSONException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * ViewAnimator — collaborator extracted from ViewFactory.
+ *
+ * Holds a back-reference to the owning {@link ViewFactory} and owns one
+ * cohesive slice of the rendering responsibility (styling, layout, events,
+ * image loading, tree patching, native views or built-in widget factories).
+ */
+public class ViewAnimator {
+
+    final ViewFactory vf;
+
+    ViewAnimator(ViewFactory vf) {
+        this.vf = vf;
+    }
+
+    void playEntrance(final View view, String type, JSONObject json) {
+        if (!"FadeIn".equals(type) && !"SlideIn".equals(type)
+                && !"ScaleIn".equals(type)) {
+            return;
+        }
+        JSONObject style = json.optJSONObject("style");
+        JSONObject spec = style != null ? style.optJSONObject("animation") : null;
+        long duration = spec != null ? spec.optLong("duration", 250) : 250;
+        long delay = spec != null ? spec.optLong("delay", 0) : 0;
+        JSONObject props = json.optJSONObject("props");
+
+        view.setAlpha(0f);
+        android.view.ViewPropertyAnimator animator = view.animate()
+            .alpha(1f).setDuration(duration).setStartDelay(delay)
+            .setInterpolator(vf.mStyler.interpolator(spec));
+
+        if ("ScaleIn".equals(type)) {
+            view.setScaleX(0.8f);
+            view.setScaleY(0.8f);
+            animator.scaleX(1f).scaleY(1f);
+        } else if ("SlideIn".equals(type)) {
+            float distance = vf.mStyler.dp(props != null
+                ? (int) props.optDouble("distance", 24) : 24);
+            String direction = props != null
+                ? props.optString("direction", "up") : "up";
+            switch (direction) {
+                case "down":  view.setTranslationY(-distance); break;
+                case "left":  view.setTranslationX(distance);  break;
+                case "right": view.setTranslationX(-distance); break;
+                default:      view.setTranslationY(distance);
+            }
+            animator.translationX(0f).translationY(0f);
+        }
+        animator.start();
+    }
+
+    boolean animateStyleChange(View view, JSONObject node,
+                                       JSONObject changed) {
+        JSONObject style = node != null ? node.optJSONObject("style") : null;
+        JSONObject spec = style != null ? style.optJSONObject("animation") : null;
+        if (spec == null || changed == null) return false;
+
+        long duration = spec.optLong("duration", 250);
+        long delay = spec.optLong("delay", 0);
+        android.view.ViewPropertyAnimator animator = view.animate()
+            .setDuration(duration).setStartDelay(delay)
+            .setInterpolator(vf.mStyler.interpolator(spec));
+        boolean animated = false;
+
+        if (changed.has("opacity")) {
+            animator.alpha((float) changed.optDouble("opacity", 1.0));
+            animated = true;
+        }
+        if (changed.has("scale")) {
+            float scale = (float) changed.optDouble("scale", 1.0);
+            animator.scaleX(scale).scaleY(scale);
+            animated = true;
+        }
+        if (changed.has("rotation")) {
+            animator.rotation((float) changed.optDouble("rotation", 0));
+            animated = true;
+        }
+        if (changed.has("width") || changed.has("height")) {
+            animateSize(view, changed, duration);
+            animated = true;
+        }
+        if (animated) animator.start();
+        return animated;
+    }
+
+    void animateSize(final View view, JSONObject changed, long duration) {
+        final ViewGroup.LayoutParams lp = view.getLayoutParams();
+        if (lp == null) return;
+        if (changed.has("width")) {
+            animateDimension(view, lp.width,
+                             vf.mStyler.dimension(changed, "width", lp.width), duration, true);
+        }
+        if (changed.has("height")) {
+            animateDimension(view, lp.height,
+                             vf.mStyler.dimension(changed, "height", lp.height), duration, false);
+        }
+    }
+
+    void animateDimension(final View view, int from, int to,
+                                  long duration, final boolean horizontal) {
+        if (from < 0 || to < 0) return;
+        android.animation.ValueAnimator animator =
+            android.animation.ValueAnimator.ofInt(from, to);
+        animator.setDuration(duration);
+        animator.addUpdateListener(
+            new android.animation.ValueAnimator.AnimatorUpdateListener() {
+                @Override public void onAnimationUpdate(
+                        android.animation.ValueAnimator value) {
+                    ViewGroup.LayoutParams lp = view.getLayoutParams();
+                    if (lp == null) return;
+                    int v = (Integer) value.getAnimatedValue();
+                    if (horizontal) lp.width = v; else lp.height = v;
+                    view.setLayoutParams(lp);
+                }
+            });
+        animator.start();
+    }
+
+}

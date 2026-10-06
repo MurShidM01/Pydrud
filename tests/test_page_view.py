@@ -136,7 +136,8 @@ class TestGeneratedJava(unittest.TestCase):
 
     def setUp(self):
         self.advanced = _read("AdvancedViews.java.j2")
-        self.factory = _read("ViewFactory.java.j2")
+        from tests import all_java_templates
+        self.factory = all_java_templates()
 
     def test_the_type_is_dispatched(self):
         self.assertIn('case "PageView":', self.factory)

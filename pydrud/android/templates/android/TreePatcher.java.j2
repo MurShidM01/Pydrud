@@ -1,0 +1,434 @@
+package {{ package }};
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.util.Log;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.*;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import org.json.JSONException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * TreePatcher — collaborator extracted from ViewFactory.
+ *
+ * Holds a back-reference to the owning {@link ViewFactory} and owns one
+ * cohesive slice of the rendering responsibility (styling, layout, events,
+ * image loading, tree patching, native views or built-in widget factories).
+ */
+public class TreePatcher {
+
+    final ViewFactory vf;
+
+    TreePatcher(ViewFactory vf) {
+        this.vf = vf;
+    }
+
+    public void applyPatch(JSONObject patch) throws JSONException {
+        String op = patch.getString("op");
+        String key = patch.getString("key");
+        String parentKey = patch.optString("parent_key", "");
+        int index = patch.optInt("index", -1);
+
+        switch (op) {
+            case "create": {
+                JSONObject tree = patch.getJSONObject("tree");
+                ViewGroup parent = vf.mLayout.containerFor(parentKey);
+                View v = vf.mBuiltin.createView(tree);
+                if (v != null && parent != null) {
+                    vf.parentMap.put(key, parentKey);
+                    vf.mLayout.addChild(parent, v, tree, index);
+                    recordChild(parentKey, tree, index);
+                    indexParents(tree);
+                } else if (v != null) {
+                    Log.w(ViewFactory.TAG, "create: parent not found for " + key);
+                }
+                break;
+            }
+            case "update": {
+                View v = vf.viewMap.get(key);
+                if (v == null) { Log.w(ViewFactory.TAG, "update: unknown key " + key); break; }
+                JSONObject node = vf.nodeMap.get(key);
+                if (patch.has("props")) {
+                    JSONObject props = patch.getJSONObject("props");
+                    boolean handled = updateProps(v, props, node);
+                    vf.mLayout.mergeInto(node, "props", props);
+                    if (!handled) {
+                        // The widget paints itself from props at build
+                        // time; rebuild it so the change is never lost.
+                        vf.mLayout.recreateInPlace(key, node);
+                        v = vf.viewMap.get(key);
+                        if (v == null) break;
+                    }
+                }
+                if (patch.has("style")) {
+                    JSONObject style = patch.getJSONObject("style");
+                    vf.mLayout.mergeInto(node, "style", style);
+                    JSONObject merged = node != null ? node.optJSONObject("style") : style;
+                    // Widgets carrying an `animation` spec tween towards the
+                    // new values; everything else snaps, as before.
+                    if (!vf.mAnimator.animateStyleChange(v, node, style)) {
+                        vf.mStyler.applyStyle(v, merged);
+                        vf.mStyler.applySize(v, merged);
+                        v.requestLayout();
+                    } else {
+                        vf.mStyler.applyStyle(v, merged);
+                    }
+                }
+                break;
+            }
+            case "move": {
+                View v = vf.viewMap.get(key);
+                ViewGroup parent = vf.mLayout.containerFor(parentKey);
+                if (v != null && parent != null && index >= 0) {
+                    if (parent instanceof androidx.recyclerview.widget.RecyclerView
+                            && ((androidx.recyclerview.widget.RecyclerView) parent).getAdapter()
+                                    instanceof AdvancedViews.ViewAdapter) {
+                        final androidx.recyclerview.widget.RecyclerView list =
+                            (androidx.recyclerview.widget.RecyclerView) parent;
+                        list.post(() -> vf.mBuiltin.rebuildListRows(list));
+                        break;
+                    }
+                    ViewGroup.LayoutParams lp = v.getLayoutParams();
+                    if (v.getParent() == parent) parent.removeView(v);
+                    parent.addView(v, Math.min(index, parent.getChildCount()), lp);
+                    vf.mLayout.applySpacing(parent);
+                    forgetChild(parentKey, key);
+                    recordChild(parentKey, vf.nodeMap.get(key), index);
+                }
+                break;
+            }
+            case "delete": {
+                View old = vf.viewMap.get(key);
+                ViewGroup parent = old != null && old.getParent() instanceof ViewGroup
+                    ? (ViewGroup) old.getParent() : null;
+                forgetChild(vf.parentMap.get(key), key);
+                vf.mLayout.removeViewTree(key);
+                vf.mLayout.applySpacing(parent);
+                // A row deleted from a virtualised list lived inside an
+                // adapter holder — refresh the adapter from the patched node.
+                ViewGroup owner = parent != null && parent.getParent() instanceof ViewGroup
+                    ? (ViewGroup) parent.getParent() : null;
+                if (owner instanceof androidx.recyclerview.widget.RecyclerView
+                        && ((androidx.recyclerview.widget.RecyclerView) owner).getAdapter()
+                                instanceof AdvancedViews.ViewAdapter) {
+                    final androidx.recyclerview.widget.RecyclerView list =
+                        (androidx.recyclerview.widget.RecyclerView) owner;
+                    list.post(() -> vf.mBuiltin.rebuildListRows(list));
+                }
+                break;
+            }
+            case "replace": {
+                View old = vf.viewMap.get(key);
+                JSONObject tree = patch.getJSONObject("tree");
+                String newKey = patch.optString("new_key", tree.optString("key", key));
+                ViewGroup parent = null;
+                int at = index;
+                if (old != null && old.getParent() instanceof ViewGroup) {
+                    parent = (ViewGroup) old.getParent();
+                    at = parent.indexOfChild(old);
+                } else {
+                    parent = vf.mLayout.containerFor(parentKey);
+                }
+                forgetChild(parentKey, key);
+                vf.mLayout.removeViewTree(key);
+                View n = vf.mBuiltin.createView(tree);
+                if (n != null && parent != null) {
+                    vf.parentMap.put(newKey, parentKey);
+                    vf.mLayout.addChild(parent, n, tree, at);
+                    recordChild(parentKey, tree, at);
+                    indexParents(tree);
+                }
+                break;
+            }
+            default:
+                Log.w(ViewFactory.TAG, "Unknown patch op: " + op);
+        }
+    }
+
+    boolean updateProps(View view, JSONObject p, JSONObject node) {
+        if (p == null) return true;
+        boolean handled = true;
+
+        if (p.has("_visible")) {
+            view.setVisibility(p.optBoolean("_visible", true) ? View.VISIBLE : View.GONE);
+            if (view.getParent() instanceof ViewGroup) {
+                vf.mLayout.applySpacing((ViewGroup) view.getParent());
+            }
+        }
+        if (p.has("_tooltip") && android.os.Build.VERSION.SDK_INT >= 26) {
+            view.setTooltipText(p.optString("_tooltip", ""));
+        }
+        if (p.has("_semantics")) {
+            String desc = p.optString("_semantics", "");
+            view.setContentDescription(desc.isEmpty() ? null : desc);
+        }
+        if (p.has("_expand") && view.getLayoutParams() instanceof LinearLayout.LayoutParams) {
+            LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) view.getLayoutParams();
+            lp.weight = (float) p.optDouble("_expand", 0);
+            view.setLayoutParams(lp);
+        }
+        if (p.has("_events") && node != null) {
+            try { node.put("events", p.getJSONArray("_events")); }
+            catch (JSONException ignored) {}
+            vf.mEvents.bindEvents(view, node);
+        }
+
+        // Only the bookkeeping keys changed — nothing else to do.
+        if (!hasRealProps(p)) return true;
+
+        if (view instanceof PydrudNavigation.PydrudNavBar) {
+            ((PydrudNavigation.PydrudNavBar) view).applyProps(p);
+            return true;
+        }
+        if (view instanceof PydrudNavigation.PydrudTabBar) {
+            ((PydrudNavigation.PydrudTabBar) view).applyProps(p);
+            return true;
+        }
+        {
+            ViewGroup host = view instanceof ViewGroup ? (ViewGroup) view : null;
+            View strip = host != null && host.getChildCount() > 0
+                ? host.getChildAt(0) : null;
+            if (strip instanceof PydrudNavigation.PydrudTabBar) {
+                // Tabs = a tab strip plus the selected tab's content below.
+                ((PydrudNavigation.PydrudTabBar) strip).applyProps(p);
+                return true;
+            }
+        }
+
+        if (view instanceof AdvancedViews.PydrudCanvas) {
+            // Canvas ops arrive as props. Re-apply them in place so a game
+            // board, gauge or chart animates instead of freezing after its
+            // first frame (PB-003). Recreating the view would also work but
+            // discards any canvas state and costs a full measure/layout.
+            vf.advanced.updateCanvas(view, p);
+            return true;
+        }
+
+        // NativeView: re-apply the props to the live instance so a custom
+        // view keeps its state. A changed class name must rebuild instead,
+        // hence the explicit recreate signal.
+        if (node != null && "NativeView".equals(node.optString("type", ""))) {
+            String wanted = p.optString("viewClass", "").trim();
+            if (!wanted.isEmpty()
+                    && !wanted.equals(view.getClass().getName())) {
+                return false;   // updateProps() -> recreateInPlace()
+            }
+            // applyProps() promises the whole prop set, so hand it the stored
+            // node's props merged with this patch — not the patch alone.
+            vf.mNativeViews.applyNativeProps(view, vf.mNativeViews.mergeProps(node.optJSONObject("props"), p));
+            return true;
+        }
+
+        if (view instanceof Spinner) {
+            Spinner sp = (Spinner) view;
+            if (p.has("options")) {
+                JSONArray arr = p.optJSONArray("options");
+                List<String> options = new ArrayList<>();
+                if (arr != null) {
+                    for (int i = 0; i < arr.length(); i++) options.add(arr.optString(i, ""));
+                }
+                ArrayAdapter<String> adapter = new ArrayAdapter<>(
+                    vf.activity, android.R.layout.simple_spinner_item, options);
+                adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+                sp.setAdapter(adapter);
+            }
+            if (p.has("index")) {
+                int idx = p.optInt("index", 0);
+                if (idx >= 0 && idx < sp.getCount() && idx != sp.getSelectedItemPosition()) {
+                    AdapterView.OnItemSelectedListener listener = sp.getOnItemSelectedListener();
+                    sp.setOnItemSelectedListener(null);
+                    sp.setSelection(idx, false);
+                    sp.post(() -> sp.setOnItemSelectedListener(listener));
+                }
+            }
+            return true;
+        }
+
+        if (view instanceof androidx.recyclerview.widget.RecyclerView
+                && ((androidx.recyclerview.widget.RecyclerView) view).getAdapter()
+                        instanceof AdvancedViews.PagerAdapter) {
+            if (p.has("initialPage")) {
+                final androidx.recyclerview.widget.RecyclerView pager =
+                    (androidx.recyclerview.widget.RecyclerView) view;
+                final int idx = Math.max(0, p.optInt("initialPage", 0));
+                pager.post(() -> pager.scrollToPosition(idx));
+            }
+            return true;
+        }
+
+        if (view instanceof com.google.android.material.slider.RangeSlider) {
+            com.google.android.material.slider.RangeSlider rs =
+                (com.google.android.material.slider.RangeSlider) view;
+            float min = (float) (p.has("min") ? p.optDouble("min", rs.getValueFrom())
+                                              : rs.getValueFrom());
+            float max = (float) (p.has("max") ? p.optDouble("max", rs.getValueTo())
+                                              : rs.getValueTo());
+            if (max <= min) max = min + 1f;
+            rs.setValueFrom(min);
+            rs.setValueTo(max);
+            float step = vf.mBuiltin.stepSizeOf(node != null ? node.optJSONObject("style") : null,
+                                    min, max);
+            if (p.has("values")) {
+                JSONArray arr = p.optJSONArray("values");
+                if (arr != null && arr.length() >= 2) {
+                    vf.mBuiltin.applyRangeValues(rs, min, max, step,
+                                     (float) arr.optDouble(0, min),
+                                     (float) arr.optDouble(1, max));
+                }
+            }
+            return true;
+        }
+
+        if (view instanceof SeekBar) {
+            SeekBar sb = (SeekBar) view;
+            double[] range = vf.mBuiltin.rangeOf(sb);
+            double min = p.has("min") ? p.optDouble("min", range[0]) : range[0];
+            double max = p.has("max") ? p.optDouble("max", range[1]) : range[1];
+            sb.setTag(R.id.pydrud_tag_range, new double[]{min, max});
+            if (p.has("value")) {
+                double span = (max - min) == 0 ? 1 : (max - min);
+                sb.setProgress((int) Math.round((p.optDouble("value", min) - min) / span * 1000));
+            }
+            return true;
+        }
+
+        if (view instanceof ProgressBar) {
+            ProgressBar pb = (ProgressBar) view;
+            if (p.has("indeterminate")) pb.setIndeterminate(p.optBoolean("indeterminate", false));
+            if (p.has("value")) {
+                pb.setMax(100);
+                pb.setProgress((int) Math.round(p.optDouble("value", 0) * 100));
+            }
+            return true;
+        }
+
+        if (view instanceof CompoundButton) {
+            CompoundButton cb = (CompoundButton) view;
+            if (p.has("label")) cb.setText(p.optString("label", ""));
+            // Mute the listener while we set the value programmatically,
+            // otherwise the UI echoes a change event straight back to Python.
+            if (p.has("checked") || p.has("active") || p.has("selected")) {
+                boolean next = p.optBoolean("checked", p.optBoolean("active",
+                               p.optBoolean("selected", cb.isChecked())));
+                if (cb.isChecked() != next) {
+                    Object tag = cb.getTag(R.id.pydrud_tag_listener);
+                    CompoundButton.OnCheckedChangeListener listener =
+                        (tag instanceof CompoundButton.OnCheckedChangeListener)
+                            ? (CompoundButton.OnCheckedChangeListener) tag : null;
+                    cb.setOnCheckedChangeListener(null);
+                    cb.setChecked(next);
+                    cb.setOnCheckedChangeListener(listener);
+                }
+            }
+            return true;
+        }
+
+        if (view instanceof EditText) {
+            EditText et = (EditText) view;
+            if (p.has("value")) {
+                String value = p.optString("value", "");
+                if (!value.equals(et.getText().toString())) {
+                    int selection = et.getSelectionStart();
+                    et.setText(value);
+                    et.setSelection(Math.min(selection, value.length()));
+                }
+            }
+            if (p.has("hint")) et.setHint(p.optString("hint", ""));
+            return true;
+        }
+
+        if (view instanceof ImageView && (p.has("name") || p.has("path"))) {
+            ImageView iv = (ImageView) view;
+            JSONObject style = node != null ? node.optJSONObject("style") : null;
+            JSONObject font = style != null ? style.optJSONObject("font") : null;
+            float size = font != null ? (float) font.optDouble("size", 24) : 24f;
+            int tint = font != null
+                ? vf.mStyler.parseColor(font.optString("color", ""), PydrudTheme.onSurfaceVariant)
+                : PydrudTheme.onSurfaceVariant;
+            String path = p.optString("path", "");
+            iv.setImageDrawable(path.isEmpty()
+                ? PydrudIcons.drawable(p.optString("name", "star"), tint,
+                                       PydrudTheme.adaptive(size))
+                : PydrudIcons.drawablePath(path, tint, PydrudTheme.adaptive(size)));
+            return true;
+        }
+
+        // Image: a new src must actually reload the bitmap.
+        if (view instanceof ImageView && p.has("src")) {
+            vf.loadImage((ImageView) view, p.optString("src", ""));
+            return true;
+        }
+
+        if (view instanceof TextView) {
+            TextView tv = (TextView) view;
+            if (p.has("value") || p.has("text") || p.has("label")) {
+                tv.setText(p.optString("value",
+                    p.optString("text", p.optString("label", tv.getText().toString()))));
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    boolean hasRealProps(JSONObject p) {
+        java.util.Iterator<String> keys = p.keys();
+        while (keys.hasNext()) {
+            if (!keys.next().startsWith("_")) return true;
+        }
+        return false;
+    }
+
+    void indexParents(JSONObject node) {
+        if (node == null) return;
+        String key = node.optString("key", "");
+        JSONArray kids = node.optJSONArray("children");
+        if (kids == null) return;
+        for (int i = 0; i < kids.length(); i++) {
+            JSONObject child = kids.optJSONObject(i);
+            if (child == null) continue;
+            String childKey = child.optString("key", "");
+            if (!key.isEmpty() && !childKey.isEmpty()) vf.parentMap.put(childKey, key);
+            indexParents(child);
+        }
+    }
+
+    void recordChild(String parentKey, JSONObject childJson, int index) {
+        JSONObject parent = parentKey == null ? null : vf.nodeMap.get(parentKey);
+        if (parent == null || childJson == null) return;
+        JSONArray kids = parent.optJSONArray("children");
+        if (kids == null) {
+            kids = new JSONArray();
+            try { parent.put("children", kids); } catch (JSONException ignored) { return; }
+        }
+        int at = (index < 0 || index > kids.length()) ? kids.length() : index;
+        JSONArray next = new JSONArray();
+        for (int i = 0; i < kids.length() + 1; i++) {
+            if (i == at) next.put(childJson);
+            else next.put(kids.opt(i > at ? i - 1 : i));
+        }
+        try { parent.put("children", next); } catch (JSONException ignored) {}
+    }
+
+    void forgetChild(String parentKey, String key) {
+        JSONObject parent = parentKey == null ? null : vf.nodeMap.get(parentKey);
+        if (parent == null) return;
+        JSONArray kids = parent.optJSONArray("children");
+        if (kids == null) return;
+        JSONArray next = new JSONArray();
+        for (int i = 0; i < kids.length(); i++) {
+            JSONObject child = kids.optJSONObject(i);
+            if (child != null && key.equals(child.optString("key", ""))) continue;
+            next.put(kids.opt(i));
+        }
+        try { parent.put("children", next); } catch (JSONException ignored) {}
+    }
+
+}

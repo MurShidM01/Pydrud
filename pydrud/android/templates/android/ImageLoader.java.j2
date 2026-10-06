@@ -1,0 +1,196 @@
+package {{ package }};
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.util.Log;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.*;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import org.json.JSONException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * ImageLoader — collaborator extracted from ViewFactory.
+ *
+ * Holds a back-reference to the owning {@link ViewFactory} and owns one
+ * cohesive slice of the rendering responsibility (styling, layout, events,
+ * image loading, tree patching, native views or built-in widget factories).
+ */
+public class ImageLoader {
+
+    final ViewFactory vf;
+
+    ImageLoader(ViewFactory vf) {
+        this.vf = vf;
+    }
+static final java.util.concurrent.ExecutorService IMAGE_EXECUTOR =
+java.util.concurrent.Executors.newFixedThreadPool(3, runnable -> {
+Thread t = new Thread(runnable, "pydrud-image");
+t.setDaemon(true);
+t.setPriority(Thread.MIN_PRIORITY + 1);
+return t;
+});
+static final android.util.LruCache<String, android.graphics.Bitmap> IMAGE_CACHE =
+new android.util.LruCache<String, android.graphics.Bitmap>(
+(int) (Runtime.getRuntime().maxMemory() / 1024 / 8)) {
+@Override
+protected int sizeOf(String key, android.graphics.Bitmap value) {
+return value.getByteCount() / 1024;
+}
+};
+
+    void loadImageInto(final ImageView view, final String src) {
+        loadImageInto(view, src, null);
+    }
+
+    void loadImageInto(final ImageView view, final String src,
+                               final JSONObject style) {
+        // Cancellation token: when a recycled view gets a new src, any older
+        // in-flight load sees the tag changed and drops its result.
+        view.setTag(R.id.pydrud_tag_image, src == null ? "" : src);
+        if (src == null || src.isEmpty()) {
+            view.setImageDrawable(null);
+            return;
+        }
+
+        // Instant cache hit (covers every ListView scroll-back).
+        android.graphics.Bitmap cached = isSvg(src) ? null : IMAGE_CACHE.get(src);
+        if (cached != null) {
+            view.setImageBitmap(cached);
+            return;
+        }
+
+        // Optional placeholders from style: placeholder / error_image.
+        final String placeholder = style != null ? style.optString("placeholder", "") : "";
+        final String errorAsset = style != null ? style.optString("error_image", "") : "";
+        if (!placeholder.isEmpty()) {
+            try {
+                java.io.InputStream ph = vf.activity.getAssets().open(placeholder);
+                view.setImageDrawable(android.graphics.drawable.Drawable.createFromStream(ph, src));
+                ph.close();
+            } catch (Exception ignored) { }
+        }
+
+        final boolean remote = src.startsWith("http://") || src.startsWith("https://");
+        final int maxDim = decodeTarget(view);
+
+        Runnable work = () -> {
+            android.graphics.drawable.Drawable drawable = null;
+            java.net.HttpURLConnection connection = null;
+            try {
+                java.io.InputStream stream;
+                if (remote) {
+                    connection = (java.net.HttpURLConnection)
+                        new java.net.URL(src).openConnection();
+                    connection.setConnectTimeout(10000);
+                    connection.setReadTimeout(15000);
+                    connection.setDoInput(true);
+                    connection.connect();
+                    stream = connection.getInputStream();
+                } else {
+                    stream = vf.activity.getAssets().open(src);
+                }
+                if (isSvg(src)) {
+                    drawable = svgDrawable(stream);
+                    stream.close();
+                } else {
+                    android.graphics.Bitmap bitmap = decodeSampled(readAll(stream), maxDim);
+                    stream.close();
+                    if (bitmap != null) {
+                        IMAGE_CACHE.put(src, bitmap);
+                        drawable = new android.graphics.drawable.BitmapDrawable(
+                            vf.activity.getResources(), bitmap);
+                    }
+                }
+            } catch (Exception e) {
+                if (remote) Log.e(ViewFactory.TAG, "Image load failed: " + src, e);
+                else Log.d(ViewFactory.TAG, "Asset not found or invalid image: " + src);
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+
+            final android.graphics.drawable.Drawable result = drawable;
+            vf.activity.runOnUiThread(() -> {
+                // Stale-result guard: view was rebound while we loaded.
+                Object wanted = view.getTag(R.id.pydrud_tag_image);
+                if (!src.equals(wanted)) return;
+                if (result != null) {
+                    view.setImageDrawable(result);
+                    if (isSvg(src)) view.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+                    else fadeIn(view);
+                } else if (!errorAsset.isEmpty()) {
+                    try {
+                        java.io.InputStream er = vf.activity.getAssets().open(errorAsset);
+                        view.setImageDrawable(
+                            android.graphics.drawable.Drawable.createFromStream(er, src));
+                        er.close();
+                    } catch (Exception ignored) { }
+                }
+            });
+        };
+
+        if (remote) {
+            IMAGE_EXECUTOR.execute(work);   // pooled — never a raw Thread
+        } else if (isSvg(src)) {
+            IMAGE_EXECUTOR.execute(work);   // SVGs parse off the UI thread
+        } else {
+            // Small local bitmaps decode fast and must not queue behind
+            // network fetches, but big ones still get downsampled.
+            work.run();
+        }
+    }
+
+    static void fadeIn(ImageView view) {
+        view.setAlpha(0f);
+        view.animate().alpha(1f).setDuration(180).start();
+    }
+
+    int decodeTarget(ImageView view) {
+        int w = view.getWidth();
+        if (w > 0) return Math.max(1, w * 2);
+        android.util.DisplayMetrics dm = vf.activity.getResources().getDisplayMetrics();
+        return Math.max(dm.widthPixels, 540);
+    }
+
+    static byte[] readAll(java.io.InputStream in) throws java.io.IOException {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        byte[] buffer = new byte[16 * 1024];
+        int read;
+        while ((read = in.read(buffer)) != -1) out.write(buffer, 0, read);
+        return out.toByteArray();
+    }
+
+    static android.graphics.Bitmap decodeSampled(byte[] data, int maxDim) {
+        android.graphics.BitmapFactory.Options bounds =
+            new android.graphics.BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        android.graphics.BitmapFactory.decodeByteArray(data, 0, data.length, bounds);
+        android.graphics.BitmapFactory.Options opts =
+            new android.graphics.BitmapFactory.Options();
+        int sample = 1;
+        while (bounds.outWidth / (sample * 2) >= maxDim
+                || bounds.outHeight / (sample * 2) >= maxDim) sample *= 2;
+        opts.inSampleSize = sample;
+        return android.graphics.BitmapFactory.decodeByteArray(data, 0, data.length, opts);
+    }
+
+    static boolean isSvg(String src) {
+        String clean = src == null ? "" : src.split("[?#]", 2)[0];
+        return clean.toLowerCase(java.util.Locale.US).endsWith(".svg");
+    }
+
+    android.graphics.drawable.Drawable svgDrawable(java.io.InputStream stream)
+            throws Exception {
+        com.caverock.androidsvg.SVG svg = com.caverock.androidsvg.SVG.getFromInputStream(stream);
+        android.graphics.drawable.PictureDrawable drawable =
+            new android.graphics.drawable.PictureDrawable(svg.renderToPicture());
+        return drawable;
+    }
+
+}

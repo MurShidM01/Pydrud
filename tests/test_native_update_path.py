@@ -19,7 +19,8 @@ VIEW_FACTORY = (Path(__file__).resolve().parent.parent / "pydrud" / "android"
 
 
 def _method_body(name_pattern: str) -> str:
-    text = VIEW_FACTORY.read_text(encoding="utf-8")
+    from tests import all_java_templates
+    text = all_java_templates()
     match = re.search(name_pattern + r".*?\n    \}", text, re.S)
     assert match, name_pattern
     return match.group(0)
@@ -44,7 +45,7 @@ class TestPositionedPatch(unittest.TestCase):
         self.assertEqual(style["top"], 340)
 
     def test_applystyle_reapplies_absolute_offsets(self):
-        body = _method_body(r"private void applyStyle\(")
+        body = _method_body(r"void applyStyle\(")
         self.assertIn('"absolute".equals(s.optString("position", ""))', body)
         for offset in ("leftMargin", "topMargin", "rightMargin", "bottomMargin"):
             with self.subTest(offset=offset):
@@ -67,7 +68,7 @@ class TestCanvasPatch(unittest.TestCase):
         self.assertNotEqual(props["ops"], [])
 
     def test_updateprops_reapplies_canvas_ops(self):
-        body = _method_body(r"private boolean updateProps\(")
+        body = _method_body(r"boolean updateProps\(")
         self.assertIn("instanceof AdvancedViews.PydrudCanvas", body)
         self.assertIn("advanced.updateCanvas(view, p)", body)
 
