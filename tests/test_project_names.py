@@ -61,7 +61,7 @@ class TestAwkwardProjectGenerates(unittest.TestCase):
         cwd = os.getcwd()
         try:
             os.chdir(tmp)
-            create_project("2cool", org="com.example")
+            create_project("2cool", org="com.example", runtime="chaquopy")
             root = os.path.join(tmp, "app_2cool")
             activity = os.path.join(
                 root, "android", "app", "src", "main", "java", "com",

@@ -10,6 +10,7 @@ import sys
 import click
 
 from pydrud import __version__
+from pydrud.runtime.runtime import Runtime
 from pydrud.utils import tui
 
 
@@ -102,11 +103,19 @@ def _show_error(message: str, hint: str = "") -> None:
 @click.option("--accent", default=None, metavar="COLOR",
               help="Brand colour the whole UI is generated from, "
                    "e.g. --accent '#FF0EA5E9'.")
-def init(name, org, min_sdk, target_sdk, accent):
-    """Create a new Pydrud project."""
+@click.option("--runtime", "runtime_", default=None,
+              type=click.Choice(["pydash", "chaquopy"], case_sensitive=False),
+              help="Runtime for the new project. Defaults to pydash (live preview).")
+def init(name, org, min_sdk, target_sdk, accent, runtime_):
+    """Create a new Pydrud project.
+
+    By default creates a pydash project (live preview — no Android
+    toolchain required). Pass ``--runtime chaquopy`` for a standalone
+    Android APK build path.
+    """
     from pydrud.commands.project import create_project
     create_project(name, org=org, min_sdk=min_sdk, target_sdk=target_sdk,
-                   accent=accent)
+                   runtime=runtime_ or "pydash", accent=accent)
 
 
 @main.command()
@@ -136,6 +145,7 @@ def sync(no_runtime):
 @click.option("--no-interactive", is_flag=True, default=False, help="Disable interactive terminal shortcuts.")
 def run(device, release, watch, no_interactive):
     """Build the APK, install, launch and start interactive Hot Reload on a connected device."""
+    _require_chaquopy("run")
     from pydrud.commands.builder import Builder
 
     root = _find_project_root()
@@ -153,6 +163,7 @@ def run(device, release, watch, no_interactive):
 @click.option("--output", default=None, help="Output APK path.")
 def build(release, output):
     """Build the APK only (no install)."""
+    _require_chaquopy("build")
     from pydrud.commands.builder import Builder
 
     root = _find_project_root()
@@ -176,6 +187,7 @@ def build(release, output):
 @click.option("--device", default=None, help="Target device ID.")
 def clean(device):
     """Clean generated build artifacts."""
+    _require_chaquopy("clean")
     from pydrud.commands.builder import Builder
 
     root = _find_project_root()
@@ -329,6 +341,22 @@ def _project_or_exit() -> str:
                     "Run this command from a directory containing pydrud.yaml.")
         sys.exit(1)
     return root
+
+
+def _require_chaquopy(command: str) -> None:
+    """Exit with a helpful message when *command* is unavailable in pydash mode."""
+    from pydrud.runtime.runtime import resolve_runtime
+    descriptor = resolve_runtime(_project_or_exit())
+    if descriptor.runtime is not Runtime.CHAQUOPY:
+        _show_error(
+            f"'pydrud {command}' builds an Android app binary, but this "
+            f"project runs in pydash mode (no binary is produced).",
+            hint=(
+                f"Use 'pydrud dev' for live preview in the Pydash client, or "
+                f"set runtime: chaquopy in pydrud.toml for a standalone APK."
+            ),
+        )
+        sys.exit(1)
 
 
 @pip.command("add")
@@ -507,6 +535,7 @@ def pip_sync():
 @click.option("--dname", default=None, help="X.500 distinguished name.")
 def keygen(alias, password, validity, dname):
     """Create an upload keystore and wire it into release builds."""
+    _require_chaquopy("keygen")
     from pydrud.commands.release import create_keystore
 
     root = _project_or_exit()
