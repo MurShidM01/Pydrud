@@ -18,7 +18,7 @@ class TestYamlControlledAndroidSync(unittest.TestCase):
         self.tmp = tempfile.mkdtemp(prefix="pydrud-config-sync-")
         self.cwd = os.getcwd()
         os.chdir(self.tmp)
-        create_project("gone", org="com.pydrud")
+        create_project("gone", org="com.pydrud", runtime="chaquopy")
         self.project = os.path.join(self.tmp, "gone")
 
     def tearDown(self):
