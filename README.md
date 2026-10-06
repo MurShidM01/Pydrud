@@ -92,6 +92,10 @@ and grows the UI layer toward Flutter/React Native parity:
   back and raises loudly instead of deferring every later render.
 * **`Canvas` animates and `Positioned` moves.** Canvas `ops` and absolute
   offsets are applied on the update path, not just at creation.
+* **The pickers honour their arguments.** `page.dialog.date(min=…, max=…)`
+  and `page.dialog.time(initial=…)` were accepted by Python and silently
+  dropped by Java; both now reach the native dialogs, and both are validated
+  in Python so a typo raises instead of doing nothing.
 * **Icons fail loud and cover Material Symbols.** An unknown name logs once
   under the stable `Pydrud` tag, `pydrud.icons` reports the shipped set, and
   the names developers copy from the docs (`rocket_launch`, `play_arrow`,
@@ -1230,8 +1234,16 @@ page.dialog.confirm(
 ```python
 page.dialog.confirm("Delete?").then(lambda yes: delete() if yes else None)
 page.dialog.prompt("New name", value=current).then(rename)
+
+# Date / time pickers. min/max bound the selectable range; all arguments are
+# validated in Python, so a typo raises instead of silently doing nothing.
 page.dialog.date().then(set_due_date)
-page.dialog.bottom_sheet(["Camera", "Gallery"]).then(pick_source)
+page.dialog.date(min="1900-01-01", max="2026-12-31").then(set_birthday)
+page.dialog.time(initial="09:30", use_24h=False).then(set_alarm)
+
+# Modal bottom sheet — resolves the chosen index, or -1 when cancelled.
+page.dialog.bottom_sheet(["Camera", "Gallery"],
+                         icons=["camera", "image"]).then(pick_source)
 
 page.storage.set("profile", {"name": "Ada"})
 page.storage.get("profile", default={}).then(render_profile)

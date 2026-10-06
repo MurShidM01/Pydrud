@@ -42,6 +42,14 @@ unlimited-widget and unlimited-icon work.
   `replay`, …) are aliased to renderer-backed icons. The catalogue is now
   **176 paths + 178 aliases**, and `Icon.svg("M…")` renders arbitrary 24×24
   path data so the set is effectively unlimited.
+* **PB-008 — the date and time pickers honour every argument.** The Python
+  API accepted `min`/`max` on `page.dialog.date()` and `initial` on
+  `page.dialog.time()`, but the generated Java ignored them, so a
+  "date of birth" picker happily offered tomorrow and every time picker
+  opened at the current time. Both are applied now, and both Python
+  arguments are validated (`YYYY-MM-DD` / `HH:MM`, `min <= max`) so a typo
+  raises at the call site instead of silently dropping the bound.
+  `bottom_sheet()` also rejects an empty option list.
 * **PB-007 — layout model parity.** `Row`/`Column` gained
   `main_axis_size`/`cross_axis_size` (`"min"`/`"max"`, Flutter-style) so a
   "row of columns" hugs its content instead of collapsing; the renderer
