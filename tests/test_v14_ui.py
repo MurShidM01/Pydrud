@@ -419,7 +419,8 @@ class TestPythonControlledTokens(unittest.TestCase):
                       "PydrudTheme.buttonHeightMd", "PydrudTheme.elevationFab",
                       "PydrudTheme.rippleOpacity", "PydrudTheme.pressScale"):
             self.assertIn(field, factory)
-        material = template("MaterialViews.java.j2")
+        material = (template("MaterialViews.java.j2")
+                    + template("MaterialNavigationViews.java.j2"))
         for field in ("PydrudTheme.listTileHeight", "PydrudTheme.avatarSize",
                       "PydrudTheme.iconSize"):
             self.assertIn(field, material)

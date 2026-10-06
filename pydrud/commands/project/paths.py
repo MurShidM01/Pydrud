@@ -198,6 +198,8 @@ _JAVA_TEMPLATES = (
     # ViewFactory collaborators (extracted to keep every renderer file small).
     "ImageLoader", "ViewStyler", "LayoutEngine", "TreePatcher",
     "EventBinder", "NativeViewFactory", "ViewAnimator", "BuiltinViews",
+    # MaterialViews collaborator (navigation family).
+    "MaterialNavigationViews",
 )
 
 

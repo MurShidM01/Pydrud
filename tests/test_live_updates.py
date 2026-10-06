@@ -159,7 +159,8 @@ class TestViewFactoryTemplate(unittest.TestCase):
     def setUpClass(cls):
         from tests import all_java_templates
         cls.factory = all_java_templates()
-        cls.material = _java("MaterialViews")
+        cls.material = (_java("MaterialViews")
+                        + _java("MaterialNavigationViews"))
         cls.bridge = _java("BridgeService")
 
     def test_material_views_get_their_children_attached(self):

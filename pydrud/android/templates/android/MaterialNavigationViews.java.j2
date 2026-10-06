@@ -1,0 +1,306 @@
+package {{ package }};
+import android.content.Context;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.text.TextUtils;
+import android.util.Log;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.webkit.WebChromeClient;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
+import android.widget.RatingBar;
+import android.widget.TextView;
+import android.widget.VideoView;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
+import com.google.android.material.bottomnavigation.BottomNavigationView;
+import com.google.android.material.chip.Chip;
+import com.google.android.material.tabs.TabLayout;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+/**
+ * MaterialNavigationViews — the navigation & progress family of Material components
+ * (Tabs, BottomNavigationBar, NavigationRail, SegmentedButton,
+ * Stepper, RefreshIndicator), extracted from {@link MaterialViews}
+ * to keep every renderer file small.
+ *
+ * Holds a back-reference to {@link MaterialViews} for its shared
+ * helpers (dp, parseColor, withAlpha, cornerRadii) and to the
+ * {@link ViewFactory} for icons and image loading.
+ */
+public class MaterialNavigationViews {
+
+    private static final String TAG = "PydrudMaterial";
+
+    private final ViewFactory factory;
+    private final MaterialViews m;
+    private final {{ app_name }}Activity activity;
+    private EventDispatcher events;
+
+    MaterialNavigationViews({{ app_name }}Activity activity, ViewFactory factory, MaterialViews m) {
+        this.activity = activity;
+        this.factory = factory;
+        this.m = m;
+    }
+
+    public void setEventDispatcher(EventDispatcher d) { this.events = d; }
+
+    View createBottomNav(final String key, JSONObject p) {
+        if (!p.optBoolean("native", false)) {
+            final PydrudNavigation.PydrudNavBar nav =
+                new PydrudNavigation.PydrudNavBar(activity);
+            nav.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                PydrudTheme.dp((float) p.optDouble("height", PydrudTheme.navHeight))));
+            nav.applyProps(p);
+            nav.setOnSelect(new PydrudNavigation.PydrudNavBar.OnSelect() {
+                @Override public void onSelect(int index) {
+                    if (events == null) return;
+                    JSONObject data = new JSONObject();
+                    try { data.put("value", index); } catch (Exception ignored) {}
+                    events.dispatch("change", key, data);
+                }
+            });
+            return nav;
+        }
+        return createNativeBottomNav(key, p);
+    }
+
+    View createNativeBottomNav(final String key, JSONObject p) {
+        BottomNavigationView nav = new BottomNavigationView(activity);
+        JSONArray items = p.optJSONArray("items");
+        int count = items == null ? 0 : items.length();
+        for (int i = 0; i < count; i++) {
+            JSONObject item = items.optJSONObject(i);
+            if (item == null) continue;
+            android.view.MenuItem menuItem =
+                nav.getMenu().add(0, i, i, item.optString("label", ""));
+            String icon = item.optString("icon", "");
+            if (!icon.isEmpty()) {
+                menuItem.setIcon(factory.icon(icon, PydrudTheme.onSurfaceVariant,
+                                              m.dp(PydrudTheme.iconSize)));
+            }
+            menuItem.setEnabled(item.optBoolean("enabled", true));
+            String badge = item.optString("badge", "");
+            if (!badge.isEmpty()) {
+                com.google.android.material.badge.BadgeDrawable drawable =
+                    nav.getOrCreateBadge(i);
+                try {
+                    drawable.setNumber(Integer.parseInt(badge));
+                } catch (NumberFormatException ignored) {
+                    drawable.setVisible(true);
+                }
+            }
+        }
+        int selected = p.optInt("selected", 0);
+        if (selected >= 0 && selected < count) nav.setSelectedItemId(selected);
+        String behavior = p.optString("labelBehavior",
+            p.optBoolean("showLabels", true) ? "always" : "never");
+        nav.setLabelVisibilityMode(
+            "never".equals(behavior)
+                ? com.google.android.material.navigation.NavigationBarView.LABEL_VISIBILITY_UNLABELED
+            : "selected".equals(behavior)
+                ? com.google.android.material.navigation.NavigationBarView.LABEL_VISIBILITY_SELECTED
+                : com.google.android.material.navigation.NavigationBarView.LABEL_VISIBILITY_LABELED);
+        String bg = p.optString("bg", "");
+        if (!bg.isEmpty()) nav.setBackgroundColor(m.parseColor(bg));
+
+        nav.setOnItemSelectedListener(
+            new com.google.android.material.navigation.NavigationBarView.OnItemSelectedListener() {
+                @Override public boolean onNavigationItemSelected(android.view.MenuItem item) {
+                    if (events != null) {
+                        JSONObject data = new JSONObject();
+                        try { data.put("value", item.getItemId()); }
+                        catch (Exception ignored) {}
+                        events.dispatch("change", key, data);
+                    }
+                    return true;
+                }
+            });
+        return nav;
+    }
+
+    View createRail(final String key, JSONObject p) {
+        LinearLayout rail = new LinearLayout(activity);
+        rail.setOrientation(LinearLayout.VERTICAL);
+        rail.setPadding(m.dp(4), m.dp(8), m.dp(4), m.dp(8));
+        rail.setBackgroundColor(PydrudTheme.background);
+
+        JSONArray items = p.optJSONArray("items");
+        final int selected = p.optInt("selected", 0);
+        int count = items == null ? 0 : items.length();
+        for (int i = 0; i < count; i++) {
+            JSONObject item = items.optJSONObject(i);
+            if (item == null) continue;
+            final int index = i;
+            LinearLayout cell = new LinearLayout(activity);
+            cell.setOrientation(LinearLayout.VERTICAL);
+            cell.setGravity(Gravity.CENTER);
+            cell.setPadding(m.dp(12), m.dp(12), m.dp(12), m.dp(12));
+
+            ImageView icon = new ImageView(activity);
+            icon.setImageDrawable(factory.icon(item.optString("icon", ""),
+                i == selected ? PydrudTheme.primary : PydrudTheme.onSurfaceVariant,
+                m.dp(24)));
+            cell.addView(icon, new LinearLayout.LayoutParams(m.dp(24), m.dp(24)));
+
+            if (p.optBoolean("extended", false)) {
+                TextView label = new TextView(activity);
+                label.setText(item.optString("label", ""));
+                label.setTextSize(11);
+                label.setGravity(Gravity.CENTER);
+                cell.addView(label);
+            }
+            cell.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    if (events == null) return;
+                    JSONObject data = new JSONObject();
+                    try { data.put("value", index); } catch (Exception ignored) {}
+                    events.dispatch("change", key, data);
+                }
+            });
+            rail.addView(cell);
+        }
+        return rail;
+    }
+
+    View createRefresh(final String key, JSONObject p) {
+        SwipeRefreshLayout layout = new SwipeRefreshLayout(activity);
+        layout.setRefreshing(p.optBoolean("refreshing", false));
+        String color = p.optString("color", "");
+        if (!color.isEmpty()) layout.setColorSchemeColors(m.parseColor(color));
+        layout.setOnRefreshListener(new SwipeRefreshLayout.OnRefreshListener() {
+            @Override public void onRefresh() {
+                if (events != null) events.dispatch("refresh", key, null);
+            }
+        });
+        return layout;
+    }
+
+    View createSegmented(final String key, JSONObject p) {
+        LinearLayout group = new LinearLayout(activity);
+        group.setOrientation(LinearLayout.HORIZONTAL);
+        JSONArray options = p.optJSONArray("options");
+        int count = options == null ? 0 : options.length();
+        final boolean multi = p.optBoolean("multi", false);
+        for (int i = 0; i < count; i++) {
+            final int index = i;
+            TextView segment = new TextView(activity);
+            segment.setText(options.optString(i, ""));
+            segment.setGravity(Gravity.CENTER);
+            segment.setPadding(m.dp(16), m.dp(11), m.dp(16), m.dp(11));
+            segment.setMinHeight(PydrudTheme.adaptive(44));
+            boolean isSelected = multi
+                ? m.containsIndex(p.optJSONArray("selected"), i)
+                : p.optInt("selected", 0) == i;
+            int accent = m.parseColor(p.optString("color", ""), PydrudTheme.primary);
+            GradientDrawable shape = new GradientDrawable();
+            shape.setColor(isSelected
+                ? PydrudTheme.alpha(accent, PydrudTheme.dark ? 0.30f : 0.16f)
+                : PydrudTheme.surfaceVariant);
+            shape.setStroke(m.dp(1), isSelected
+                ? PydrudTheme.alpha(accent, 0.5f) : PydrudTheme.outline);
+            shape.setCornerRadii(m.cornerRadii(i, count));
+            segment.setBackground(PydrudTheme.ripple(
+                shape, PydrudTheme.alpha(accent, 0.14f), m.dp(20)));
+            PydrudTheme.applyTextDefaults(segment, 14f, isSelected ? 600 : 500,
+                isSelected
+                    ? (PydrudTheme.dark ? PydrudTheme.lighten(accent, 0.4f)
+                                        : PydrudTheme.darken(accent, 0.25f))
+                    : PydrudTheme.onSurfaceVariant);
+            segment.setGravity(Gravity.CENTER);
+            segment.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    if (events == null) return;
+                    JSONObject data = new JSONObject();
+                    try { data.put("value", index); } catch (Exception ignored) {}
+                    events.dispatch("change", key, data);
+                }
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            group.addView(segment, lp);
+        }
+        return group;
+    }
+
+    View createStepper(JSONObject p) {
+        LinearLayout host = new LinearLayout(activity);
+        boolean horizontal = "horizontal".equals(p.optString("orientation", "horizontal"));
+        host.setOrientation(horizontal ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+        host.setGravity(Gravity.CENTER_VERTICAL);
+        host.setPadding(m.dp(16), m.dp(12), m.dp(16), m.dp(12));
+
+        JSONArray steps = p.optJSONArray("steps");
+        int count = steps == null ? 0 : steps.length();
+        int current = p.optInt("current", 0);
+        for (int i = 0; i < count; i++) {
+            TextView bubble = new TextView(activity);
+            bubble.setText(String.valueOf(i + 1));
+            bubble.setGravity(Gravity.CENTER);
+            bubble.setTextColor(Color.WHITE);
+            GradientDrawable circle = new GradientDrawable();
+            circle.setShape(GradientDrawable.OVAL);
+            circle.setColor(i <= current ? PydrudTheme.primary
+                                         : PydrudTheme.outlineStrong);
+            bubble.setBackground(circle);
+            host.addView(bubble, new LinearLayout.LayoutParams(m.dp(28), m.dp(28)));
+
+            if (i < count - 1) {
+                View line = new View(activity);
+                line.setBackgroundColor(i < current ? PydrudTheme.primary
+                                                    : PydrudTheme.outlineStrong);
+                LinearLayout.LayoutParams lp = horizontal
+                    ? new LinearLayout.LayoutParams(0, m.dp(2), 1f)
+                    : new LinearLayout.LayoutParams(m.dp(2), m.dp(24));
+                lp.setMargins(m.dp(4), 0, m.dp(4), 0);
+                host.addView(line, lp);
+            }
+        }
+        return host;
+    }
+
+    View createTabs(final String key, JSONObject p) {
+        LinearLayout host = new LinearLayout(activity);
+        host.setOrientation(LinearLayout.VERTICAL);
+
+        final PydrudNavigation.PydrudTabBar bar =
+            new PydrudNavigation.PydrudTabBar(activity);
+        bar.setLayoutParams(new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            PydrudTheme.dp((float) p.optDouble("tabHeight", 48))));
+        bar.applyProps(p);
+        bar.setOnSelect(new PydrudNavigation.PydrudTabBar.OnSelect() {
+            @Override public void onSelect(int index) {
+                if (events == null) return;
+                JSONObject data = new JSONObject();
+                try { data.put("value", index); } catch (Exception ignored) {}
+                events.dispatch("change", key, data);
+            }
+        });
+        host.addView(bar);
+
+        // The selected tab's body lives *below* the strip. Tagging it marks
+        // it as the child host, so both the first render and later patches
+        // put the tab content in the right place (it used to land above the
+        // tab bar — or nowhere at all on the very first frame). The tag key
+        // must be an application-specific id — android.R.id.content throws
+        // "The key must be an application-specific resource id" and used to
+        // replace every Tabs with an empty box.
+        LinearLayout content = new LinearLayout(activity);
+        content.setOrientation(LinearLayout.VERTICAL);
+        host.addView(content, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT));
+        host.setTag(R.id.pydrud_tag_children, content);
+        return host;
+    }
+
+}
