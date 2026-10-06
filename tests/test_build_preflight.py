@@ -36,7 +36,7 @@ class TestPreflight(unittest.TestCase):
         cls.tmp = tempfile.mkdtemp(prefix="pydrud-preflight-")
         cls.cwd = os.getcwd()
         os.chdir(cls.tmp)
-        create_project("demo_app", org="com.example")
+        create_project("demo_app", org="com.example", runtime="chaquopy")
         cls.project = os.path.join(cls.tmp, "demo_app")
 
     @classmethod
