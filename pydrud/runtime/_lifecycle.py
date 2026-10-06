@@ -11,6 +11,7 @@ import traceback
 from typing import TYPE_CHECKING, Callable, Optional
 
 from pydrud.core.logcat import log_exception
+from pydrud.core.results import ResultCancelled
 from pydrud.widgets import Widget, assign_stable_keys, validate_tree_keys
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -100,7 +101,17 @@ class LifecycleMixin:
         handler can naturally write ``await page.dialog.confirm(...)``.
         """
         async def run_handler():
-            return await awaitable
+            try:
+                return await awaitable
+            except ResultCancelled:
+                # The bridge shut down while the call was pending — a normal
+                # shutdown signal, not an app error.  Report nothing.
+                return None
+            except Exception as exc:
+                # Route through the app's error path (on_error / dev server /
+                # logcat) instead of TaskRunner's raw worker-thread print,
+                # which escapes pytest capture and interleaves with output.
+                self._report_error(exc)
 
         try:
             self._tasks.run(run_handler)

@@ -14,7 +14,7 @@ from pydrud.core.errors import PydrudError, MaxDepthError, FrameTooLargeError
 from pydrud.core.state import State, ReactiveDict
 from pydrud.core.store import Store, Selector, Computed, ReactiveList
 from pydrud.core.events import Event, EventDispatcher
-from pydrud.core.results import Result, ResultError
+from pydrud.core.results import Result, ResultCancelled, ResultError
 from pydrud.core.elements import Element, ElementTree
 from pydrud.core.subscriptions import Subscription
 from pydrud.core.tasks import TaskRunner, Timer, debounce, throttle, job
@@ -209,6 +209,7 @@ __all__ = [
     "Event",
     "EventDispatcher",
     "Result",
+    "ResultCancelled",
     "ResultError",
     "Element",
     "ElementTree",

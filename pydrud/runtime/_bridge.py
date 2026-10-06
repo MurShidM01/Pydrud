@@ -56,9 +56,11 @@ class BridgeMixin:
             result.fail(str(data.get("error", "native call failed")))
 
     def _cancel_pending(self, reason: str = "bridge closed") -> None:
+        # Cancel (not fail): a shutdown is expected, so coroutines awaiting
+        # these results see `ResultCancelled` instead of an app-level error.
         pending, self._pending = self._pending, {}
         for result in pending.values():
-            result.fail(reason)
+            result.cancel(reason)
 
     # ── background work ───────────────────────────────────────────────────
 

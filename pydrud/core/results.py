@@ -27,6 +27,14 @@ class ResultError(RuntimeError):
     """Raised when a native call fails (or times out) and the value is read."""
 
 
+class ResultCancelled(ResultError):
+    """The pending call was cancelled — typically the bridge shutting down.
+
+    Awaited handlers treat this as a normal shutdown signal, not an app
+    error, so no traceback is reported for it.
+    """
+
+
 class Result:
     """A one-shot, thread-safe holder for the answer to a native call."""
 
@@ -95,13 +103,13 @@ class Result:
             _safe(cb, self._error)
         return True
 
-    def cancel(self) -> bool:
+    def cancel(self, reason: str = "cancelled") -> bool:
         """Mark as cancelled; a later answer from Android will be ignored."""
         with self._lock:
             if self._done:
                 return False
             self._cancelled = True
-        return self.fail("cancelled")
+        return self.fail(reason)
 
     # ── consumption ──────────────────────────────────────────────────────
 
@@ -180,7 +188,8 @@ class Result:
         def reject(message: str) -> None:
             def set_error() -> None:
                 if not future.done():
-                    future.set_exception(ResultError(
+                    exc_cls = ResultCancelled if self._cancelled else ResultError
+                    future.set_exception(exc_cls(
                         f"{self._cmd or 'call'} failed: {message}"))
             loop.call_soon_threadsafe(set_error)
 
