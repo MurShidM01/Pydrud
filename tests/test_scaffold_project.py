@@ -258,12 +258,14 @@ class TestGeneratedProject(unittest.TestCase):
         # The budget is a tripwire for *accidental* bloat — bundling the CLI,
         # the templates or the launcher icons adds megabytes, and that is what
         # this number is here to catch. It sits roughly 40 KB above the real
-        # bundle (600 KB at the time of writing) so deliberate runtime work
-        # has room; move it, with the measurement, when features need it.
+        # bundle (652 KB at the time of writing, after v2.0.3 added the
+        # vendored icon catalogue and the pure-Python component library) so
+        # deliberate runtime work has room; move it, with the measurement,
+        # when features need it.
         size_kb = bundled_runtime_size_kb(bundle)
         heaviest = "".join(f"\n  {s / 1024:6.1f} KB  {p}"
                            for s, p in bundle_files(bundle)[:5])
-        self.assertLess(size_kb, 640,
+        self.assertLess(size_kb, 700,
                         f"bundled runtime is unexpectedly large "
                         f"({size_kb:.1f} KB); heaviest modules:{heaviest}")
 

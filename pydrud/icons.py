@@ -11,10 +11,13 @@ actually has — *is this icon name supported?* and *what names are there?*::
     len(icons.available())            # every supported name
     icons.suggest("rocket_lunch")     # ['rocket_launch']
 
-The catalogue is parsed from the generated ``PydrudIcons`` Java template —
-the exact class that ships in every built app — so it can never drift from
-what actually renders. It grows with icons registered at runtime through
-:meth:`Icons.register` / :meth:`Icons.load_pack`.
+The catalogue is generated from the same table that produces the
+``PydrudIcons`` Java class and vendored as plain data, so it reports the
+truth both on a build machine and inside a running app — the Java template
+itself is build-time only and never reaches the APK. A test pins the data
+and the template together so they cannot drift. The set grows with icons
+registered at runtime through :meth:`Icons.register` /
+:meth:`Icons.load_pack`.
 
 Custom iconography does not have to live in this list: :meth:`Icon.svg`
 renders arbitrary 24x24 SVG path data, so an app can ship its own icons
@@ -24,35 +27,15 @@ without touching the framework.
 from __future__ import annotations
 
 import difflib
-import functools
-import re
-from pathlib import Path
 from typing import Optional
+
+from pydrud.core.icon_data import ALIASES as _ALIASES
+from pydrud.core.icon_data import PATHS as _PATHS
 
 __all__ = ["available", "canonical", "closest", "has", "shipped", "suggest"]
 
-_TEMPLATE = (Path(__file__).resolve().parent
-             / "android" / "templates" / "android" / "PydrudIcons.java.j2")
-
-_PATHS_RE = re.compile(r'PATHS\.put\(\s*"([^"]+)"')
-_ALIASES_RE = re.compile(r'ALIASES\.put\(\s*"([^"]+)"\s*,\s*"([^"]+)"')
-
-
-@functools.lru_cache(maxsize=1)
-def _catalogue() -> tuple[frozenset, dict]:
-    """Parse the generated icon class once.
-
-    Returns ``(names, aliases)`` where *names* is every icon or alias the
-    Java ``PydrudIcons`` class recognises and *aliases* maps each alias to
-    the canonical path name it resolves to.
-    """
-    try:
-        text = _TEMPLATE.read_text(encoding="utf-8")
-    except OSError:  # pragma: no cover - template always ships
-        return frozenset(), {}
-    paths = set(_PATHS_RE.findall(text))
-    aliases = {alias: target for alias, target in _ALIASES_RE.findall(text)}
-    return frozenset(paths | set(aliases)), aliases
+#: Path names plus alias names — everything the renderer resolves.
+_NAMES: frozenset = frozenset(_PATHS | set(_ALIASES))
 
 
 def _normalise(name: str) -> str:
@@ -62,7 +45,7 @@ def _normalise(name: str) -> str:
 
 def shipped() -> frozenset:
     """Icon names and aliases compiled into the Android renderer."""
-    return _catalogue()[0]
+    return _NAMES
 
 
 def available() -> set:
@@ -86,10 +69,9 @@ def canonical(name: str) -> Optional[str]:
     if not isinstance(name, str) or not name.strip():
         return None
     key = _normalise(name)
-    names, aliases = _catalogue()
-    if key in aliases:
-        return aliases[key]
-    return key if key in names else None
+    if key in _ALIASES:
+        return _ALIASES[key]
+    return key if key in _PATHS else None
 
 
 def has(name: str) -> bool:

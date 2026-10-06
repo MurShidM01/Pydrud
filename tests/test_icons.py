@@ -84,6 +84,38 @@ class TestCatalogue(unittest.TestCase):
         self.assertEqual(broken, {})
 
 
+class TestVendoredData(unittest.TestCase):
+    """The catalogue must work inside the APK, where the template is absent.
+
+    ``pydrud/android`` is build-time only (it is excluded from the bundle),
+    so ``pydrud.icons`` reads ``pydrud.core.icon_data`` instead. These tests
+    keep the two generated artefacts — the Java template and the Python
+    data — from drifting apart.
+    """
+
+    def setUp(self):
+        from pydrud.core import icon_data
+
+        self.data = icon_data
+
+    def test_vendored_paths_match_the_template(self):
+        self.assertEqual(set(self.data.PATHS), _template_paths())
+
+    def test_vendored_aliases_match_the_template(self):
+        self.assertEqual(self.data.ALIASES, _template_aliases())
+
+    def test_shipped_is_the_union_of_the_vendored_data(self):
+        self.assertEqual(
+            icons.shipped(),
+            frozenset(self.data.PATHS | set(self.data.ALIASES)))
+
+    def test_the_catalogue_does_not_read_the_template_file(self):
+        # A regression guard: re-introducing a file read would make every
+        # lookup wrong (not fatal) on a device, where android/ is absent.
+        self.assertFalse(hasattr(icons, "_TEMPLATE"))
+        self.assertTrue(icons.shipped())
+
+
 class TestAnalyzerRule(unittest.TestCase):
 
     def _messages(self, source: str) -> list:
