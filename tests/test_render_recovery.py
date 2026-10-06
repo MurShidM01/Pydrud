@@ -70,8 +70,8 @@ def test_oversized_snapshot_streams_and_does_not_wedge(monkeypatch):
         assert tester.count("Text") >= 3
 
         # Grow well past the (tiny) frame limit. 2.0.2 froze here forever.
+        # The bound State schedules the rebuild on the UI thread.
         count.value = 250
-        tester.app.update()
         tester.settle(timeout=5.0)
 
         assert tester.count("Text") == 250, "the whole tree must reach the device"
@@ -79,7 +79,6 @@ def test_oversized_snapshot_streams_and_does_not_wedge(monkeypatch):
 
         # Shrink again: rendering must still work after the big frame.
         count.value = 4
-        tester.app.update()
         tester.settle(timeout=5.0)
 
         assert tester.count("Text") == 4

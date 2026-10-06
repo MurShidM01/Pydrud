@@ -40,25 +40,27 @@ class RenderedNode:
     """A mirror of a native View created from a widget JSON node."""
 
     def __init__(self, data: dict):
-        self.key: str = data.get("key", "")
-        self.type: str = data.get("type", "")
-        self.style: dict = dict(data.get("style") or {})
-        self.props: dict = dict(data.get("props") or {})
-        self.events: list[str] = list(data.get("events") or [])
-        self.visible: bool = data.get("visible", True)
-        self.children: list["RenderedNode"] = [
-            RenderedNode(c) for c in (data.get("children") or [])
-        ]
-        self.parent: Optional["RenderedNode"] = None
-        for child in self.children:
-            child.parent = self
+        _fill_node(self, data)
+        # Build the subtree with an explicit stack so a deeply nested tree
+        # does not overflow during snapshot application (PB-001).
+        stack = [(data, self)]
+        while stack:
+            source, node = stack.pop()
+            for child_data in (source.get("children") or []):
+                child = object.__new__(RenderedNode)
+                _fill_node(child, child_data)
+                child.parent = node
+                node.children.append(child)
+                stack.append((child_data, child))
 
     # ── queries ───────────────────────────────────────────────────────────
 
     def walk(self):
-        yield self
-        for child in self.children:
-            yield from child.walk()
+        stack = [self]
+        while stack:
+            node = stack.pop()
+            yield node
+            stack.extend(reversed(node.children))
 
     def find(self, key: str) -> Optional["RenderedNode"]:
         for node in self.walk():
@@ -82,6 +84,18 @@ class RenderedNode:
 
     def __repr__(self) -> str:
         return f"<{self.type} {self.key!r} children={len(self.children)}>"
+
+
+def _fill_node(node: "RenderedNode", data: dict) -> None:
+    """Populate a node's own fields (not its children)."""
+    node.key = data.get("key", "")
+    node.type = data.get("type", "")
+    node.style = dict(data.get("style") or {})
+    node.props = dict(data.get("props") or {})
+    node.events = list(data.get("events") or [])
+    node.visible = data.get("visible", True)
+    node.children = []
+    node.parent = None
 
 
 class FakeDevice:

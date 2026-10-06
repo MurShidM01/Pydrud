@@ -24,6 +24,7 @@ from pydrud.core.diff import TreeDiff
 from pydrud.core.events import EventDispatcher
 from pydrud.core.bridge import BridgeProtocol
 from pydrud.core.protocol import MAX_FRAME_BYTES, ProtocolError, RenderTransaction
+from pydrud.core.errors import FrameTooLargeError
 from pydrud.core.elements import ElementTree
 from pydrud.widgets import Widget, assign_stable_keys, validate_tree_keys
 
@@ -307,7 +308,7 @@ class App:
             return
 
         # 3. Nothing fit — report loudly rather than wedging the UI.
-        self._report_error(ProtocolError(
+        self._report_error(FrameTooLargeError(
             "render frame exceeds the maximum size of "
             f"{MAX_FRAME_BYTES} bytes even after splitting; a single widget "
             "is too large to send"))
@@ -381,7 +382,7 @@ class App:
                                   snapshot_tree=tree):
             self._outbox.clear()
             self._outbox_final_tree = None
-            self._report_error(ProtocolError(
+            self._report_error(FrameTooLargeError(
                 "a widget subtree is too large to stream over the bridge"))
             return
         if is_last:
@@ -467,12 +468,14 @@ class App:
         return None
 
     def _replace_widget_reference(self, root: Widget, key: str, replacement: Widget) -> bool:
-        for index, child in enumerate(root.children):
-            if child.key == key:
-                root.children[index] = replacement
-                return True
-            if self._replace_widget_reference(child, key, replacement):
-                return True
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            for index, child in enumerate(node.children):
+                if child.key == key:
+                    node.children[index] = replacement
+                    return True
+                stack.append(child)
         return False
 
     def render(self):
@@ -703,7 +706,9 @@ class App:
 
     def _materialize_elements(self, tree: Widget) -> None:
         """Refresh persistent logical element metadata without touching Views."""
-        def walk(widget: Widget, parent_key: Optional[str] = None, index: int = 0):
+        stack: list[tuple[Widget, Optional[str], int]] = [(tree, None, 0)]
+        while stack:
+            widget, parent_key, index = stack.pop()
             props = widget._serialise_props()
             element, _ = self._elements.upsert(
                 widget.key,
@@ -715,8 +720,7 @@ class App:
             element.listeners = set(widget.event_handlers)
             element.children = [child.key for child in widget.children]
             for i, child in enumerate(widget.children):
-                walk(child, widget.key, i)
-        walk(tree)
+                stack.append((child, widget.key, i))
 
     # ── Hot Reload ─────────────────────────────────────────────────────────
 
@@ -1610,7 +1614,7 @@ class App:
             return
         if self._send_chunked_snapshot(desired, self._confirmed_revision):
             return
-        self._report_error(ProtocolError(
+        self._report_error(FrameTooLargeError(
             "render recovery frame exceeds the maximum size of "
             f"{MAX_FRAME_BYTES} bytes"))
 

@@ -243,8 +243,3 @@ class Scaffold(Widget):
     def unwrap(self) -> Widget:
         self.rebuild()
         return self.children[0]
-
-    def to_dict(self) -> dict:
-        """Serialise as the internal Stack so Android renders it correctly."""
-        self.rebuild()
-        return self.children[0].to_dict()

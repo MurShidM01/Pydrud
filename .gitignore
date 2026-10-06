@@ -44,6 +44,7 @@ pydrud.log
 # generated API reference (`pydrud docs`); hand-written docs are tracked
 docs/*.html
 CLAUDE.md
+PYDRUD.md
 *.zip
 
 # Testing

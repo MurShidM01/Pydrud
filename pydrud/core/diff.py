@@ -84,7 +84,7 @@ class TreeDiff:
             if old is not None:
                 patches.append(Patch("delete", old.unwrap().key))
             return patches
-        _diff_node(old, new, patches, parent_key="", index=0)
+        _diff_iterative(old, new, patches)
         return patches
 
     @staticmethod
@@ -96,61 +96,65 @@ class TreeDiff:
 # ── Internal helpers ─────────────────────────────────────────────────────────
 
 
-def _diff_node(
-    old: Optional[Widget],
-    new: Widget,
-    patches: list[Patch],
-    *,
-    parent_key: str = "",
-    index: int = 0,
-):
-    """Compute patches for a single node."""
-    new = new.unwrap()
-    if old is not None:
-        old = old.unwrap()
-    if old is None:
-        # Entirely new subtree — include the full JSON tree.
-        patches.append(
-            Patch("create", new.key, parent_key=parent_key, index=index, tree=new.to_dict())
-        )
-        return
+def _diff_iterative(old: Optional[Widget], new: Widget,
+                    patches: list[Patch]) -> None:
+    """Diff two trees with an explicit work stack (PB-001).
 
-    if old._widget_type != new._widget_type or old.key != new.key:
-        # Different widget identity — replace the whole subtree.
-        patches.append(
-            Patch("replace", old.key, parent_key=parent_key, index=index,
-                  new_key=new.key, tree=new.to_dict())
-        )
-        return
+    The recursive 2.0.2 engine blew the C stack on a deep tree. The tasks
+    below reproduce its traversal exactly: a ``node`` task compares one pair
+    and queues a ``children`` task, which in turn queues the surviving
+    children as ``node`` tasks. Children tasks are pushed reversed so they
+    run left-to-right, and each child's subtree is fully diffed before the
+    next sibling — the same order the recursive version produced.
+    """
+    stack: list[tuple] = [("node", old, new, "", 0)]
+    while stack:
+        task = stack.pop()
+        if task[0] == "node":
+            _, old_node, new_node, parent_key, index = task
+            new_node = new_node.unwrap()
+            if old_node is not None:
+                old_node = old_node.unwrap()
+            if old_node is None:
+                # Entirely new subtree — include the full JSON tree.
+                patches.append(Patch(
+                    "create", new_node.key, parent_key=parent_key,
+                    index=index, tree=new_node.to_dict()))
+                continue
+            if (old_node._widget_type != new_node._widget_type
+                    or old_node.key != new_node.key):
+                # Different widget identity — replace the whole subtree.
+                patches.append(Patch(
+                    "replace", old_node.key, parent_key=parent_key,
+                    index=index, new_key=new_node.key,
+                    tree=new_node.to_dict()))
+                continue
+            changed_props = _changed_props(old_node, new_node)
+            changed_style = _changed_dict(old_node.style, new_node.style)
+            if changed_props or changed_style:
+                patch_data: dict = {}
+                if changed_props:
+                    patch_data["props"] = changed_props
+                if changed_style:
+                    patch_data["style"] = changed_style
+                patches.append(Patch("update", new_node.key,
+                                     parent_key=parent_key, **patch_data))
+            stack.append(("children", old_node.children, new_node.children,
+                          new_node.key))
+        else:
+            _, old_list, new_list, parent_key = task
+            _diff_children_iterative(old_list, new_list, patches,
+                                     parent_key, stack)
 
-    # Same type and key: check for property changes.
-    changed_props = _changed_props(old, new)
-    changed_style = _changed_dict(old.style, new.style)
 
-    if changed_props or changed_style:
-        patch_data: dict = {}
-        if changed_props:
-            patch_data["props"] = changed_props
-        if changed_style:
-            patch_data["style"] = changed_style
-        patches.append(Patch("update", new.key, parent_key=parent_key, **patch_data))
-
-    # Walk children.
-    _diff_children(old.children, new.children, patches, parent_key=new.key)
-
-
-def _diff_children(
+def _diff_children_iterative(
     old_list: list[Widget],
     new_list: list[Widget],
     patches: list[Patch],
-    *,
-    parent_key: str = "",
-):
-    """Keyed children diff.
-
-    Children are matched by key: survivors are diffed in place, children
-    only in the old tree are deleted and children only in the new tree are
-    created at their target index.
+    parent_key: str,
+    stack: list[tuple],
+) -> None:
+    """Keyed children diff; queues surviving children as ``node`` tasks.
 
     Positions are tracked against an *evolving* list rather than the
     original one. The native applier executes patches in order — ``create``
@@ -175,7 +179,9 @@ def _diff_children(
     # The order the native side is left in once the deletions are applied.
     order = [w.key for w in old_list if w.key in new_by_key]
 
-    # 2. Creations / moves / updates, left to right.
+    # 2. Creations / moves, left to right. Surviving children are queued for
+    #    the recursive-equivalent node pass.
+    node_tasks: list[tuple] = []
     for index, new_w in enumerate(new_list):
         old_w = old_by_key.get(new_w.key)
         if old_w is None:
@@ -193,17 +199,22 @@ def _diff_children(
             )
             order.pop(current)
             order.insert(index, new_w.key)
-        # ``replace`` keeps the view at its current position, so the move
-        # above must happen first — hence diffing the node last.
-        _diff_node(old_w, new_w, patches, parent_key=parent_key, index=index)
+        node_tasks.append((old_w, new_w, parent_key, index))
+
+    # Push reversed so the first child's subtree is diffed first (LIFO).
+    for old_w, new_w, pk, idx in reversed(node_tasks):
+        stack.append(("node", old_w, new_w, pk, idx))
 
 
 def _copy_auto_keys(fresh_node: Widget, prev_node: Widget) -> None:
     """Recursively synchronize auto-generated keys for matched subtrees."""
-    fresh_node.key = prev_node.key
-    for fc, pc in zip(fresh_node.children, prev_node.children):
-        if getattr(fc, "_auto_key", False) and getattr(pc, "_auto_key", False):
-            _copy_auto_keys(fc, pc)
+    stack = [(fresh_node, prev_node)]
+    while stack:
+        fresh, prev = stack.pop()
+        fresh.key = prev.key
+        for fc, pc in zip(fresh.children, prev.children):
+            if getattr(fc, "_auto_key", False) and getattr(pc, "_auto_key", False):
+                stack.append((fc, pc))
 
 
 def _preserve_keyless_identities(
@@ -262,23 +273,37 @@ def _preserve_keyless_identities(
 
 
 def _keyless_fingerprint(widget: Widget) -> str:
-    """A conservative content signature used only for keyless matching."""
-    try:
-        payload = {
-            "type": widget._widget_type,
-            "props": widget._serialise_props(),
-            "style": widget.style,
-            "expand": widget.expand,
-            "visible": widget.visible,
-            "tooltip": widget.tooltip,
-            "children": [_keyless_fingerprint(c) for c in widget.children],
-        }
-        return json.dumps(payload, sort_keys=True, default=str,
-                          separators=(",", ":"))
-    except Exception:
-        # Never let an exotic custom prop make reconciliation fail. A unique
-        # value means it simply falls back to the existing structural key.
-        return f"{widget._widget_type}:{id(widget)}"
+    """A conservative content signature used only for keyless matching.
+
+    Iterative (PB-001): the signature is built bottom-up so a deep tree
+    cannot overflow the stack while computing a fingerprint.
+    """
+    order: list[Widget] = []
+    stack = [widget]
+    while stack:
+        node = stack.pop()
+        order.append(node)
+        stack.extend(node.children)
+
+    fingerprints: dict[int, str] = {}
+    for node in reversed(order):
+        try:
+            payload = {
+                "type": node._widget_type,
+                "props": node._serialise_props(),
+                "style": node.style,
+                "expand": node.expand,
+                "visible": node.visible,
+                "tooltip": node.tooltip,
+                "children": [fingerprints[id(c)] for c in node.children],
+            }
+            fingerprints[id(node)] = json.dumps(
+                payload, sort_keys=True, default=str, separators=(",", ":"))
+        except Exception:
+            # Never let an exotic custom prop make reconciliation fail. A
+            # unique value means it simply falls back to the structural key.
+            fingerprints[id(node)] = f"{node._widget_type}:{id(node)}"
+    return fingerprints[id(widget)]
 
 
 def _changed_props(old: Widget, new: Widget) -> dict:

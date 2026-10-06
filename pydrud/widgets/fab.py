@@ -116,18 +116,25 @@ class FloatingActionButton(Widget):
             )
         self.children = [child]
 
-    def to_dict(self) -> dict:
-        """Serialise the FAB as a Container with a centred label/icon."""
+    def _serialise_self(self) -> dict:
+        """Serialise the FAB as a Container with a centred label/icon.
+
+        Uses the depth-safe ``_serialise_self`` hook (PB-001) rather than
+        overriding ``to_dict``, so a FAB nested in a deep tree stays
+        iterative.
+        """
+        from pydrud.widgets.base import _serialise_value
+
         self.rebuild()
         return {
             "type": "Container",
             "key": self.key,
-            "style": dict(self.style),
+            "style": _serialise_value(self.style),
             "expand": self.expand,
             "visible": self.visible,
             "tooltip": self.tooltip,
             "has_events": bool(self.event_handlers),
             "events": sorted(self.event_handlers.keys()),
             "props": {"_fab": True},
-            "children": [c.to_dict() for c in self.children],
+            "children": [],
         }

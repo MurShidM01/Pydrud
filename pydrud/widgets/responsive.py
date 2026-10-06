@@ -97,10 +97,6 @@ class ResponsiveBuilder(Widget):
         self.rebuild()
         return self.children[0]
 
-    def to_dict(self) -> dict:
-        self.rebuild()
-        return self.children[0].to_dict()
-
 
 class AdaptiveLayout(ResponsiveBuilder):
     """Pick a completely different layout per window size class.
@@ -289,7 +285,3 @@ class SafeArea(Widget):
     def unwrap(self) -> Widget:
         self.rebuild()
         return self.children[0]
-
-    def to_dict(self) -> dict:
-        self.rebuild()
-        return self.children[0].to_dict()

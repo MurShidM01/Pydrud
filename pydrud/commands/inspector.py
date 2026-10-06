@@ -24,31 +24,43 @@ BOX = {"tl": "┌", "tr": "┐", "bl": "└", "br": "┘", "h": "─", "v": "│
 
 def _flatten(node: dict, depth: int = 0, out: Optional[list] = None,
              prefix: str = "") -> list[str]:
+    """Indented rendering of a serialised tree (iterative, PB-001)."""
     out = [] if out is None else out
-    kind = node.get("type", "?")
-    key = node.get("key", "")
-    props = node.get("props") or {}
-    label = props.get("value") or props.get("title") or props.get("text") or ""
-    if isinstance(label, str) and len(label) > 28:
-        label = label[:27] + "…"
-    events = ",".join(node.get("events") or [])
-    line = f"{prefix}{kind}"
-    if label:
-        line += f"  '{label}'"
-    line += f"   [{key}]"
-    if events:
-        line += f"  ({events})"
-    out.append(line)
-    children = node.get("children") or []
-    for index, child in enumerate(children):
-        last = index == len(children) - 1
-        branch = "  " * depth + ("└─ " if last else "├─ ")
-        _flatten(child, depth + 1, out, branch)
+    stack: list[tuple[dict, int, str]] = [(node, depth, prefix)]
+    while stack:
+        current, level, branch = stack.pop()
+        kind = current.get("type", "?")
+        key = current.get("key", "")
+        props = current.get("props") or {}
+        label = props.get("value") or props.get("title") or props.get("text") or ""
+        if isinstance(label, str) and len(label) > 28:
+            label = label[:27] + "…"
+        events = ",".join(current.get("events") or [])
+        line = f"{branch}{kind}"
+        if label:
+            line += f"  '{label}'"
+        line += f"   [{key}]"
+        if events:
+            line += f"  ({events})"
+        out.append(line)
+        children = current.get("children") or []
+        for index in range(len(children) - 1, -1, -1):
+            child = children[index]
+            last = index == len(children) - 1
+            child_prefix = "  " * level + ("└─ " if last else "├─ ")
+            stack.append((child, level + 1, child_prefix))
     return out
 
 
 def count_nodes(node: dict) -> int:
-    return 1 + sum(count_nodes(child) for child in node.get("children") or [])
+    """Total node count, without recursion (PB-001)."""
+    total = 0
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        total += 1
+        stack.extend(current.get("children") or [])
+    return total
 
 
 def summarise(tree: dict) -> dict:
@@ -56,17 +68,16 @@ def summarise(tree: dict) -> dict:
     kinds: dict[str, int] = {}
     interactive = 0
     deepest = 0
-
-    def walk(node: dict, depth: int) -> None:
-        nonlocal interactive, deepest
+    stack: list[tuple[dict, int]] = [(tree, 1)]
+    while stack:
+        node, depth = stack.pop()
         deepest = max(deepest, depth)
-        kinds[node.get("type", "?")] = kinds.get(node.get("type", "?"), 0) + 1
+        kind = node.get("type", "?")
+        kinds[kind] = kinds.get(kind, 0) + 1
         if node.get("has_events") or node.get("events"):
             interactive += 1
         for child in node.get("children") or []:
-            walk(child, depth + 1)
-
-    walk(tree, 1)
+            stack.append((child, depth + 1))
     return {"nodes": sum(kinds.values()), "depth": deepest,
             "interactive": interactive,
             "widgets": dict(sorted(kinds.items(), key=lambda kv: -kv[1]))}

@@ -10,6 +10,7 @@ __version__ = "2.0.3"
 __app_name__ = "Pydrud"
 
 from pydrud.runtime.app import App
+from pydrud.core.errors import PydrudError, MaxDepthError, FrameTooLargeError
 from pydrud.core.state import State, ReactiveDict
 from pydrud.core.store import Store, Selector, Computed, ReactiveList
 from pydrud.core.events import Event, EventDispatcher
@@ -167,6 +168,9 @@ from pydrud.widgets import (
 
 __all__ = [
     "App",
+    "PydrudError",
+    "MaxDepthError",
+    "FrameTooLargeError",
     "Responsive",
     "MediaQuery",
     "Breakpoints",

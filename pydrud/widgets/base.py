@@ -12,6 +12,8 @@ import json
 import uuid
 from typing import Any, Callable, Optional
 
+from pydrud.core.errors import MaxDepthError
+
 #: Event names a widget may subscribe to.
 EVENT_NAMES = (
     "click",
@@ -21,6 +23,17 @@ EVENT_NAMES = (
     "focus",
     "scroll",
 )
+
+#: Maximum nesting depth of a widget tree.
+#:
+#: Every tree algorithm in Pydrud is iterative, so this is not a Python
+#: stack limit — it is a guard for the *native* side, whose ``createView``,
+#: ``indexParents`` and ``removeViewTree`` walk the tree recursively and
+#: whose view hierarchy degrades long before this. Exceeding it raises
+#: :class:`~pydrud.errors.MaxDepthError` with an actionable message instead
+#: of a bare ``RecursionError``. Raise it (``pydrud.widgets.base.
+#: MAX_TREE_DEPTH = …``) only if you know the device can take it.
+MAX_TREE_DEPTH = 1000
 
 
 def _serialise_value(value):
@@ -161,8 +174,23 @@ class Widget:
 
     def to_dict(self) -> dict:
         """Recursively serialise this widget and its children to a JSON-safe dict."""
-        validate_tree_keys(self)
-        d: dict[str, Any] = {
+        root = self.unwrap()
+        validate_tree_keys(root)
+        return _serialise_tree(root)
+
+    def _serialise_props(self) -> dict:
+        """Override in subclasses to add widget-specific properties."""
+        return dict(self._extra)
+
+    def _serialise_self(self) -> dict:
+        """This node's own serialised fields (``children`` left empty).
+
+        The iterative :func:`_serialise_tree` fills ``children`` afterwards.
+        Override this — not :meth:`to_dict` — when a widget renders as a
+        different native node (``FloatingActionButton`` serialises as a
+        ``Container``), so the tree stays depth-safe.
+        """
+        return {
             "type": self._widget_type,
             "key": self.key,
             "style": _serialise_value(self.style),
@@ -172,18 +200,8 @@ class Widget:
             "has_events": bool(self.event_handlers),
             "events": sorted(self.event_handlers.keys()),
             "props": _serialise_value(self._serialise_props()),
+            "children": [],
         }
-        if self.children:
-            # Hidden children are serialised too (the renderer gives them
-            # View.GONE). Dropping them here would make the native child
-            # indices disagree with the diff's indices, so a later
-            # create/move patch would land in the wrong position.
-            d["children"] = [c.to_dict() for c in self.children]
-        return d
-
-    def _serialise_props(self) -> dict:
-        """Override in subclasses to add widget-specific properties."""
-        return dict(self._extra)
 
     def to_json(self) -> str:
         """JSON string representation of the widget tree."""
@@ -193,17 +211,24 @@ class Widget:
 
     def find_by_key(self, key: str) -> Optional["Widget"]:
         """Walk the tree and return the first widget matching *key*."""
-        if self.key == key:
-            return self
-        for child in self.children:
-            result = child.find_by_key(key)
-            if result is not None:
-                return result
+        stack: list["Widget"] = [self]
+        while stack:
+            widget = stack.pop()
+            if widget.key == key:
+                return widget
+            # Reversed so children are visited left-to-right, matching the
+            # pre-2.0.3 recursive order.
+            stack.extend(reversed(widget.children))
         return None
 
     def walk(self):
         """Depth-first generator yielding (widget, depth) tuples."""
-        yield from _walk(self, 0)
+        stack: list[tuple["Widget", int]] = [(self, 0)]
+        while stack:
+            widget, depth = stack.pop()
+            yield widget, depth
+            for child in reversed(widget.children):
+                stack.append((child, depth + 1))
 
     def unwrap(self) -> "Widget":
         """Return the widget that is actually serialised.
@@ -222,22 +247,81 @@ class Widget:
         especially bound methods and closures over sockets — are not always
         copyable.  The clone is only used for diffing, where handler identity
         does not matter.
+
+        The copy is *iterative*: ``copy.deepcopy`` recursed once per tree
+        level and blew the C stack around depth 200, which meant a moderately
+        deep tree wedged rendering on every frame (2.0.2, PB-001). Only each
+        node's own (shallow) attributes are deep-copied here; children are
+        linked with an explicit stack.
         """
         memo: dict[int, Any] = {}
-        handlers: list[tuple[Widget, dict]] = []
-        for w, _ in self.walk():
-            handlers.append((w, w.event_handlers))
-            memo[id(w.event_handlers)] = dict(w.event_handlers)
-        return copy.deepcopy(self, memo)
+        root = self._copy_node(memo)
+        stack: list[tuple["Widget", "Widget"]] = [(self, root)]
+        while stack:
+            source, target = stack.pop()
+            for child in source.children:
+                child_clone = child._copy_node(memo)
+                target.children.append(child_clone)
+                stack.append((child, child_clone))
+        return root
+
+    def _copy_node(self, memo: dict) -> "Widget":
+        """Shallow-copy one widget, deep-copying its non-child attributes."""
+        clone = object.__new__(type(self))
+        for name, value in self.__dict__.items():
+            if name == "children":
+                clone.children = []
+            elif name == "event_handlers":
+                # Share callables; copy the mapping so mutations are local.
+                clone.event_handlers = dict(value)
+            else:
+                clone.__dict__[name] = copy.deepcopy(value, memo)
+        return clone
 
     def __repr__(self) -> str:
         return f"{self._widget_type}(key={self.key!r})"
 
 
-def _walk(widget: "Widget", depth: int):
-    yield widget, depth
-    for child in widget.children:
-        yield from _walk(child, depth + 1)
+def _serialise_tree(root: "Widget") -> dict:
+    """Serialise a widget tree without recursion (PB-001).
+
+    Composite widgets (``AppBar``, ``Scaffold``, ``Visible`` …) render as an
+    internal node; :meth:`Widget.unwrap` is resolved once per node and cached
+    so a builder with side effects runs exactly once, and each node's own
+    fields come from :meth:`Widget._serialise_self`. A pre-order pass
+    collects the rendered nodes; the reversed pass builds each dict once its
+    children already have one, giving the same output as the recursive
+    ``to_dict`` with O(n) stack.
+
+    *root* must already be unwrapped (``to_dict`` does that).
+    """
+    children_of: dict[int, list["Widget"]] = {}
+    order: list[Widget] = []
+    stack: list[Widget] = [root]
+    while stack:
+        widget = stack.pop()
+        order.append(widget)
+        kids: list[Widget] = []
+        for child in widget.children:
+            rendered = child.unwrap()
+            kids.append(rendered)
+            stack.append(rendered)
+        children_of[id(widget)] = kids
+
+    serialised: dict[int, dict] = {}
+    for widget in reversed(order):
+        d = widget._serialise_self()
+        kids = children_of[id(widget)]
+        if kids:
+            # Hidden children are serialised too (the renderer gives them
+            # View.GONE). Dropping them here would make the native child
+            # indices disagree with the diff's indices, so a later
+            # create/move patch would land in the wrong position.
+            d["children"] = [serialised[id(c)] for c in kids]
+        else:
+            d.pop("children", None)
+        serialised[id(widget)] = d
+    return serialised[id(root)]
 
 
 def assign_stable_keys(root: "Widget", prefix: str = "r") -> "Widget":
@@ -250,15 +334,14 @@ def assign_stable_keys(root: "Widget", prefix: str = "r") -> "Widget":
     """
     if root._auto_key:
         root.key = prefix
-    _stabilise_children(root)
+    stack: list[Widget] = [root]
+    while stack:
+        widget = stack.pop()
+        for index, child in enumerate(widget.children):
+            if child._auto_key:
+                child.key = f"{widget.key}.{index}{child._widget_type}"
+            stack.append(child)
     return root
-
-
-def _stabilise_children(widget: "Widget") -> None:
-    for index, child in enumerate(widget.children):
-        if child._auto_key:
-            child.key = f"{widget.key}.{index}{child._widget_type}"
-        _stabilise_children(child)
 
 
 def _gen_key() -> str:
@@ -270,10 +353,25 @@ def validate_tree_keys(root: "Widget") -> None:
 
     Duplicate keys make keyed reconciliation mathematically ambiguous and can
     otherwise collapse entries in the diff engine's dictionaries.
+
+    Iterative (PB-001): the old recursive walk raised ``RecursionError`` on a
+    deep tree; now an over-deep tree raises :class:`MaxDepthError` with the
+    offending widget named, and duplicate keys are still reported with both
+    paths (in the same left-to-right order as before).
     """
     seen: dict[str, tuple[str, ...]] = {}
-
-    def visit(widget: "Widget", path: tuple[str, ...]) -> None:
+    stack: list[tuple["Widget", tuple[str, ...], int]] = [
+        (root, (root._widget_type,), 0)
+    ]
+    while stack:
+        widget, path, depth = stack.pop()
+        if depth > MAX_TREE_DEPTH:
+            raise MaxDepthError(
+                f"Pydrud widget tree exceeds the maximum depth of "
+                f"{MAX_TREE_DEPTH} at {widget._widget_type}"
+                f"(key={widget.key!r}). Flatten the tree, or raise "
+                "pydrud.widgets.base.MAX_TREE_DEPTH if the device can take it."
+            )
         key = str(widget.key or "")
         if not key:
             raise ValueError("Pydrud widget keys must be non-empty")
@@ -285,7 +383,8 @@ def validate_tree_keys(root: "Widget") -> None:
                 f"{previous} and {current}"
             )
         seen[key] = path
-        for index, child in enumerate(widget.children):
-            visit(child, path + (f"{widget._widget_type}[{index}]",))
-
-    visit(root, (root._widget_type,))
+        # Push in reverse so children are visited left-to-right.
+        for index in range(len(widget.children) - 1, -1, -1):
+            child = widget.children[index]
+            stack.append((child, path + (f"{widget._widget_type}[{index}]",),
+                          depth + 1))

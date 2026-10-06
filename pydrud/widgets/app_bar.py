@@ -179,10 +179,5 @@ class AppBar(Widget):
         self.rebuild()
         return self.children[0]
 
-    def to_dict(self) -> dict:
-        """Delegate to the internal Container so Android renders it correctly."""
-        self.rebuild()
-        return self.children[0].to_dict()
-
     def _serialise_props(self) -> dict:
         return {}
