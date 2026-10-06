@@ -27,7 +27,7 @@ class TestManifestAndCliRegressions(unittest.TestCase):
         self.previous_cwd = os.getcwd()
         os.chdir(self.root)
         self.project = os.path.join(self.root, "camera_app")
-        create_project("camera_app", org="com.example")
+        create_project("camera_app", org="com.example", runtime="chaquopy")
 
     def tearDown(self):
         os.chdir(self.previous_cwd)
