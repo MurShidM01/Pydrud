@@ -31,6 +31,20 @@ the developer-experience traps (DX-001…DX-006), the doc/API mismatches
 unlimited-widget and unlimited-icon work.
 
 ### Fixed — silent render failures
+* **Shutdown no longer prints a stray traceback from awaited native calls.**
+  Event handlers that return a native `Result` (e.g. a fire-and-forget
+  `page.share.text(...)` tap) are awaited on a worker thread; when the app
+  stopped, the bridge failed every pending call and the await raised, dumping
+  a raw `ResultError` traceback (`results.py:188 _await_result`) into test
+  and console output. Pending calls are now *cancelled* at shutdown and
+  awaited handlers treat cancellation as a normal shutdown signal — silent
+  in tests, still reported through `on_error` / logcat for real failures.
+  A `ResultCancelled` exception (subclass of `ResultError`) is exported for
+  apps that await results manually.
+* **`pydrud analyze` is clean on fresh scaffolds.** `DataTable` and
+  `Timeline` presets no longer build widgets in loops without `key=`
+  (explicit `th-`/`tr-`/`td-`/`tl-*` keys now) and dropped the dead
+  `tableRow`, `header`, `timelineIndex` and `timelineIcon` style keys.
 * **PB-002 — an oversized frame no longer wedges rendering forever.**
   `App._send_desired_tree` now encodes the transaction *before* registering
   it as in-flight, rolls the in-flight state back when encoding fails, and
