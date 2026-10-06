@@ -8,9 +8,14 @@ import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
+import android.util.Log;
 
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * PydrudIcons — crisp vector icons, drawn from path data.
@@ -24,14 +29,26 @@ import java.util.Map;
  */
 public final class PydrudIcons {
 
+    /** Stable logcat tag (PB-005 / DX-004). */
+    public static final String TAG = "Pydrud";
+
     private static final Map<String, String> PATHS = new HashMap<>();
     private static final Map<String, String> ALIASES = new HashMap<>();
+    private static final Set<String> WARNED = Collections.synchronizedSet(new HashSet<String>());
 
     private PydrudIcons() {}
 
     /** @return true when an icon with this name (or alias) exists. */
     public static boolean has(String name) {
         return name != null && !name.isEmpty() && pathData(name) != null;
+    }
+
+    /** Every icon name (and alias) this build understands, sorted. */
+    public static Set<String> available() {
+        Set<String> names = new TreeSet<>();
+        names.addAll(PATHS.keySet());
+        names.addAll(ALIASES.keySet());
+        return Collections.unmodifiableSet(names);
     }
 
     /** Raw 24x24 SVG path data for {@code name}, or null. */
@@ -44,11 +61,44 @@ public final class PydrudIcons {
         return alias == null ? null : PATHS.get(alias);
     }
 
-    /** A tintable, size-independent drawable for {@code name}. */
+    /**
+     * A tintable, size-independent drawable for {@code name}.
+     *
+     * <p>An unknown name used to render a silent "?" (the {@code help}
+     * glyph), which made a typo look like a design choice (PB-005). It now
+     * logs a warning once per unknown name before falling back, so the
+     * mistake is visible in logcat and in {@code pydrud analyze} output.
+     */
     public static Drawable drawable(String name, int color, int sizePx) {
         String data = pathData(name);
-        if (data == null) data = PATHS.get("help");
+        if (data == null) {
+            warnUnknown(name);
+            data = PATHS.get("help");
+        }
         return new IconDrawable(data, color, sizePx);
+    }
+
+    /**
+     * A drawable for arbitrary 24x24 SVG path data.
+     *
+     * <p>Backs {@code Icon.svg(...)}: an app can render its own iconography
+     * without the framework knowing the name, so the icon set is effectively
+     * unlimited (PYDRUD §16.2).
+     */
+    public static Drawable drawablePath(String data, int color, int sizePx) {
+        if (data == null || data.trim().isEmpty()) {
+            warnUnknown("<empty svg path>");
+            data = PATHS.get("help");
+        }
+        return new IconDrawable(data, color, sizePx);
+    }
+
+    private static void warnUnknown(String name) {
+        String key = name == null ? "" : name.trim().toLowerCase();
+        if (!WARNED.add(key)) return;   // once per name, per process
+        Log.w(TAG, "unknown icon '" + name + "' — falling back to 'help'. "
+            + "Call pydrud.icons.has(name) (Python) or PydrudIcons.has(name) "
+            + "(Java) for the supported set.");
     }
 
     /** Drawable that rasterises 24x24 path data at any size. */
@@ -113,6 +163,7 @@ public final class PydrudIcons {
         load5();
         load6();
         aliases();
+        extras();
     }
 
     private static void load0() {
@@ -482,43 +533,72 @@ public final class PydrudIcons {
 
     private static void aliases() {
         ALIASES.put("account", "person");
+        ALIASES.put("account_tree", "list");
+        ALIASES.put("add_circle_outline", "add_circle");
         ALIASES.put("alert", "warning");
         ALIASES.put("analytics", "chart");
         ALIASES.put("animation", "sparkle");
         ALIASES.put("api", "code");
         ALIASES.put("arrow_back", "back");
+        ALIASES.put("arrow_circle_down", "arrow_down");
+        ALIASES.put("arrow_circle_up", "arrow_up");
         ALIASES.put("arrow_down", "expand_more");
+        ALIASES.put("arrow_drop_down", "expand_more");
+        ALIASES.put("arrow_drop_up", "expand_less");
         ALIASES.put("arrow_forward", "forward");
         ALIASES.put("arrow_left", "back");
         ALIASES.put("arrow_right", "forward");
         ALIASES.put("arrow_up", "expand_less");
         ALIASES.put("astrophysics", "rocket");
         ALIASES.put("attachment", "attach");
+        ALIASES.put("backspace", "back");
         ALIASES.put("bar_chart", "chart");
         ALIASES.put("bell", "notifications");
         ALIASES.put("bin", "delete");
+        ALIASES.put("block", "cancel");
+        ALIASES.put("bolt", "sparkle");
+        ALIASES.put("calendar_today", "calendar");
         ALIASES.put("canvas", "palette");
         ALIASES.put("cast", "fullscreen");
+        ALIASES.put("check_circle_outline", "check_circle");
+        ALIASES.put("circle", "circle");
+        ALIASES.put("clear", "close");
         ALIASES.put("clock_outline", "clock");
+        ALIASES.put("cloud_done", "cloud");
         ALIASES.put("cog", "settings");
         ALIASES.put("compass", "navigation");
-        ALIASES.put("controller", "play_circle");
+        ALIASES.put("content_copy", "copy");
+        ALIASES.put("content_cut", "cut");
+        ALIASES.put("content_paste", "paste");
+        ALIASES.put("controller", "play");
         ALIASES.put("credit_card", "payment");
         ALIASES.put("danger", "error");
         ALIASES.put("date", "calendar");
+        ALIASES.put("delete_outline", "delete");
+        ALIASES.put("diamond", "diamond");
         ALIASES.put("directions_car", "navigation");
         ALIASES.put("doc", "file");
         ALIASES.put("document", "file");
         ALIASES.put("done", "check");
+        ALIASES.put("done_all", "check");
         ALIASES.put("dots", "more_vert");
+        ALIASES.put("edit_note", "edit");
+        ALIASES.put("emoji_events", "verified");
+        ALIASES.put("error_outline", "error");
         ALIASES.put("exit", "logout");
         ALIASES.put("eye", "visibility");
         ALIASES.put("eye_off", "visibility_off");
+        ALIASES.put("favorite_outline", "favorite_border");
+        ALIASES.put("file_download", "download");
+        ALIASES.put("file_upload", "upload");
+        ALIASES.put("filter_alt", "filter");
+        ALIASES.put("first_page", "skip_previous");
         ALIASES.put("flash", "sparkle");
+        ALIASES.put("flash_on", "sparkle");
         ALIASES.put("flight", "rocket");
         ALIASES.put("fullscreen_exit", "fullscreen");
-        ALIASES.put("gamepad", "play_circle");
-        ALIASES.put("games", "play_circle");
+        ALIASES.put("gamepad", "play");
+        ALIASES.put("games", "play");
         ALIASES.put("gear", "settings");
         ALIASES.put("graph", "chart");
         ALIASES.put("heart", "favorite");
@@ -526,14 +606,18 @@ public final class PydrudIcons {
         ALIASES.put("heart_broken", "favorite_border");
         ALIASES.put("home_work", "home");
         ALIASES.put("hotel", "home");
+        ALIASES.put("hourglass_bottom", "timer");
         ALIASES.put("idea", "lightbulb");
-        ALIASES.put("joystick", "play_circle");
+        ALIASES.put("joystick", "play");
         ALIASES.put("keyboard_arrow_down", "expand_more");
         ALIASES.put("keyboard_arrow_left", "chevron_left");
         ALIASES.put("keyboard_arrow_right", "chevron_right");
         ALIASES.put("keyboard_arrow_up", "expand_less");
         ALIASES.put("language", "translate");
+        ALIASES.put("last_page", "skip_next");
+        ALIASES.put("library_books", "book");
         ALIASES.put("location_pin", "location");
+        ALIASES.put("lock_outline", "lock");
         ALIASES.put("magic", "sparkle");
         ALIASES.put("magnify", "search");
         ALIASES.put("mail", "email");
@@ -541,53 +625,101 @@ public final class PydrudIcons {
         ALIASES.put("minus", "remove");
         ALIASES.put("money", "payment");
         ALIASES.put("moon", "dark_mode");
+        ALIASES.put("more_time", "timer");
         ALIASES.put("mute", "volume");
         ALIASES.put("night", "dark_mode");
+        ALIASES.put("note_add", "add");
+        ALIASES.put("notification_important", "notifications");
+        ALIASES.put("notifications_active", "notifications");
         ALIASES.put("ok", "check");
+        ALIASES.put("open_in_full", "fullscreen");
         ALIASES.put("pause_circle", "pause");
         ALIASES.put("pencil", "edit");
         ALIASES.put("people", "group");
+        ALIASES.put("person_outline", "person");
         ALIASES.put("phone", "call");
         ALIASES.put("photo", "image");
         ALIASES.put("photos", "gallery");
         ALIASES.put("picture", "image");
+        ALIASES.put("picture_as_pdf", "file");
         ALIASES.put("pin", "location");
         ALIASES.put("place", "location");
+        ALIASES.put("play_arrow", "play");
         ALIASES.put("play_circle", "play");
+        ALIASES.put("playlist_add", "list");
         ALIASES.put("plus", "add");
         ALIASES.put("print_outline", "print");
         ALIASES.put("profile", "person");
+        ALIASES.put("publish", "upload");
         ALIASES.put("question", "help");
+        ALIASES.put("queue_music", "music");
         ALIASES.put("record", "stop");
+        ALIASES.put("remove_red_eye", "visibility");
+        ALIASES.put("repeat", "sync");
+        ALIASES.put("repeat_one", "sync");
+        ALIASES.put("replay", "refresh");
+        ALIASES.put("restart_alt", "undo");
         ALIASES.put("restaurant", "food");
+        ALIASES.put("rocket_launch", "rocket");
+        ALIASES.put("save_alt", "save");
         ALIASES.put("scan", "qr_code");
         ALIASES.put("schedule", "clock");
         ALIASES.put("screen_rotation", "refresh");
         ALIASES.put("security", "shield");
         ALIASES.put("server", "database");
         ALIASES.put("shop", "store");
+        ALIASES.put("shopping_bag", "cart");
         ALIASES.put("shopping_cart", "cart");
+        ALIASES.put("shuffle", "swap");
         ALIASES.put("sign_in", "login");
         ALIASES.put("sign_out", "logout");
         ALIASES.put("sound", "volume");
         ALIASES.put("spark", "sparkle");
         ALIASES.put("sparkles", "sparkle");
+        ALIASES.put("speed", "timer");
+        ALIASES.put("sports_esports", "play");
+        ALIASES.put("square", "square");
+        ALIASES.put("star_outline", "star_border");
+        ALIASES.put("star_rate", "star");
         ALIASES.put("state", "sync");
         ALIASES.put("stats", "chart");
         ALIASES.put("sun", "light_mode");
         ALIASES.put("support", "help");
+        ALIASES.put("sync_alt", "sync");
+        ALIASES.put("task_alt", "check_circle");
+        ALIASES.put("thumb_up_alt", "thumb_up");
         ALIASES.put("tick", "check");
         ALIASES.put("time", "clock");
         ALIASES.put("today", "event");
         ALIASES.put("touch", "drag");
         ALIASES.put("touch_app", "drag");
         ALIASES.put("trash", "delete");
+        ALIASES.put("trending_flat", "trending_up");
+        ALIASES.put("triangle", "triangle");
         ALIASES.put("trophy", "verified");
+        ALIASES.put("upload_file", "upload");
         ALIASES.put("user", "person");
         ALIASES.put("users", "group");
+        ALIASES.put("verified_user", "shield");
         ALIASES.put("vibration", "notifications");
+        ALIASES.put("videocam", "video");
+        ALIASES.put("view_list", "list");
         ALIASES.put("volume_mute", "volume");
         ALIASES.put("volume_off", "volume");
         ALIASES.put("volume_up", "volume");
+        ALIASES.put("warning_amber", "warning");
+        ALIASES.put("work_outline", "work");
+        ALIASES.put("zoom_out_map", "fullscreen");
+    }
+
+    private static void extras() {
+        PATHS.put("circle",
+            "M12,2 A10,10 0 1,0 12,22 A10,10 0 1,0 12,2 Z");
+        PATHS.put("diamond",
+            "M12,2 L22,12 L12,22 L2,12 Z");
+        PATHS.put("square",
+            "M4,4 L20,4 L20,20 L4,20 Z");
+        PATHS.put("triangle",
+            "M12,3 L21.5,20 L2.5,20 Z");
     }
 }

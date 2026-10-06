@@ -219,6 +219,16 @@ ICONS: dict[str, str] = {
     "android": "android",
 }
 
+#: Icons with no Material Design Icons glyph in the webfont, hand-authored as
+#: plain 24x24 path data. Kept here (not in the generated Java) so a future
+#: ``python tools/generate_icons.py`` reproduces them instead of dropping them.
+EXTRA_PATHS: dict[str, str] = {
+    "circle": "M12,2 A10,10 0 1,0 12,22 A10,10 0 1,0 12,2 Z",
+    "diamond": "M12,2 L22,12 L12,22 L2,12 Z",
+    "square": "M4,4 L20,4 L20,20 L4,20 Z",
+    "triangle": "M12,3 L21.5,20 L2.5,20 Z",
+}
+
 FONT_DIRS = [
     Path(p) / "qtawesome" / "fonts" for p in sys.path if p
 ]
@@ -277,9 +287,14 @@ import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
+import android.util.Log;
 
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * PydrudIcons — crisp vector icons, drawn from path data.
@@ -293,14 +308,26 @@ import java.util.Map;
  */
 public final class PydrudIcons {
 
+    /** Stable logcat tag (PB-005 / DX-004). */
+    public static final String TAG = "Pydrud";
+
     private static final Map<String, String> PATHS = new HashMap<>();
     private static final Map<String, String> ALIASES = new HashMap<>();
+    private static final Set<String> WARNED = Collections.synchronizedSet(new HashSet<String>());
 
     private PydrudIcons() {}
 
     /** @return true when an icon with this name (or alias) exists. */
     public static boolean has(String name) {
         return name != null && !name.isEmpty() && pathData(name) != null;
+    }
+
+    /** Every icon name (and alias) this build understands, sorted. */
+    public static Set<String> available() {
+        Set<String> names = new TreeSet<>();
+        names.addAll(PATHS.keySet());
+        names.addAll(ALIASES.keySet());
+        return Collections.unmodifiableSet(names);
     }
 
     /** Raw 24x24 SVG path data for {@code name}, or null. */
@@ -313,11 +340,44 @@ public final class PydrudIcons {
         return alias == null ? null : PATHS.get(alias);
     }
 
-    /** A tintable, size-independent drawable for {@code name}. */
+    /**
+     * A tintable, size-independent drawable for {@code name}.
+     *
+     * <p>An unknown name used to render a silent "?" (the {@code help}
+     * glyph), which made a typo look like a design choice (PB-005). It now
+     * logs a warning once per unknown name before falling back, so the
+     * mistake is visible in logcat and in {@code pydrud analyze} output.
+     */
     public static Drawable drawable(String name, int color, int sizePx) {
         String data = pathData(name);
-        if (data == null) data = PATHS.get("help");
+        if (data == null) {
+            warnUnknown(name);
+            data = PATHS.get("help");
+        }
         return new IconDrawable(data, color, sizePx);
+    }
+
+    /**
+     * A drawable for arbitrary 24x24 SVG path data.
+     *
+     * <p>Backs {@code Icon.svg(...)}: an app can render its own iconography
+     * without the framework knowing the name, so the icon set is effectively
+     * unlimited (PYDRUD §16.2).
+     */
+    public static Drawable drawablePath(String data, int color, int sizePx) {
+        if (data == null || data.trim().isEmpty()) {
+            warnUnknown("<empty svg path>");
+            data = PATHS.get("help");
+        }
+        return new IconDrawable(data, color, sizePx);
+    }
+
+    private static void warnUnknown(String name) {
+        String key = name == null ? "" : name.trim().toLowerCase();
+        if (!WARNED.add(key)) return;   // once per name, per process
+        Log.w(TAG, "unknown icon '" + name + "' — falling back to 'help'. "
+            + "Call pydrud.icons.has(name) (Python) or PydrudIcons.has(name) "
+            + "(Java) for the supported set.");
     }
 
     /** Drawable that rasterises 24x24 path data at any size. */
@@ -468,6 +528,109 @@ ALIASES = {
     "scan": "qr_code",
 }
 
+#: Extra spellings on top of :data:`ALIASES` — the framework's own shorthands
+#: plus the Material Symbols names developers copy straight from the docs.
+#: The shipped vocabulary is smaller than Material's, so each name maps onto
+#: the closest real icon (PB-005). A target must be a **path** name: aliases
+#: resolve in a single hop, so chaining an alias to another alias silently
+#: falls back to ``help``.
+EXTRA_ALIASES: dict[str, str] = {
+    # framework shorthands
+    "animation": "sparkle",
+    "arrow_down": "expand_more",
+    "arrow_up": "expand_less",
+    "astrophysics": "rocket",
+    "canvas": "palette",
+    "controller": "play",
+    "fullscreen_exit": "fullscreen",
+    "gamepad": "play",
+    "games": "play",
+    "joystick": "play",
+    "mute": "volume",
+    "screen_rotation": "refresh",
+    "sound": "volume",
+    "sparkles": "sparkle",
+    "state": "sync",
+    "touch": "drag",
+    "touch_app": "drag",
+    "vibration": "notifications",
+    "volume_mute": "volume",
+    "volume_off": "volume",
+    "volume_up": "volume",
+    # Material Symbols names (see PYDRUD §16.1)
+    "account_tree": "list",
+    "add_circle_outline": "add_circle",
+    "arrow_circle_down": "arrow_down",
+    "arrow_circle_up": "arrow_up",
+    "arrow_drop_down": "expand_more",
+    "arrow_drop_up": "expand_less",
+    "backspace": "back",
+    "block": "cancel",
+    "bolt": "sparkle",
+    "calendar_today": "calendar",
+    "check_circle_outline": "check_circle",
+    "circle": "circle",
+    "clear": "close",
+    "cloud_done": "cloud",
+    "content_copy": "copy",
+    "content_cut": "cut",
+    "content_paste": "paste",
+    "delete_outline": "delete",
+    "diamond": "diamond",
+    "done_all": "check",
+    "edit_note": "edit",
+    "emoji_events": "verified",
+    "error_outline": "error",
+    "favorite_outline": "favorite_border",
+    "file_download": "download",
+    "file_upload": "upload",
+    "filter_alt": "filter",
+    "first_page": "skip_previous",
+    "flash_on": "sparkle",
+    "hourglass_bottom": "timer",
+    "last_page": "skip_next",
+    "library_books": "book",
+    "lock_outline": "lock",
+    "more_time": "timer",
+    "note_add": "add",
+    "notification_important": "notifications",
+    "notifications_active": "notifications",
+    "open_in_full": "fullscreen",
+    "person_outline": "person",
+    "picture_as_pdf": "file",
+    "play_arrow": "play",
+    "playlist_add": "list",
+    "publish": "upload",
+    "queue_music": "music",
+    "remove_red_eye": "visibility",
+    "replay": "refresh",
+    "repeat": "sync",
+    "repeat_one": "sync",
+    "restart_alt": "undo",
+    "rocket_launch": "rocket",
+    "save_alt": "save",
+    "shopping_bag": "cart",
+    "shuffle": "swap",
+    "speed": "timer",
+    "sports_esports": "play",
+    "square": "square",
+    "star_outline": "star_border",
+    "star_rate": "star",
+    "sync_alt": "sync",
+    "task_alt": "check_circle",
+    "thumb_up_alt": "thumb_up",
+    "trending_flat": "trending_up",
+    "triangle": "triangle",
+    "upload_file": "upload",
+    "verified_user": "shield",
+    "videocam": "video",
+    "view_list": "list",
+    "warning_amber": "warning",
+    "work_outline": "work",
+    "zoom_out_map": "fullscreen",
+}
+ALIASES.update(EXTRA_ALIASES)
+
 
 def java_literal(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
@@ -478,11 +641,14 @@ def render(paths: dict[str, str]) -> str:
     names = list(paths)
     per_method = 25
     groups = [names[i:i + per_method] for i in range(0, len(names), per_method)]
+    # Alias targets must be real paths; hand-authored icons count too.
+    known = set(paths) | set(EXTRA_PATHS)
 
     body = [JAVA_HEADER, "\n    static {\n"]
     for index in range(len(groups)):
         body.append(f"        load{index}();\n")
-    body.append("        aliases();\n    }\n")
+    body.append("        aliases();\n")
+    body.append("        extras();\n    }\n")
 
     for index, group in enumerate(groups):
         body.append(f"\n    private static void load{index}() {{\n")
@@ -495,10 +661,20 @@ def render(paths: dict[str, str]) -> str:
 
     body.append("\n    private static void aliases() {\n")
     for alias, target in sorted(ALIASES.items()):
-        if target in paths:
+        if target in known:
             body.append(
                 f"        ALIASES.put({java_literal(alias)}, {java_literal(target)});\n"
             )
+    body.append("    }\n")
+
+    # Hand-authored icons live in their own method so a regeneration keeps
+    # them visibly separate from the webfont-derived outlines.
+    body.append("\n    private static void extras() {\n")
+    for name in sorted(EXTRA_PATHS):
+        body.append(
+            f"        PATHS.put({java_literal(name)},\n"
+            f"            {java_literal(EXTRA_PATHS[name])});\n"
+        )
     body.append("    }\n")
     body.append(JAVA_FOOTER)
     chunks.append("".join(body))
@@ -510,7 +686,8 @@ def main() -> int:
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(render(paths), encoding="utf-8")
     size = os.path.getsize(OUT)
-    print(f"wrote {OUT.relative_to(REPO)} — {len(paths)} icons, {size // 1024} KB")
+    print(f"wrote {OUT.relative_to(REPO)} — {len(paths)} webfont icons "
+          f"+ {len(EXTRA_PATHS)} hand-authored, {size // 1024} KB")
     return 0
 
 
