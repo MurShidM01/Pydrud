@@ -51,6 +51,110 @@ class Flexible(Container):
         super().__init__(child=child, expand=int(flex), **kwargs)
 
 
+class Flex(Widget):
+    """Flutter's ``Flex``: a :class:`Row` or :class:`Column` chosen by axis.
+
+    ``Row`` and ``Column`` are the two axes of the same layout, so a widget
+    that wants to switch between them (a responsive card, a segmented
+    toolbar) had to duplicate its whole child list for each branch.
+    ``Flex`` picks the axis at construction time and delegates::
+
+        Flex(direction="horizontal", children=[a, b], spacing=12)
+        Flex(direction="vertical", children=[a, b], main_alignment="center")
+
+    ``direction`` accepts Flutter's ``Axis`` spelling as well as the words
+    the rest of Pydrud uses (``"row"``/``"column"``, ``"x"``/``"y"``).
+    ``main_alignment``/``cross_alignment`` are Flutter's
+    ``mainAxisAlignment``/``crossAxisAlignment``; the Pydrud spellings
+    (``horizontal_alignment``/``vertical_alignment``) work too.
+
+    The result serialises as a plain ``Row``/``Column``, so it diffs,
+    tests and themes exactly like the widget it stands for.
+    """
+
+    _widget_type = "Flex"
+
+    #: Accepted ``direction`` spellings -> the axis they name.
+    AXES = {
+        "horizontal": "horizontal", "row": "horizontal", "x": "horizontal",
+        "vertical": "vertical", "column": "vertical", "y": "vertical",
+    }
+
+    def __init__(self, *, direction: str = "horizontal",
+                 children: Optional[list[Widget]] = None, spacing: float = 0,
+                 main_axis_size: Optional[str] = None,
+                 cross_axis_size: Optional[str] = None,
+                 main_alignment: Optional[str] = None,
+                 cross_alignment: Optional[str] = None,
+                 horizontal_alignment: Optional[str] = None,
+                 vertical_alignment: Optional[str] = None,
+                 key: Optional[str] = None, style: Optional[dict] = None,
+                 expand: Optional[int] = None, visible: bool = True,
+                 scroll: bool = False, **kwargs):
+        super().__init__(key=key, style=style, expand=expand,
+                         visible=visible, **kwargs)
+        axis = self.AXES.get(str(direction).strip().lower())
+        if axis is None:
+            raise ValueError(
+                f"direction must be one of {sorted(self.AXES)}, "
+                f"got {direction!r}")
+        self.direction = axis
+        self._items = list(children or [])
+        self._spacing = spacing
+        self._main_axis_size = main_axis_size
+        self._cross_axis_size = cross_axis_size
+        # Flutter's names win when both are given; the Pydrud spellings are
+        # accepted because every other layout widget uses them.
+        self._main_alignment = (main_alignment if main_alignment is not None
+                                else (horizontal_alignment
+                                      if axis == "horizontal"
+                                      else vertical_alignment))
+        self._cross_alignment = (cross_alignment if cross_alignment is not None
+                                 else (vertical_alignment
+                                       if axis == "horizontal"
+                                       else horizontal_alignment))
+        self._scroll = scroll
+        self.rebuild()
+
+    @property
+    def is_horizontal(self) -> bool:
+        return self.direction == "horizontal"
+
+    def add(self, *widgets: Widget) -> "Flex":
+        self._items.extend(widgets)
+        self.rebuild()
+        return self
+
+    def rebuild(self) -> None:
+        """(Re)build the underlying Row/Column from the current children."""
+        builder = Row if self.is_horizontal else Column
+        # Main axis is the direction; the other alignment names the cross one.
+        if self.is_horizontal:
+            alignments = {"horizontal_alignment": self._main_alignment,
+                          "vertical_alignment": self._cross_alignment}
+        else:
+            alignments = {"vertical_alignment": self._main_alignment,
+                          "horizontal_alignment": self._cross_alignment}
+        alignments = {k: v for k, v in alignments.items() if v is not None}
+        self.children = [builder(
+            key=f"{self.key}._flex",
+            children=self._items,
+            spacing=self._spacing,
+            main_axis_size=self._main_axis_size,
+            cross_axis_size=self._cross_axis_size,
+            style=dict(self.style),
+            expand=self.expand,
+            visible=self.visible,
+            scroll=self._scroll,
+            **alignments,
+            **self._extra,
+        )]
+
+    def unwrap(self) -> Widget:
+        self.rebuild()
+        return self.children[0]
+
+
 class FractionallySizedBox(Container):
     """Size a child as a fraction of its available width and/or height.
 
@@ -616,7 +720,7 @@ class FormSection(Column):
 
 
 __all__ = [
-    "Expanded", "Flexible", "FractionallySizedBox", "FittedBox", "Align",
+    "Expanded", "Flexible", "Flex", "FractionallySizedBox", "FittedBox", "Align",
     "MetricCard", "DataTable", "Timeline", "ColoredBox", "DecoratedBox",
     "ConstrainedBox", "LimitedBox", "Gap", "VerticalDivider",
     "SingleChildScrollView", "Wrap", "ButtonBar", "Heading", "Title",

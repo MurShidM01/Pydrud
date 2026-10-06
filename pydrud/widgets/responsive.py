@@ -33,6 +33,8 @@ from pydrud.widgets.layout import Container, GridView
 
 __all__ = [
     "ResponsiveBuilder",
+    "LayoutBuilder",
+    "Constraints",
     "AdaptiveLayout",
     "ResponsiveGrid",
     "ShowWhen",
@@ -96,6 +98,165 @@ class ResponsiveBuilder(Widget):
     def unwrap(self) -> Widget:
         self.rebuild()
         return self.children[0]
+
+
+class Constraints:
+    """The box constraints a :class:`LayoutBuilder` builder receives.
+
+    Flutter hands a builder a :class:`BoxConstraints`; Pydrud knows the same
+    numbers from the live media query, so a builder can branch on the real
+    available space instead of a hard-coded breakpoint::
+
+        LayoutBuilder(lambda c: Row(children=cards) if c.max_width >= 600
+                                else Column(children=cards))
+
+    Unknown attributes fall through to the underlying
+    :class:`~pydrud.core.responsive.ScreenInfo`, so ``c.orientation``,
+    ``c.breakpoint`` and ``c.is_tablet`` all work.
+    """
+
+    __slots__ = ("_screen",)
+
+    def __init__(self, screen):
+        self._screen = screen
+
+    @property
+    def screen(self):
+        """The full :class:`ScreenInfo` snapshot behind these constraints."""
+        return self._screen
+
+    @property
+    def max_width(self) -> float:
+        return self._screen.width
+
+    @property
+    def max_height(self) -> float:
+        return self._screen.height
+
+    @property
+    def min_width(self) -> float:
+        return 0
+
+    @property
+    def min_height(self) -> float:
+        return 0
+
+    # Flutter calls the bounded extent simply width/height.
+    @property
+    def width(self) -> float:
+        return self.max_width
+
+    @property
+    def height(self) -> float:
+        return self.max_height
+
+    # ── size-class predicates (Flutter exposes these as plain getters) ───
+
+    @property
+    def is_phone(self) -> bool:
+        return MediaQuery.is_phone()
+
+    @property
+    def is_tablet(self) -> bool:
+        return MediaQuery.is_tablet()
+
+    @property
+    def is_desktop(self) -> bool:
+        return MediaQuery.is_desktop()
+
+    @property
+    def is_landscape(self) -> bool:
+        return MediaQuery.is_landscape()
+
+    @property
+    def is_portrait(self) -> bool:
+        return MediaQuery.is_portrait()
+
+    @property
+    def is_dark(self) -> bool:
+        return MediaQuery.is_dark()
+
+    @property
+    def breakpoint(self) -> str:
+        return self._screen.breakpoint
+
+    @property
+    def orientation(self) -> str:
+        return self._screen.orientation
+
+    def at_least(self, size_class: str) -> bool:
+        """True when the window is *size_class* or wider."""
+        return MediaQuery.at_least(size_class)
+
+    def at_most(self, size_class: str) -> bool:
+        """True when the window is *size_class* or narrower."""
+        return MediaQuery.at_most(size_class)
+
+    def columns(self, min_item_width: float = 160, *,
+                max_columns: int = 12, gutter: float = 16) -> int:
+        """How many grid columns of at least *min_item_width* dp fit."""
+        return Responsive.columns(min_item_width, max_columns=max_columns,
+                                  gutter=gutter)
+
+    def grid(self, min_item_width: float = 160, *, gutter: float = 16,
+             max_columns: int = 12):
+        """``(columns, item_width_dp)`` for a responsive grid."""
+        return Responsive.grid(min_item_width, gutter=gutter,
+                               max_columns=max_columns)
+
+    def content_width(self, max_width: float = 560) -> int:
+        """Page width capped on large screens (keeps line length sane)."""
+        return Responsive.content_width(max_width)
+
+    def matches(self, **query) -> bool:
+        """A CSS-style media query, e.g. ``c.matches(min_width=600)``."""
+        return MediaQuery.matches(**query)
+
+    def __getattr__(self, item: str):
+        # Raw metrics (device_type, refresh_rate, density, …) come straight
+        # from the screen snapshot the constraints were derived from.
+        try:
+            return getattr(self._screen, item)
+        except AttributeError:
+            raise AttributeError(
+                f"Constraints has no {item!r}; it exposes max_width, "
+                f"max_height, is_tablet, columns(), grid(), matches() and "
+                f"every ScreenInfo metric"
+            ) from None
+
+    def __repr__(self) -> str:
+        return (f"Constraints(max_width={self.max_width:g}, "
+                f"max_height={self.max_height:g})")
+
+
+class LayoutBuilder(ResponsiveBuilder):
+    """Build a subtree from the live box constraints (Flutter's names).
+
+    ::
+
+        LayoutBuilder(lambda c: GridView(columns=c.columns(180),
+                                         children=cards))
+
+    Like every responsive widget it re-runs on each serialisation, so a
+    rotation, a split-screen resize or a foldable unfold rebuilds it.
+    """
+
+    _widget_type = "LayoutBuilder"
+
+    def __init__(self, builder: Callable[..., Optional[Widget]], *,
+                 key: Optional[str] = None):
+        if not callable(builder):
+            raise TypeError("LayoutBuilder() expects a callable builder")
+        self._constraints_builder = builder
+        super().__init__(self._adapt, key=key)
+
+    def _adapt(self, screen) -> Optional[Widget]:
+        return self._constraints_builder(Constraints(screen))
+
+    @property
+    def constraints(self) -> Constraints:
+        """The constraints the current build was made from."""
+        return Constraints(MediaQuery.info())
 
 
 class AdaptiveLayout(ResponsiveBuilder):

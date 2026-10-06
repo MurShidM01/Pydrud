@@ -48,8 +48,8 @@ _WIDGET_CLASSES = {
     "AnimatedRotation", "AnimatedSwitcher", "FadeIn", "SlideIn", "ScaleIn",
     "Hero", "Form", "FormField",
     # v1.5 — responsive layout
-    "ResponsiveBuilder", "AdaptiveLayout", "ResponsiveGrid", "ShowWhen",
-    "SafeArea", "NavigationBar", "TabBar",
+    "ResponsiveBuilder", "LayoutBuilder", "AdaptiveLayout", "ResponsiveGrid",
+    "ShowWhen", "SafeArea", "NavigationBar", "TabBar",
     # state-driven conditional rendering
     "Visible", "Hidden",
     # Flutter-style presets and common app compositions
@@ -65,6 +65,8 @@ _WIDGET_CLASSES = {
     # v2.0 — Flutter sizing presets and premium compositions
     "FractionallySizedBox", "FittedBox", "DataTable", "MetricCard",
     "Timeline",
+    # v2.0.3 — the flex model, the constraint builder and the accordion
+    "Flex", "ExpansionPanelList",
 }
 
 # Style property keys known to be valid.

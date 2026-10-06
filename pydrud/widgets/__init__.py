@@ -20,7 +20,8 @@ from pydrud.widgets.theme import (Colors, Icons, Theme, ColorScheme, Typography,
                                   TextTheme, ThemeExtension)
 from pydrud.widgets.tokens import Tokens
 from pydrud.widgets.material import (
-    ListTile, ExpansionTile, Chip, AssistChip, FilterChip, InputChip,
+    ListTile, ExpansionTile, ExpansionPanel, ExpansionPanelList,
+    Chip, AssistChip, FilterChip, InputChip,
     SuggestionChip, Badge, Avatar, Banner, Tooltip,
     Tab, Tabs, TabBar, NavItem, NavigationItem, NavigationDestination,
     BottomNavigationBar, NavigationBar,
@@ -46,14 +47,16 @@ from pydrud.widgets.app_bar import AppBar
 from pydrud.widgets.scaffold import Scaffold
 from pydrud.widgets.fab import FloatingActionButton
 from pydrud.widgets.responsive import (
-    AdaptiveLayout, ResponsiveBuilder, ResponsiveGrid, SafeArea, ShowWhen,
+    AdaptiveLayout, Constraints, LayoutBuilder, ResponsiveBuilder,
+    ResponsiveGrid, SafeArea, ShowWhen,
 )
 from pydrud.widgets.conditional import Hidden, Visible
 from pydrud.widgets.presets import (
     ActionChip, Align, AssetImage, BackButton, ButtonBar, Caption,
     CheckboxListTile, ChoiceChip, CircleAvatar, CircleImage, CloseButton,
     ColoredBox, ConstrainedBox, DecoratedBox, EmptyState, ErrorState, Expanded,
-    Flexible, FractionallySizedBox, FittedBox, MetricCard, DataTable, Timeline,
+    Flexible, Flex, FractionallySizedBox, FittedBox, MetricCard, DataTable,
+    Timeline,
     FormSection, Gap, Heading, InfoCard, Label, LimitedBox, Link,
     LoadingState, MenuButton, NavigationTile, NetworkImage, Placeholder,
     RadioListTile, SectionHeader, SettingsTile, SingleChildScrollView, StatCard,
@@ -68,6 +71,7 @@ __all__ = [
     "Container",
     "Column",
     "Row",
+    "Flex",
     "Center",
     "Spacer",
     "Divider",
@@ -134,6 +138,8 @@ __all__ = [
     # material
     "ListTile",
     "ExpansionTile",
+    "ExpansionPanel",
+    "ExpansionPanelList",
     "Chip",
     "AssistChip",
     "FilterChip",
@@ -210,6 +216,8 @@ __all__ = [
     "InfiniteList",
     # v1.5 — responsive layout
     "ResponsiveBuilder",
+    "LayoutBuilder",
+    "Constraints",
     "AdaptiveLayout",
     "ResponsiveGrid",
     "ShowWhen",
