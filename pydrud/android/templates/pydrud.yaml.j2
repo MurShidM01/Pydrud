@@ -6,6 +6,10 @@ package: "{{ package }}"
 version_code: {{ version_code | default(1) }}
 version_name: "{{ version_name | default("1.0.0") }}"
 
+# Runtime: "pydash" (default — live preview, no build toolchain needed) or
+#          "chaquopy" (standalone APK, Android-only).
+runtime: "{{ runtime | default("chaquopy") }}"
+
 # Android SDK and native targets
 min_sdk: {{ min_sdk }}
 target_sdk: {{ target_sdk }}

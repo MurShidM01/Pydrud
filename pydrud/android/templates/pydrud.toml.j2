@@ -5,6 +5,8 @@
 # Only packages verified to work on Android are accepted; run
 # 'pydrud pip list --all' to see them.
 
+runtime = "{{ runtime | default("chaquopy") }}"
+
 [app]
 name = "{{ project_name }}"
 package = "{{ package }}"
