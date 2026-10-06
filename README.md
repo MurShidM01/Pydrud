@@ -117,6 +117,9 @@ and grows the UI layer toward Flutter/React Native parity:
   `semantics=` (Android `contentDescription`), `Colors.contrast()` measures
   WCAG ratios, and `pydrud analyze` flags unreadable text/background pairs
   and sub-48 dp touch targets (§14.7).
+* **Two more §15.2 widgets.** `RangeSlider` (a two-thumb range, backed by
+  Material's `RangeSlider`) and `PageView`/`Carousel` (swipeable, snapping
+  pages, backed by a snapping RecyclerView that reuses the list patch path).
 
 Existing projects should regenerate their managed runtime after upgrading:
 
@@ -918,6 +921,8 @@ pydrud build    # proxy forwarded to Gradle automatically
 | **`Card`** (v1.1) | Rounded elevated surface | `child`, `bg`, `elevation`, `border_radius`, `padding`, `margin` |
 | **`ListView`** (v1.1) | Scrollable list | `children`, `spacing`, `horizontal`, `padding` |
 | **`GridView`** (v1.1) | Fixed-column grid | `children`, `columns`, `spacing` |
+| **`PageView`** (v2.0.3) | Swipeable, snapping pages | `children`, `initial_page`, `orientation`, `peek`, `on_change` |
+| **`Carousel`** (v2.0.3) | `PageView` with a peek (neighbours visible) | `children`, `peek`, `orientation` |
 | **`SizedBox`** (v1.1) | Fixed-size gap / box | `width`, `height`, `child` |
 | **`Padding`** (v1.1) | Pads a single child | `padding`, `child` |
 | **`Drawer`** (v1.2) | Slide-in navigation panel | `children`, `header`, `width`, `side`, opened with `page.open_drawer()` |
@@ -966,6 +971,7 @@ fill, exactly like Flutter — put it between weighted children only when you
 | `Switch` | Toggle switch; labelled switches put text left and control right | `label`, `active`, `full_width` |
 | **`ProgressBar`** (v1.1) | Determinate or spinning progress | `value` (0-1), `indeterminate`, `circular`, `color` |
 | **`Slider`** (v1.1) | Draggable value slider | `value`, `min`, `max`, `divisions`, `color` |
+| **`RangeSlider`** (v2.0.3) | Two-thumb range slider | `start`, `end` (or `values=`), `min`, `max`, `step_size`, `divisions`, `color` |
 | **`Dropdown`** (v1.1) | Option picker (spinner) | `options`, `value`, `hint` |
 | **`Radio`** (v1.1) | Radio button | `label`, `value`, `group`, `selected` |
 | **`ListTile`** (v1.2) | List row: leading / title / subtitle / trailing | `title`, `subtitle`, `leading`, `trailing`, `dense`, `selected` |
@@ -1050,6 +1056,35 @@ IconButton(icon=Icons.CLOSE, style={"width": 24, "height": 24})  # flagged
 The stock buttons already pad themselves to 48 dp; the check only fires when
 an explicit `width`/`height` overrides that padding.
 
+### Paging and ranges (v2.0.3)
+
+**`RangeSlider`** selects a pair. `values=(lo, hi)` is clamped to `[min,
+max]` and ordered, so `RangeSlider(80, 20)` is the same as
+`RangeSlider(20, 80)`. `on_change` receives `{"values": [lo, hi]}`:
+
+```python
+price = RangeSlider(20, 80, min=0, max=200, step_size=5, key="price",
+                    on_change=lambda e: page.update())
+```
+
+**`PageView`** swipes between full-size pages, one child per page, snapping
+to each. `on_change` receives `{"index": page}`. It fills both axes, so give
+it a bounded parent:
+
+```python
+PageView([
+    OnboardingSlide(title="Welcome"),
+    OnboardingSlide(title="Fast"),
+], initial_page=0, on_change=lambda e: goto(e["index"]))
+```
+
+**`Carousel`** is the same widget with carousel defaults — a 24 dp `peek`
+that leaves the neighbouring pages visible:
+
+```python
+Carousel([PosterCard(p) for p in posters], peek=24)
+```
+
 ### Flutter-style presets and compositions
 
 These constructors reuse the native primitives above, so they add ergonomics
@@ -1073,7 +1108,7 @@ All interactive widgets support callback chaining:
 ```python
 widget.on_click(callback)      # Any widget — callback(data) where data is a dict
 widget.on_long_press(callback) # Any widget
-widget.on_change(callback)     # TextField, Checkbox, Switch, Slider, Dropdown
+widget.on_change(callback)     # TextField, Checkbox, Switch, Slider, RangeSlider, Dropdown, PageView
 widget.on_submit(callback)     # TextField (IME action)
 widget.on_focus(callback)      # Focus gain / loss
 widget.on("scroll", callback)  # Any event name

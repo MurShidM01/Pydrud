@@ -103,6 +103,16 @@ unlimited-widget and unlimited-icon work.
   the APK too; a test pins the data and the template together.
 * Runtime light/dark switching via `page.set_theme_mode()` is covered by
   explicit tests.
+* **`RangeSlider`** — a two-thumb range control, backed by Material's
+  `RangeSlider`. `values=(lo, hi)` is clamped and ordered; `on_change`
+  receives `{"values": [lo, hi]}`. Off-grid values are snapped, and a value
+  Material would reject falls back to the full range rather than crashing
+  the frame.
+* **`PageView`** / **`Carousel`** — swipeable, snapping pages, one child
+  per page, backed by a snapping RecyclerView. `on_change` receives
+  `{"index": page}`. `Carousel` is the same widget with a `peek` default.
+  Its adapter extends the virtualised-list adapter, so page add/move/remove
+  patches reuse the existing list path unchanged.
 
 ### Added — accessibility (PYDRUD §14.7)
 * **`semantics=` on every widget** — the label becomes Android's
