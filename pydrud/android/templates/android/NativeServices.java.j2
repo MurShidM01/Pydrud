@@ -233,18 +233,35 @@ public class NativeServices {
         });
     }
 
+    /**
+     * Parse an ISO {@code YYYY-MM-DD} string into *into*, or return false.
+     *
+     * <p>Malformed input is ignored rather than thrown: the Python side
+     * already validates the format, and a bad bound must never stop the
+     * picker from opening.
+     */
+    private static boolean parseIsoDate(String iso, java.util.Calendar into) {
+        if (iso == null || iso.length() != 10 || iso.charAt(4) != '-'
+                || iso.charAt(7) != '-') {
+            return false;
+        }
+        try {
+            into.set(Integer.parseInt(iso.substring(0, 4)),
+                     Integer.parseInt(iso.substring(5, 7)) - 1,
+                     Integer.parseInt(iso.substring(8, 10)),
+                     0, 0, 0);
+            into.set(java.util.Calendar.MILLISECOND, 0);
+            return true;
+        } catch (NumberFormatException ignored) {
+            return false;
+        }
+    }
+
     private void showDatePicker(final String requestId, final JSONObject msg) {
         activity.runOnUiThread(new Runnable() {
             @Override public void run() {
                 java.util.Calendar now = java.util.Calendar.getInstance();
-                String initial = msg.optString("initial", "");
-                if (initial.length() == 10) {
-                    try {
-                        now.set(Integer.parseInt(initial.substring(0, 4)),
-                                Integer.parseInt(initial.substring(5, 7)) - 1,
-                                Integer.parseInt(initial.substring(8, 10)));
-                    } catch (NumberFormatException ignored) {}
-                }
+                parseIsoDate(msg.optString("initial", ""), now);
                 android.app.DatePickerDialog dialog = new android.app.DatePickerDialog(
                     activity,
                     (view, year, month, day) -> reply(requestId,
@@ -253,6 +270,16 @@ public class NativeServices {
                     now.get(java.util.Calendar.YEAR),
                     now.get(java.util.Calendar.MONTH),
                     now.get(java.util.Calendar.DAY_OF_MONTH));
+                // min/max used to be accepted by the Python API and silently
+                // dropped here, so a "date of birth" picker happily offered
+                // tomorrow. Apply both bounds now (PB-008).
+                java.util.Calendar bound = java.util.Calendar.getInstance();
+                if (parseIsoDate(msg.optString("min", ""), bound)) {
+                    dialog.getDatePicker().setMinDate(bound.getTimeInMillis());
+                }
+                if (parseIsoDate(msg.optString("max", ""), bound)) {
+                    dialog.getDatePicker().setMaxDate(bound.getTimeInMillis());
+                }
                 dialog.setOnCancelListener(d -> reply(requestId, null));
                 dialog.show();
             }
@@ -263,12 +290,25 @@ public class NativeServices {
         activity.runOnUiThread(new Runnable() {
             @Override public void run() {
                 java.util.Calendar now = java.util.Calendar.getInstance();
+                int hour = now.get(java.util.Calendar.HOUR_OF_DAY);
+                int minute = now.get(java.util.Calendar.MINUTE);
+                // ``initial`` was accepted by the Python API and ignored here,
+                // so every picker opened at the current time.
+                String initial = msg.optString("initial", "");
+                if (initial.length() == 5 && initial.charAt(2) == ':') {
+                    try {
+                        int h = Integer.parseInt(initial.substring(0, 2));
+                        int m = Integer.parseInt(initial.substring(3, 5));
+                        if (h >= 0 && h < 24) hour = h;
+                        if (m >= 0 && m < 60) minute = m;
+                    } catch (NumberFormatException ignored) {}
+                }
                 android.app.TimePickerDialog dialog = new android.app.TimePickerDialog(
                     activity,
-                    (view, hour, minute) -> reply(requestId,
-                        String.format(java.util.Locale.US, "%02d:%02d", hour, minute)),
-                    now.get(java.util.Calendar.HOUR_OF_DAY),
-                    now.get(java.util.Calendar.MINUTE),
+                    (view, h, m) -> reply(requestId,
+                        String.format(java.util.Locale.US, "%02d:%02d", h, m)),
+                    hour,
+                    minute,
                     msg.optBoolean("use24h", true));
                 dialog.setOnCancelListener(d -> reply(requestId, null));
                 dialog.show();
