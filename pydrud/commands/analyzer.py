@@ -159,6 +159,7 @@ def _analyze_file(source: str, filepath: str) -> list[dict]:
     issues.extend(_check_page_update_in_loops(tree, filepath))
     issues.extend(_check_icon_references(tree, filepath))
     issues.extend(_check_icon_strings(tree, filepath))
+    issues.extend(_check_flex_collapse(tree, filepath))
     issues.extend(_check_constant_references(tree, filepath))
 
     return _dedupe(issues)
@@ -356,7 +357,77 @@ def _check_icon_strings(tree: ast.AST, filepath: str) -> list[dict]:
     return issues
 
 
-# ── Check 7: Design-token references ────────────────────────────────────────
+# ── Check 7: Row/Column main-axis collapse ──────────────────────────────────
+
+
+#: Values that pin a dimension to the parent (fill the available space).
+_FILL_VALUES = {"match", "match_parent", "fill", "expand", "100%", "max"}
+
+
+def _declares_fill(call: ast.Call, axis: str) -> bool:
+    """True when *call* pins ``axis`` ("width"/"height") to fill the parent."""
+    for kw in call.keywords:
+        if kw.arg == axis and isinstance(kw.value, ast.Constant):
+            value = str(kw.value.value).strip().lower()
+            if value in _FILL_VALUES:
+                return True
+        if kw.arg == "main_axis_size" and isinstance(kw.value, ast.Constant):
+            if str(kw.value.value).strip().lower() == "max":
+                return True
+        if kw.arg == "style" and isinstance(kw.value, ast.Dict):
+            for key, val in zip(kw.value.keys, kw.value.values):
+                if (isinstance(key, ast.Constant) and key.value == axis
+                        and isinstance(val, ast.Constant)
+                        and str(val.value).strip().lower() in _FILL_VALUES):
+                    return True
+    return False
+
+
+def _has_weight(call: ast.Call) -> bool:
+    return any(kw.arg == "expand" and not (
+        isinstance(kw.value, ast.Constant) and kw.value.value in (0, None))
+        for kw in call.keywords)
+
+
+def _check_flex_collapse(tree: ast.AST, filepath: str) -> list[dict]:
+    """Warn when a Row/Column has ≥2 unweighted main-axis-filling children.
+
+    Two unweighted children both pinned to fill the main axis fight for the
+    same space: the first consumes it and the rest are squeezed to zero,
+    clipping their text with no ellipsis and no error (PB-007 / FM-006).
+    Give them ``expand=1`` to share the space, or let them hug their content.
+    """
+    issues: list[dict] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = _get_call_name(node)
+        if func not in {"Row", "Column"}:
+            continue
+        axis = "width" if func == "Row" else "height"
+        children_kw = next((kw for kw in node.keywords
+                            if kw.arg == "children"
+                            and isinstance(kw.value, ast.List)), None)
+        if children_kw is None:
+            continue
+        colliding = [el for el in children_kw.value.elts
+                     if isinstance(el, ast.Call)
+                     and not _has_weight(el)
+                     and _declares_fill(el, axis)]
+        if len(colliding) >= 2:
+            issues.append({
+                "file": filepath,
+                "line": node.lineno,
+                "severity": _SEVERITY_WARNING,
+                "message": f"{len(colliding)} {func} children fill the main axis "
+                           "without a weight — they will collapse. Add expand=1 "
+                           "to share the space, or a content width.",
+            })
+    return issues
+
+
+# ── Check 8: Design-token references ────────────────────────────────────────
+
 
 def _check_constant_references(tree: ast.AST, filepath: str) -> list[dict]:
     """Warn if code references a design token that does not exist.
@@ -390,7 +461,7 @@ def _check_constant_references(tree: ast.AST, filepath: str) -> list[dict]:
     return issues
 
 
-# ── Check 8: Package shadowing ──────────────────────────────────────────────
+# ── Check 9: Package shadowing ──────────────────────────────────────────────
 
 
 def _check_shadowing_issues(src_dir: str) -> list[dict]:

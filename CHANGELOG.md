@@ -43,9 +43,12 @@ unlimited-widget and unlimited-icon work.
   **176 paths + 178 aliases**, and `Icon.svg("M…")` renders arbitrary 24×24
   path data so the set is effectively unlimited.
 * **PB-007 — layout model parity.** `Row`/`Column` gained
-  `main_axis_size`/`cross_axis_size`, nested layouts no longer default to
-  `MATCH_PARENT`, and a horizontal row of unweighted fill-width children is
-  warned about at build time.
+  `main_axis_size`/`cross_axis_size` (`"min"`/`"max"`, Flutter-style) so a
+  "row of columns" hugs its content instead of collapsing; the renderer
+  already downgrades an unweighted fill-width child inside a horizontal row
+  to `WRAP_CONTENT`; and `pydrud analyze` now warns when two unweighted
+  children are pinned to fill the main axis. The fill-width default is
+  documented with the three idiomatic recipes.
 
 ### Added — theming, widgets and icons
 * **Runtime theming.** `Theme.scope()` (per-subtree overrides),

@@ -9,6 +9,31 @@ from pydrud.widgets.base import Widget
 from pydrud.widgets.styling import Border, EdgeInsets, Style
 
 
+#: Flutter-style axis sizes mapped onto Pydrud's ``width``/``height`` values.
+_AXIS_SIZES = {
+    "min": "wrap", "max": "match",
+    "wrap": "wrap", "wrap_content": "wrap", "auto": "wrap",
+    "match": "match", "match_parent": "match", "fill": "match",
+}
+
+
+def _axis_size(value: Any, name: str) -> Any:
+    """Normalise ``main_axis_size`` / ``cross_axis_size`` to a dimension.
+
+    Flutter's ``MainAxisSize.min``/``.max`` are accepted verbatim, as are
+    Pydrud's own ``"wrap"``/``"match"`` spellings and raw numbers.
+    """
+    if value is None or isinstance(value, (int, float)):
+        return value
+    key = str(value).strip().lower()
+    if key not in _AXIS_SIZES:
+        raise ValueError(
+            f"{name} must be 'min' or 'max' (or 'wrap'/'match'/a number), "
+            f"got {value!r}")
+    return _AXIS_SIZES[key]
+
+
+
 class Container(Widget):
     """A box that wraps a single child with padding, margin, bg, border, etc."""
 
@@ -76,6 +101,14 @@ class Column(Widget):
     along the main axis ("top" | "center" | "bottom")::
 
         Column(children=[card], vertical_alignment="center", expand=1)
+
+    ``main_axis_size`` / ``cross_axis_size`` mirror Flutter: ``"min"``
+    hugs the content, ``"max"`` (the default for the main axis) fills the
+    parent. A ``Column`` fills the width by default; pass
+    ``main_axis_size="min"`` for a content-height column inside a row of
+    siblings::
+
+        Row(children=[Column(main_axis_size="min", children=[...]), ...])
     """
 
     _widget_type = "Column"
@@ -87,6 +120,8 @@ class Column(Widget):
         spacing: float = 0,
         horizontal_alignment: Optional[str] = None,
         vertical_alignment: Optional[str] = None,
+        main_axis_size: Optional[str] = None,
+        cross_axis_size: Optional[str] = None,
         key: Optional[str] = None,
         style: Optional[dict] = None,
         expand: Optional[int] = None,
@@ -102,6 +137,11 @@ class Column(Widget):
             self.style["crossAxisAlignment"] = horizontal_alignment
         if vertical_alignment:
             self.style["mainAxisAlignment"] = vertical_alignment
+        # Main axis is vertical (height); cross axis is horizontal (width).
+        if main_axis_size is not None:
+            self.style["height"] = _axis_size(main_axis_size, "main_axis_size")
+        if cross_axis_size is not None:
+            self.style["width"] = _axis_size(cross_axis_size, "cross_axis_size")
         if scroll:
             self.style["scroll"] = True
 
@@ -118,6 +158,14 @@ class Row(Widget):
     along the main axis ("start" | "center" | "end")::
 
         Row(children=[reset, tap], horizontal_alignment="center")
+
+    ``main_axis_size`` / ``cross_axis_size`` mirror Flutter: ``"min"``
+    hugs the content, ``"max"`` (the default for the main axis) fills the
+    parent. A ``Row`` fills the width by default, so give side-by-side
+    children a weight (``expand=1``) or a content width::
+
+        Row(children=[_stat("Score"), _stat("Combo")])          # each hugs
+        Row(children=[_stat("Score", expand=1), _stat("Combo", expand=1)])
     """
 
     _widget_type = "Row"
@@ -129,6 +177,8 @@ class Row(Widget):
         spacing: float = 0,
         vertical_alignment: Optional[str] = None,
         horizontal_alignment: Optional[str] = None,
+        main_axis_size: Optional[str] = None,
+        cross_axis_size: Optional[str] = None,
         key: Optional[str] = None,
         style: Optional[dict] = None,
         expand: Optional[int] = None,
@@ -144,6 +194,11 @@ class Row(Widget):
             self.style["crossAxisAlignment"] = vertical_alignment
         if horizontal_alignment:
             self.style["mainAxisAlignment"] = horizontal_alignment
+        # Main axis is horizontal (width); cross axis is vertical (height).
+        if main_axis_size is not None:
+            self.style["width"] = _axis_size(main_axis_size, "main_axis_size")
+        if cross_axis_size is not None:
+            self.style["height"] = _axis_size(cross_axis_size, "cross_axis_size")
         if scroll:
             self.style["scroll"] = True
 

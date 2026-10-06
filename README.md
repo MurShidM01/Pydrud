@@ -848,8 +848,8 @@ pydrud build    # proxy forwarded to Gradle automatically
 | Widget | Description | Key Props |
 |--------|-------------|-----------|
 | `Container` | Box with padding, margin, bg, border-radius | `child`, `padding`, `margin`, `bg`, `border_radius`, `width`, `height`, `alignment`, `expand` |
-| `Column` | Vertical flex layout | `children`, `spacing`, `horizontal_alignment`, `vertical_alignment` (main axis: `top`/`center`/`bottom`), `scroll`, `expand` |
-| `Row` | Horizontal flex layout | `children`, `spacing`, `vertical_alignment`, `horizontal_alignment` (main axis: `start`/`center`/`end`), `expand` |
+| `Column` | Vertical flex layout | `children`, `spacing`, `horizontal_alignment`, `vertical_alignment` (main axis: `top`/`center`/`bottom`), `main_axis_size`, `cross_axis_size`, `scroll`, `expand` |
+| `Row` | Horizontal flex layout | `children`, `spacing`, `vertical_alignment`, `horizontal_alignment` (main axis: `start`/`center`/`end`), `main_axis_size`, `cross_axis_size`, `expand` |
 | `Center` | Centres its child | `child`, `expand` |
 | `Spacer` | Flexible empty space | `expand` (default 1) |
 | `Divider` | Horizontal / vertical line | `color`, `thickness` |
@@ -867,6 +867,33 @@ pydrud build    # proxy forwarded to Gradle automatically
 | **`BottomNavigationBar`** / `NavItem` (v1.2) | 2-5 bottom destinations | `items`, `selected`, `show_labels`, `on_change` |
 | **`NavigationRail`** (v1.2) | Vertical rail for tablets | `items`, `selected`, `extended` |
 | **`RefreshIndicator`** (v1.2) | Pull-to-refresh | `child`, `on_refresh`, `refreshing` |
+
+#### Layout model — the one default to know
+
+A `Row`/`Column` **fills the width by default** (Android `MATCH_PARENT`),
+unlike Flutter's `mainAxisSize.min`. Inside a horizontal `Row`, several
+fill-width children that are not weighted fight for the same space, so the
+native renderer hugs their content instead of letting them collapse — and
+`pydrud analyze` warns when you pin two of them to `"match"` explicitly.
+
+The three idiomatic recipes:
+
+```python
+# 1. A row of columns (stat strip, card row, toolbar) — each hugs its content.
+Row(children=[stat("Score"), stat("Combo"), stat("Level")])
+
+# 2. Share the width equally — weight every child.
+Row(children=[stat("Score", expand=1), stat("Combo", expand=1)])
+
+# 3. Opt into the Flutter mental model explicitly.
+Row(main_axis_size="min", children=[...])   # hug the main axis
+Column(cross_axis_size="min", children=[...])  # hug the cross axis
+```
+
+`main_axis_size` / `cross_axis_size` accept `"min"`/`"max"` (Flutter), the
+Pydrud spellings `"wrap"`/`"match"`, or a number. A bare `Spacer()` expands to
+fill, exactly like Flutter — put it between weighted children only when you
+*want* it to take a share.
 
 ### Basic
 
