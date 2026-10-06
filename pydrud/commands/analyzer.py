@@ -31,7 +31,7 @@ _WIDGET_CLASSES = {
     "TextButton", "ElevatedButton", "IconButton", "TextField",
     "SearchField", "EmailField", "PasswordField", "NumberField",
     "PhoneField", "UrlField", "Image", "SvgPicture", "Icon", "Checkbox", "Switch",
-    "ProgressBar", "LinearProgress", "Slider", "Dropdown", "Radio",
+    "ProgressBar", "LinearProgress", "Slider", "RangeSlider", "Dropdown", "Radio",
     "AppBar", "Scaffold", "FloatingActionButton",
     # v1.2 — Material components
     "ListTile", "ExpansionTile", "Chip", "AssistChip", "FilterChip",

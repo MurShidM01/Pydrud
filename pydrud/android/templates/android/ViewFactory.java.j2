@@ -372,6 +372,8 @@ public class ViewFactory {
                     view = createProgressBar(json); break;
                 case "Slider":
                     view = createSlider(json); break;
+                case "RangeSlider":
+                    view = createRangeSlider(json); break;
                 case "Dropdown":
                     view = createDropdown(json); break;
                 case "Canvas":
@@ -1485,6 +1487,80 @@ public class ViewFactory {
         return sb;
     }
 
+    /**
+     * A two-thumb range slider (Material {@code RangeSlider}).
+     *
+     * The pair lives in props as ``values: [lo, hi]``; a value that does not
+     * land on the step grid is snapped, and a rejection falls back to the
+     * full range rather than throwing on the UI thread.
+     */
+    private View createRangeSlider(JSONObject json) {
+        com.google.android.material.slider.RangeSlider rs =
+            new com.google.android.material.slider.RangeSlider(activity);
+        JSONObject p = json.optJSONObject("props");
+        JSONObject s = json.optJSONObject("style");
+        float min = (float) (p != null ? p.optDouble("min", 0) : 0);
+        float max = (float) (p != null ? p.optDouble("max", 100) : 100);
+        if (max <= min) max = min + 1f;
+        rs.setValueFrom(min);
+        rs.setValueTo(max);
+
+        float step = stepSizeOf(s, min, max);
+        if (step > 0) rs.setStepSize(step);
+
+        JSONArray values = p != null ? p.optJSONArray("values") : null;
+        float lo = values != null ? (float) values.optDouble(0, min) : min;
+        float hi = values != null ? (float) values.optDouble(1, max) : max;
+        applyRangeValues(rs, min, max, step, lo, hi);
+
+        int accent = parseColor(s != null ? s.optString("color", "") : "",
+                                PydrudTheme.primary);
+        android.content.res.ColorStateList tint =
+            android.content.res.ColorStateList.valueOf(accent);
+        rs.setThumbTintList(tint);
+        rs.setTrackActiveTintList(tint);
+        rs.setTrackInactiveTintList(android.content.res.ColorStateList.valueOf(
+            PydrudTheme.alpha(accent, PydrudTheme.dark ? 0.26f : 0.18f)));
+        rs.setMinimumHeight(PydrudTheme.touchTarget());
+        return rs;
+    }
+
+    /** The step size a range slider should use (explicit, or from divisions). */
+    private float stepSizeOf(JSONObject s, float min, float max) {
+        if (s == null) return 0f;
+        float step = (float) s.optDouble("stepSize", 0);
+        if (step > 0) return step;
+        int divisions = s.optInt("divisions", 0);
+        return divisions > 0 ? (max - min) / divisions : 0f;
+    }
+
+    /**
+     * Set a range slider's two values, snapping to the step grid and
+     * clamping to ``[min, max]``. Material rejects off-grid or out-of-range
+     * values with an exception, which would otherwise crash the frame, so a
+     * rejection falls back to the full range.
+     */
+    private void applyRangeValues(com.google.android.material.slider.RangeSlider rs,
+                                  float min, float max, float step,
+                                  float lo, float hi) {
+        if (lo < min) lo = min;
+        if (hi > max) hi = max;
+        if (lo > hi) { float t = lo; lo = hi; hi = t; }
+        if (step > 0) {
+            lo = min + Math.round((lo - min) / step) * step;
+            hi = min + Math.round((hi - min) / step) * step;
+            if (lo < min) lo = min;
+            if (hi > max) hi = max;
+            if (lo > hi) lo = hi;
+        }
+        try {
+            rs.setValues(lo, hi);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "range slider rejected [" + lo + ", " + hi + "]", e);
+            rs.setValues(min, max);
+        }
+    }
+
     private Spinner createDropdown(JSONObject json) {
         Spinner sp = new androidx.appcompat.widget.AppCompatSpinner(activity);
         JSONObject p = json.optJSONObject("props");
@@ -1663,6 +1739,25 @@ public class ViewFactory {
                     @Override public void onStopTrackingTouch(SeekBar bar) {}
                 });
             }
+        } else if (view instanceof com.google.android.material.slider.RangeSlider) {
+            final com.google.android.material.slider.RangeSlider rs =
+                (com.google.android.material.slider.RangeSlider) view;
+            if (events.contains("change")) {
+                rs.addOnChangeListener((slider, value, fromUser) -> {
+                    // Ignore the echo from a programmatic setValues().
+                    if (!fromUser) return;
+                    java.util.List<Float> pair = slider.getValues();
+                    if (pair.size() < 2) return;
+                    try {
+                        JSONObject d = new JSONObject();
+                        JSONArray arr = new JSONArray();
+                        arr.put(pair.get(0).doubleValue());
+                        arr.put(pair.get(1).doubleValue());
+                        d.put("values", arr);
+                        eventDispatcher.dispatch("change", key, d);
+                    } catch (JSONException ignored) {}
+                });
+            }
         } else if (view instanceof Spinner) {
             if (events.contains("change")) {
                 ((Spinner) view).setOnItemSelectedListener(
@@ -1693,6 +1788,7 @@ public class ViewFactory {
         if (view == null) return;
         if (view instanceof Button || view instanceof CompoundButton
             || view instanceof EditText || view instanceof SeekBar
+            || view instanceof com.google.android.material.slider.RangeSlider
             || view instanceof Spinner) {
             return;
         }
@@ -1755,6 +1851,7 @@ public class ViewFactory {
             case "CameraPreview":
             case "ReorderableList":
             case "InfiniteList":
+            case "RangeSlider":
             case "NativeView":
                 return true;
             default:
@@ -1766,7 +1863,7 @@ public class ViewFactory {
         switch (type) {
             case "Column": case "Row": case "Card":
             case "ListView": case "GridView": case "Divider": case "Padding":
-            case "Slider": case "ProgressBar":
+            case "Slider": case "RangeSlider": case "ProgressBar":
             case "TextField": case "SearchBar": case "ListTile":
             case "ExpansionTile": case "Tabs": case "BottomNavigationBar":
             case "SegmentedButton": case "Chart": case "RefreshIndicator":
@@ -2210,7 +2307,7 @@ public class ViewFactory {
             + "rotation route safeArea safeAreaBottom safeAreaTop sample_rate scale scan scanFormats "
             + "scanOverlay scroll scrollable seconds selectable selected semantics sensor service services shadow "
             + "shortcuts show showGrid showLabels side size source spacing spans src start "
-            + "status_bar_color steps strike strikethrough style subject subtitle surface_variant sweep "
+            + "status_bar_color stepSize steps strike strikethrough style subject subtitle surface_variant sweep "
             + "swipeThreshold swipeToRemove sx sy tabHeight tabletColumns tabs text textAlign textColor "
             + "textScale text_scale thickness threeLine threshold timeout title tokens tooltip top "
             + "topDivider topic trailingColor trailingIcon transaction_id transition tristate type "
@@ -2519,6 +2616,29 @@ public class ViewFactory {
                     sp.setOnItemSelectedListener(null);
                     sp.setSelection(idx, false);
                     sp.post(() -> sp.setOnItemSelectedListener(listener));
+                }
+            }
+            return true;
+        }
+
+        if (view instanceof com.google.android.material.slider.RangeSlider) {
+            com.google.android.material.slider.RangeSlider rs =
+                (com.google.android.material.slider.RangeSlider) view;
+            float min = (float) (p.has("min") ? p.optDouble("min", rs.getValueFrom())
+                                              : rs.getValueFrom());
+            float max = (float) (p.has("max") ? p.optDouble("max", rs.getValueTo())
+                                              : rs.getValueTo());
+            if (max <= min) max = min + 1f;
+            rs.setValueFrom(min);
+            rs.setValueTo(max);
+            float step = stepSizeOf(node != null ? node.optJSONObject("style") : null,
+                                    min, max);
+            if (p.has("values")) {
+                JSONArray arr = p.optJSONArray("values");
+                if (arr != null && arr.length() >= 2) {
+                    applyRangeValues(rs, min, max, step,
+                                     (float) arr.optDouble(0, min),
+                                     (float) arr.optDouble(1, max));
                 }
             }
             return true;

@@ -13,7 +13,7 @@ from pydrud.widgets.basic import (
     Text, Button, FilledButton, TonalButton, OutlinedButton, TextButton,
     ElevatedButton, IconButton, TextField, SearchField, EmailField,
     PasswordField, NumberField, PhoneField, UrlField, Image, SvgPicture, Icon, Checkbox,
-    Switch, ProgressBar, LinearProgress, Slider, Dropdown, Radio,
+    Switch, ProgressBar, LinearProgress, Slider, RangeSlider, Dropdown, Radio,
 )
 from pydrud.widgets.theme import (Colors, Icons, Theme, ColorScheme, Typography,
                                   Spacing, Radius, Elevation, Motion,
@@ -106,6 +106,7 @@ __all__ = [
     "ProgressBar",
     "LinearProgress",
     "Slider",
+    "RangeSlider",
     "Dropdown",
     "Radio",
     # structure

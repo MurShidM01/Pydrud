@@ -627,6 +627,85 @@ class Slider(Widget):
         return {"value": self._value, "min": self._min, "max": self._max}
 
 
+class RangeSlider(Widget):
+    """A slider with two thumbs that selects a range.
+
+    ``values=(lo, hi)`` (or ``start=``/``end=``) are clamped to
+    ``[min, max]`` and ordered, so ``RangeSlider(80, 20)`` is the same as
+    ``RangeSlider(20, 80)``. ``on_change`` receives ``{"values": [lo, hi]}``.
+
+    Rendered natively by Material's ``RangeSlider``, which draws the two
+    thumbs and the highlighted track between them.
+    """
+
+    _widget_type = "RangeSlider"
+
+    def __init__(
+        self,
+        start: float = 0,
+        end: float = 100,
+        *,
+        values: Optional[tuple] = None,
+        min: float = 0,          # noqa: A002
+        max: float = 100,        # noqa: A002
+        divisions: Optional[int] = None,
+        step_size: Optional[float] = None,
+        color: Optional[str] = None,
+        key: Optional[str] = None,
+        style: Optional[dict] = None,
+        expand: Optional[int] = None,
+        visible: bool = True,
+        **kwargs,
+    ):
+        super().__init__(key=key, style=style, expand=expand, visible=visible,
+                         **kwargs)
+        if max <= min:
+            raise ValueError("RangeSlider max must be greater than min")
+        self._min = float(min)
+        self._max = float(max)
+        if values is not None:
+            try:
+                start, end = values
+            except (TypeError, ValueError):
+                raise ValueError(
+                    "RangeSlider values must be a (start, end) pair") from None
+        self._start, self._end = self._normalise(start, end)
+        if divisions is not None:
+            self.style["divisions"] = int(divisions)
+        if step_size is not None:
+            if step_size <= 0:
+                raise ValueError("RangeSlider step_size must be positive")
+            self.style["stepSize"] = float(step_size)
+        if color:
+            self.style["color"] = color
+        self.style.setdefault("width", "match")
+
+    def _normalise(self, start: float, end: float) -> tuple:
+        low = _clamp(float(start), self._min, self._max)
+        high = _clamp(float(end), self._min, self._max)
+        return (low, high) if low <= high else (high, low)
+
+    @property
+    def values(self) -> tuple:
+        return (self._start, self._end)
+
+    @values.setter
+    def values(self, pair):
+        self._start, self._end = self._normalise(*pair)
+
+    @property
+    def start(self) -> float:
+        return self._start
+
+    @property
+    def end(self) -> float:
+        return self._end
+
+    def _serialise_props(self) -> dict:
+        return {"values": [self._start, self._end],
+                "min": self._min, "max": self._max}
+
+
 class Dropdown(Widget):
     """A dropdown (spinner) that lets the user pick one of several options."""
 

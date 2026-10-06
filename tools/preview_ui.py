@@ -474,7 +474,7 @@ class Renderer:
         "Divider", "TextField", "SearchBar", "ListTile", "ListView", "Tabs",
         "BottomNavigationBar", "ProgressBar", "SegmentedButton", "Chart",
         "Stack", "RefreshIndicator", "Form", "Slider", "Column", "Row",
-        "Card", "GridView", "Padding", "ExpansionTile",
+        "Card", "GridView", "Padding", "ExpansionTile", "RangeSlider",
     }
 
     #: Fixed-width widgets the native layer sizes for us.
