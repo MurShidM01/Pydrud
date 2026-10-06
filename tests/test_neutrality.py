@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import importlib
 import sys
-from typing import Iterable
 
 import pytest
 
@@ -32,7 +31,7 @@ _ANDROID_MODULES = frozenset({
 })
 
 
-def _android_dependent_modules(mod: importlib.machinery.ModuleType) -> list[str]:
+def _android_dependent_modules(mod: object) -> list[str]:
     """Return names of Android-only modules transitively loaded by *mod*."""
     visited: set[str] = set()
     queue: list[str] = [mod.__name__]
@@ -45,25 +44,24 @@ def _android_dependent_modules(mod: importlib.machinery.ModuleType) -> list[str]
         visited.add(name)
         if name in _ANDROID_MODULES:
             continue  # expected
-        try:
-            m = sys.modules.get(name)
-            if m is None:
+        m = sys.modules.get(name)
+        if m is None:
+            continue
+        for attr_name in dir(m):
+            try:
+                attr = getattr(m, attr_name)
+            except Exception:
                 continue
-            for attr_name in dir(m):
-                try:
-                    attr = getattr(m, attr_name)
-                except Exception:
-                    continue
-                if not (hasattr(attr, "__module__")
-                        and isinstance(attr.__module__, str)):
-                    continue
-                mod_name = attr.__module__
-                if (mod_name.startswith("pydrud.android")
-                        or mod_name in _ANDROID_MODULES):
-                    leaks.append(f"{name}.{attr_name} ({mod_name})")
-                    continue
-                if mod_name.startswith("pydrud.") and mod_name not in visited:
-                    queue.append(mod_name)
+            if not (hasattr(attr, "__module__")
+                    and isinstance(attr.__module__, str)):
+                continue
+            mod_name = attr.__module__
+            if (mod_name.startswith("pydrud.android")
+                    or mod_name in _ANDROID_MODULES):
+                leaks.append(f"{name}.{attr_name} ({mod_name})")
+                continue
+            if mod_name.startswith("pydrud.") and mod_name not in visited:
+                queue.append(mod_name)
     return leaks
 
 
@@ -105,9 +103,8 @@ class TestCrossPlatformNeutrality:
                 + "; ".join(leaks)
             )
 
-    def test_pss_engine_imports_in_isolation(self) -> None:
-        """The PSS engine (schema + parser + resolver) has no Android deps."""
-        # Import each component individually.
+    def test_pss_schema_is_android_free(self) -> None:
+        """The PSS schema (style vocabulary) has no Android deps."""
         from pydrud.core.styles.schema import VALID_STYLE_KEYS, KEY_KIND
         from pydrud.core.styles import normalize_key
 
