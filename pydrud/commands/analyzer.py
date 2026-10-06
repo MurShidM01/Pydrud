@@ -16,14 +16,13 @@ from __future__ import annotations
 import ast
 import os
 
+from pydrud.core.styles import VALID_STYLE_KEYS as _VALID_STYLE_KEYS
 from pydrud.utils import tui
 
 # ── Issue types ──────────────────────────────────────────────────────────────
 
 _SEVERITY_WARNING = "warning"
 _SEVERITY_ERROR = "error"
-
-# Known Pydrud widget classes that should have keys in dynamic lists.
 _WIDGET_CLASSES = {
     "Container", "Column", "Row", "Center", "Spacer", "Divider",
     "Stack", "Positioned", "SizedBox", "Padding", "Card", "ListView", "GridView",
