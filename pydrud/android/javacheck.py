@@ -229,6 +229,114 @@ def _scope_vars(decl, info: ClassInfo) -> dict[str, str]:
 
 # ── The check itself ────────────────────────────────────────────────────────
 
+def _child_nodes(node) -> list:
+    """Direct child AST nodes.
+
+    ``Node.children`` yields raw attribute *values* — a list-valued attribute
+    (a body, an argument list) arrives as the list itself, so it has to be
+    flattened here.
+    """
+    out: list = []
+    for child in getattr(node, "children", []) or []:
+        if isinstance(child, jtree.Node):
+            out.append(child)
+        elif isinstance(child, (list, tuple, set)):
+            out.extend(item for item in child if isinstance(item, jtree.Node))
+    return out
+
+
+def _declared_names(node, *, into_lambdas: bool) -> set:
+    """Local variable names declared under *node*.
+
+    Anonymous-class bodies are always skipped — they open a fresh scope, so
+    their locals may reuse an enclosing method's names. Nested lambda bodies
+    are skipped unless ``into_lambdas`` is true.
+    """
+    names: set = set()
+    stack = _child_nodes(node)
+    while stack:
+        child = stack.pop()
+        if isinstance(child, jtree.ClassCreator) and child.body is not None:
+            continue
+        if not into_lambdas and isinstance(child, jtree.LambdaExpression):
+            continue
+        if isinstance(child, jtree.LocalVariableDeclaration):
+            names.update(d.name for d in child.declarators)
+        elif isinstance(child, jtree.VariableDeclarator):
+            names.add(child.name)
+        stack.extend(_child_nodes(child))
+    return names
+
+
+def _method_scope_names(member) -> set:
+    """Parameters and top-level locals of a method/constructor.
+
+    Only declarations directly in the method body (and a top-level ``for``
+    or ``try`` header) are collected: a local inside a nested ``if``/block is
+    in a sibling scope, so a lambda reusing that name is legal.
+    """
+    names = {p.name for p in getattr(member, "parameters", []) or []}
+    body = getattr(member, "body", None)
+    if not isinstance(body, list):
+        return names
+    for stmt in body:
+        if isinstance(stmt, jtree.LocalVariableDeclaration):
+            names.update(d.name for d in stmt.declarators)
+        elif isinstance(stmt, jtree.ForStatement):
+            for init in getattr(stmt.control, "init", None) or []:
+                if isinstance(init, jtree.VariableDeclaration):
+                    names.update(d.name for d in init.declarators)
+        elif isinstance(stmt, jtree.TryStatement):
+            for resource in getattr(stmt, "resources", None) or []:
+                for d in getattr(resource, "declarators", []) or []:
+                    names.add(d.name)
+    return names
+
+
+def _lambda_names(lam) -> set:
+    """A lambda's own parameter and local names."""
+    names = set()
+    params = getattr(lam, "parameters", None)
+    for param in (params if isinstance(params, list) else [params]):
+        # A typed/inferred parameter carries `.name`; the bare `x -> …` form
+        # is a MemberReference whose identifier is `.member`.
+        name = getattr(param, "name", None) or getattr(param, "member", None)
+        if name:
+            names.add(name)
+    names |= _declared_names(lam, into_lambdas=False)
+    return names
+
+
+def _check_lambda_scopes(info: ClassInfo, problems: list[Problem]) -> None:
+    """Reject a lambda local that shadows an enclosing method variable.
+
+    Java puts a lambda body in the enclosing method's scope, so a lambda may
+    not redeclare a parameter or a top-level local of the method it sits in
+    — javac reports "variable X is already defined in method Y". This is a
+    compile error the symbol checks cannot see, and it only surfaces minutes
+    into ``pydrud build``.
+    """
+    decl = info.decl
+    if decl is None:
+        return
+    for member in _members(decl):
+        if not isinstance(member, (jtree.MethodDeclaration,
+                                   jtree.ConstructorDeclaration)):
+            continue
+        where = f"{info.qname}.{getattr(member, 'name', '<init>')}()"
+        outer = _method_scope_names(member)
+        if not outer:
+            continue
+        for _path, lam in member.filter(jtree.LambdaExpression):
+            clash = sorted(_lambda_names(lam) & outer)
+            if clash:
+                problems.append(Problem(
+                    info.source,
+                    f"{where}: variable {clash[0]} is already defined in the "
+                    "enclosing method — a lambda body shares the method's "
+                    "scope"))
+
+
 def _check_class(info: ClassInfo, res: _Resolver,
                  problems: list[Problem]) -> None:
     decl = info.decl
@@ -318,4 +426,5 @@ def check_sources(rendered: dict[str, str]) -> list[Problem]:
     problems: list[Problem] = []
     for info in model.values():
         _check_class(info, res, problems)
+        _check_lambda_scopes(info, problems)
     return sorted(set(problems), key=lambda p: (p.template, p.message))

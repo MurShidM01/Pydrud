@@ -153,7 +153,7 @@ class TestGeneratedJava(unittest.TestCase):
         self.assertIn("if (!fromUser) return;", self.source)
 
     def test_it_reports_the_pair_from_the_change_listener(self):
-        self.assertIn('d.put("values", arr);', self.source)
+        self.assertIn('d.put("values", pairArray);', self.source)
 
     def test_off_grid_values_are_snapped_and_guarded(self):
         body = re.search(r"private void applyRangeValues"

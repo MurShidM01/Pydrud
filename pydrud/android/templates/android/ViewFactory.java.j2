@@ -1775,10 +1775,10 @@ public class ViewFactory {
                     if (pair.size() < 2) return;
                     try {
                         JSONObject d = new JSONObject();
-                        JSONArray arr = new JSONArray();
-                        arr.put(pair.get(0).doubleValue());
-                        arr.put(pair.get(1).doubleValue());
-                        d.put("values", arr);
+                        JSONArray pairArray = new JSONArray();
+                        pairArray.put(pair.get(0).doubleValue());
+                        pairArray.put(pair.get(1).doubleValue());
+                        d.put("values", pairArray);
                         eventDispatcher.dispatch("change", key, d);
                     } catch (JSONException ignored) {}
                 });

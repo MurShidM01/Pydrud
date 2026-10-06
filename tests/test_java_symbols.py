@@ -112,6 +112,49 @@ class TestJavaSymbols(unittest.TestCase):
         }
         self.assertEqual([], check_sources(sources))
 
+    def test_detects_lambda_shadowing_an_enclosing_local(self):
+        """A lambda body shares the method's scope (a real javac error)."""
+        sources = {
+            "A.java": ("public class A { void go() {"
+                       " int arr = 0;"
+                       " run(() -> { int arr = 1; }); } }"),
+        }
+        problems = check_sources(sources)
+        self.assertTrue(any("arr" in p.message for p in problems), problems)
+
+    def test_detects_lambda_parameter_shadowing_a_method_parameter(self):
+        sources = {
+            "A.java": ("public class A { void go(String key) {"
+                       " run(key -> System.out.println(key)); } }"),
+        }
+        problems = check_sources(sources)
+        self.assertTrue(any("key" in p.message for p in problems), problems)
+
+    def test_allows_a_lambda_local_in_a_sibling_scope(self):
+        """A local inside a nested block is not in scope in a sibling lambda."""
+        sources = {
+            "A.java": ("public class A { void go(boolean c) {"
+                       " if (c) { int x = 1; }"
+                       " run(() -> { int x = 2; }); } }"),
+        }
+        self.assertEqual([], check_sources(sources))
+
+    def test_allows_an_anonymous_class_local_with_the_same_name(self):
+        sources = {
+            "A.java": ("public class A { void go() { int x = 1;"
+                       " Object o = new Object() { void run() { int x = 2; } };"
+                       " } }"),
+        }
+        self.assertEqual([], check_sources(sources))
+
+    def test_allows_two_sibling_lambdas_with_the_same_local(self):
+        sources = {
+            "A.java": ("public class A { void go() {"
+                       " run(() -> { int x = 1; });"
+                       " run(() -> { int x = 2; }); } }"),
+        }
+        self.assertEqual([], check_sources(sources))
+
     def test_problem_formats_like_javac(self):
         problem = Problem("X.java", "boom")
         self.assertEqual("X.java: boom", str(problem))
