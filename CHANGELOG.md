@@ -171,6 +171,29 @@ unlimited-widget and unlimited-icon work.
   cross-class checker now rejects it, with no false positives on sibling
   blocks or anonymous-class locals.
 
+### Changed — project structure (scalability)
+* **No file in the repository exceeds 1,000 lines.** Every oversized module
+  was split into a package or collaborator classes following one convention
+  (a package whose `__init__.py` re-exports the public names, so imports
+  keep working):
+  - `pydrud/runtime/` mixins + `page.py`, `pydrud/widgets/material/` (9
+    modules), `pydrud/widgets/theme/` (7), `pydrud/services/native/` (8),
+    `pydrud/commands/project/` (8).
+  - The Java renderer `ViewFactory` (3,380 lines) is now a thin orchestrator
+    (142 lines) plus eight collaborator classes — `BuiltinViews`,
+    `ViewStyler`, `LayoutEngine`, `TreePatcher`, `EventBinder`,
+    `NativeViewFactory`, `ViewAnimator`, `ImageLoader` — that hold a
+    back-reference to the factory and own one cohesive slice of the
+    rendering responsibility. `MaterialViews` (1,206 lines) keeps the
+    dispatch point and moves its navigation family into
+    `MaterialNavigationViews`.
+  - The new templates are registered in `_JAVA_TEMPLATES`, so every
+    scaffold renders them; the 14 tests pinned to the old filenames now
+    assert against the combined renderer source (`tests.all_java_templates()`).
+  - Verified end to end: the full pytest suite (1,237 tests, 2,806
+    subtests), `ruff --select F,E9`, and a real Gradle `assembleDebug` APK
+    build of a scaffolded project.
+
 ### Verified — release build (BT-002)
 `pydrud build --release` was exercised end to end with `shrink: true` on the
 generated project (AGP 8.13.2, R8, Gradle 8.14.4). It produced a signed
