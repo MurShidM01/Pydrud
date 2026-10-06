@@ -1152,6 +1152,7 @@ public class ViewFactory {
     private ImageView createIconView(JSONObject json) {
         JSONObject p = json.optJSONObject("props");
         String name = p != null ? p.optString("name", "star") : "star";
+        String path = p != null ? p.optString("path", "") : "";
         ImageView iv = new androidx.appcompat.widget.AppCompatImageView(activity);
 
         JSONObject s = json.optJSONObject("style");
@@ -1163,7 +1164,11 @@ public class ViewFactory {
             tint = parseColor(f.optString("color", ""), tint);
         }
         int px = PydrudTheme.adaptive(size);
-        iv.setImageDrawable(PydrudIcons.drawable(name, tint, px));
+        // Icon.svg(...) ships raw path data; a named icon resolves via the
+        // catalogue. Both render through the same vector drawable (PYDRUD §16.2).
+        iv.setImageDrawable(path.isEmpty()
+            ? PydrudIcons.drawable(name, tint, px)
+            : PydrudIcons.drawablePath(path, tint, px));
         iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
         iv.setLayoutParams(new ViewGroup.LayoutParams(px, px));
         return iv;
@@ -2298,7 +2303,7 @@ public class ViewFactory {
             return true;
         }
 
-        if (view instanceof ImageView && p.has("name")) {
+        if (view instanceof ImageView && (p.has("name") || p.has("path"))) {
             ImageView iv = (ImageView) view;
             JSONObject style = node != null ? node.optJSONObject("style") : null;
             JSONObject font = style != null ? style.optJSONObject("font") : null;
@@ -2306,8 +2311,11 @@ public class ViewFactory {
             int tint = font != null
                 ? parseColor(font.optString("color", ""), PydrudTheme.onSurfaceVariant)
                 : PydrudTheme.onSurfaceVariant;
-            iv.setImageDrawable(PydrudIcons.drawable(
-                p.optString("name", "star"), tint, PydrudTheme.adaptive(size)));
+            String path = p.optString("path", "");
+            iv.setImageDrawable(path.isEmpty()
+                ? PydrudIcons.drawable(p.optString("name", "star"), tint,
+                                       PydrudTheme.adaptive(size))
+                : PydrudIcons.drawablePath(path, tint, PydrudTheme.adaptive(size)));
             return true;
         }
 

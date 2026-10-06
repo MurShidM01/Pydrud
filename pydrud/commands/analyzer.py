@@ -158,6 +158,7 @@ def _analyze_file(source: str, filepath: str) -> list[dict]:
     issues.extend(_check_event_handlers(tree, filepath))
     issues.extend(_check_page_update_in_loops(tree, filepath))
     issues.extend(_check_icon_references(tree, filepath))
+    issues.extend(_check_icon_strings(tree, filepath))
     issues.extend(_check_constant_references(tree, filepath))
 
     return _dedupe(issues)
@@ -306,8 +307,56 @@ def _check_icon_references(tree: ast.AST, filepath: str) -> list[dict]:
     return issues
 
 
-# ── Check 6: Design-token references ────────────────────────────────────────
+# ── Check 6: Unknown icon strings ───────────────────────────────────────────
 
+
+#: Keyword arguments that carry an icon name on the Python side.
+_ICON_KWARGS = {"icon", "active_icon", "selected_icon", "leading_icon",
+                "trailing_icon"}
+
+
+def _check_icon_strings(tree: ast.AST, filepath: str) -> list[dict]:
+    """Flag icon names the Android renderer does not ship (PB-005 / DX-005).
+
+    ``Icon("rocket_launch")``, ``Button(icon="play_arrow")`` and friends used
+    to render a silent "?" on device. The analyzer resolves every string
+    literal used as an icon against the shipped catalogue and reports the
+    closest match, so the mistake surfaces at build time, not on screen.
+    """
+    from pydrud import icons as catalogue
+
+    issues: list[dict] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        candidates: list = []
+        if _get_call_name(node) in {"Icon", "IconButton"} and node.args:
+            candidates.append(node.args[0])
+        for kw in node.keywords:
+            if kw.arg in _ICON_KWARGS:
+                candidates.append(kw.value)
+        for const in candidates:
+            if not (isinstance(const, ast.Constant)
+                    and isinstance(const.value, str)
+                    and const.value.strip()):
+                continue
+            value = const.value
+            if catalogue.has(value):
+                continue
+            close = catalogue.suggest(value)
+            hint = (f" Did you mean {' or '.join(repr(c) for c in close)}?"
+                    if close else "")
+            issues.append({
+                "file": filepath,
+                "line": const.lineno,
+                "severity": _SEVERITY_WARNING,
+                "message": f"Unknown icon: {value!r}.{hint} "
+                           "See pydrud.icons.available() for the full set.",
+            })
+    return issues
+
+
+# ── Check 7: Design-token references ────────────────────────────────────────
 
 def _check_constant_references(tree: ast.AST, filepath: str) -> list[dict]:
     """Warn if code references a design token that does not exist.
@@ -341,7 +390,7 @@ def _check_constant_references(tree: ast.AST, filepath: str) -> list[dict]:
     return issues
 
 
-# ── Check 7: Package shadowing ──────────────────────────────────────────────
+# ── Check 8: Package shadowing ──────────────────────────────────────────────
 
 
 def _check_shadowing_issues(src_dir: str) -> list[dict]:

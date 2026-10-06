@@ -382,7 +382,22 @@ class SvgPicture(Image):
 
 
 class Icon(Widget):
-    """A Material icon glyph."""
+    """A Material icon glyph.
+
+    Use a shipped name — ::
+
+        Icon("star")
+
+    or render arbitrary 24x24 SVG path data, so the icon set is effectively
+    unlimited and an app can ship its own iconography without touching the
+    framework (PYDRUD §16.2)::
+
+        Icon.svg("M12,2 L22,12 L12,22 L2,12 Z")
+
+    ``pydrud.icons.has(name)`` / ``pydrud.icons.available()`` report which
+    names the renderer understands; an unknown name now logs a warning and
+    is flagged by ``pydrud analyze`` instead of silently rendering "?".
+    """
 
     _widget_type = "Icon"
 
@@ -400,12 +415,41 @@ class Icon(Widget):
     ):
         super().__init__(key=key, style=style, expand=expand, visible=visible, **kwargs)
         self._icon_name = Icons.normalize(name)
+        self._icon_path: Optional[str] = None
         if size:
             self.style.setdefault("font", {})["size"] = size
         if color:
             self.style.setdefault("font", {})["color"] = color
 
+    @classmethod
+    def svg(
+        cls,
+        path_data: str,
+        *,
+        size: Optional[float] = None,
+        color: Optional[str] = None,
+        key: Optional[str] = None,
+        style: Optional[dict] = None,
+        expand: Optional[int] = None,
+        visible: bool = True,
+        **kwargs,
+    ) -> "Icon":
+        """An icon drawn from raw 24x24 SVG path data.
+
+        ``path_data`` uses the same path syntax as an Android
+        ``VectorDrawable`` (``M``/``L``/``C``/``A``/``Z`` …). The glyph is
+        tinted and scaled exactly like a named icon.
+        """
+        if not isinstance(path_data, str) or not path_data.strip():
+            raise ValueError("Icon.svg() needs non-empty 24x24 SVG path data")
+        icon = cls(name="star", size=size, color=color, key=key, style=style,
+                   expand=expand, visible=visible, **kwargs)
+        icon._icon_path = path_data.strip()
+        return icon
+
     def _serialise_props(self) -> dict:
+        if self._icon_path is not None:
+            return {"path": self._icon_path}
         return {"name": self._icon_name}
 
 

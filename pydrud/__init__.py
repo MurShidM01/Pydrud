@@ -166,8 +166,12 @@ from pydrud.widgets import (
     SettingsTile, NavigationTile, FormSection,
 )
 
+#: The icon catalogue — ``pydrud.icons.has(...)`` / ``.available()`` / ``.suggest()``.
+from pydrud import icons  # noqa: E402
+
 __all__ = [
     "App",
+    "icons",
     "PydrudError",
     "MaxDepthError",
     "FrameTooLargeError",
