@@ -86,6 +86,8 @@ from pydrud.widgets import (
     Tokens,
     ColorScheme,
     Typography,
+    TextTheme,
+    ThemeExtension,
     ListTile,
     ExpansionTile,
     Chip,
@@ -169,9 +171,13 @@ from pydrud.widgets import (
 #: The icon catalogue — ``pydrud.icons.has(...)`` / ``.available()`` / ``.suggest()``.
 from pydrud import icons  # noqa: E402
 
+#: Higher-level composite widgets built purely from the primitives.
+from pydrud import components  # noqa: E402
+
 __all__ = [
     "App",
     "icons",
+    "components",
     "PydrudError",
     "MaxDepthError",
     "FrameTooLargeError",
@@ -262,6 +268,8 @@ __all__ = [
     "Theme",
     "ColorScheme",
     "Typography",
+    "TextTheme",
+    "ThemeExtension",
     "ListTile",
     "ExpansionTile",
     "Chip",

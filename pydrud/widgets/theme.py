@@ -12,6 +12,7 @@ understood by the Android renderer::
 
 from __future__ import annotations
 
+import contextlib
 import re
 
 from pydrud.widgets.tokens import Tokens
@@ -627,6 +628,123 @@ class Motion(metaclass=_ConstantsMeta):
     BOUNCE = "bounce"
 
 
+class _TextStyle(dict):
+    """A named text style — a ``style=`` dict for :class:`~pydrud.Text`."""
+
+    def __init__(self, size: float, weight: int = 400,
+                 letter_spacing: float | None = None,
+                 line_height: float | None = None):
+        font: dict = {"size": size, "weight": weight}
+        if letter_spacing is not None:
+            font["letterSpacing"] = letter_spacing
+        if line_height is not None:
+            font["lineHeight"] = line_height
+        super().__init__(font=font)
+
+    @property
+    def size(self) -> float:
+        return self["font"]["size"]
+
+    @property
+    def weight(self) -> int:
+        return self["font"]["weight"]
+
+    def with_(self, **overrides) -> "_TextStyle":
+        """A copy with some font fields overridden (colour, family, …)."""
+        font = {**self["font"], **overrides}
+        copy = _TextStyle(font.pop("size", self.size),
+                          font.pop("weight", self.weight))
+        copy["font"].update(font)
+        return copy
+
+
+class _TextThemeMeta(type):
+    """Resolve ``TextTheme.titleLarge`` / ``.TITLE_LARGE`` / ``.title_large``."""
+
+    def __getattr__(cls, name: str):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        value = vars(cls).get(_token_name(name))
+        if isinstance(value, _TextStyle):
+            return value
+        available = ", ".join(sorted(k.lower() for k, v in vars(cls).items()
+                                     if isinstance(v, _TextStyle)))
+        raise AttributeError(f"TextTheme has no style {name!r}. "
+                             f"Available: {available}")
+
+
+class TextTheme(metaclass=_TextThemeMeta):
+    """Named text styles, by role instead of magic numbers.
+
+    Mirrors Flutter's ``TextTheme`` / Material 3's type scale::
+
+        from pydrud import Text, TextTheme
+
+        Text("Title", style=TextTheme.title_large)
+        Text("Body", style=TextTheme.BODY_MEDIUM)      # any spelling works
+
+    Each role is a ``style=`` dict, so it can be passed straight to
+    :class:`~pydrud.Text` and refined with :meth:`_TextStyle.with_`.
+    """
+
+    DISPLAY_LARGE = _TextStyle(57, 400, letter_spacing=-0.25)
+    DISPLAY_MEDIUM = _TextStyle(45, 400)
+    DISPLAY_SMALL = _TextStyle(36, 400)
+    HEADLINE_LARGE = _TextStyle(32, 500)
+    HEADLINE_MEDIUM = _TextStyle(28, 500)
+    HEADLINE_SMALL = _TextStyle(24, 500)
+    TITLE_LARGE = _TextStyle(22, 500)
+    TITLE_MEDIUM = _TextStyle(16, 600)
+    TITLE_SMALL = _TextStyle(14, 600)
+    BODY_LARGE = _TextStyle(16, 400)
+    BODY_MEDIUM = _TextStyle(14, 400)
+    BODY_SMALL = _TextStyle(12, 400)
+    LABEL_LARGE = _TextStyle(14, 500)
+    LABEL_MEDIUM = _TextStyle(12, 500)
+    LABEL_SMALL = _TextStyle(11, 500)
+
+
+class ThemeExtension:
+    """A named bag of custom design values (Flutter's ``ThemeExtension``).
+
+    Carries app-specific roles alongside the theme so they travel together::
+
+        Theme.extend(ThemeExtension("brand", accent="#FF22D3EE", hero_radius=28))
+        brand = Theme.extension("brand")
+        Container(border_radius=brand.hero_radius, bg=brand.accent)
+    """
+
+    __slots__ = ("name", "_values")
+
+    def __init__(self, name: str, **values):
+        if not isinstance(name, str) or not name.isidentifier():
+            raise ValueError("ThemeExtension needs an identifier name")
+        self.name = name
+        self._values = dict(values)
+
+    def __getattr__(self, item: str):
+        try:
+            return self._values[item]
+        except KeyError:
+            raise AttributeError(
+                f"ThemeExtension {self.name!r} has no value {item!r}. "
+                f"Available: {', '.join(sorted(self._values))}") from None
+
+    def get(self, item: str, default=None):
+        return self._values.get(item, default)
+
+    def replace(self, **values) -> "ThemeExtension":
+        """A copy with some values replaced."""
+        return ThemeExtension(self.name, **{**self._values, **values})
+
+    def as_dict(self) -> dict:
+        return dict(self._values)
+
+    def __repr__(self) -> str:
+        body = ", ".join(f"{k}={v!r}" for k, v in sorted(self._values.items()))
+        return f"ThemeExtension({self.name!r}, {body})"
+
+
 class Theme:
     """App-wide colours **and** design tokens.
 
@@ -768,10 +886,74 @@ class Theme:
         if tokens:
             Tokens.update(**tokens)
 
+    #: Colour roles that :meth:`configure` / :meth:`scope` understand.
+    _ROLES = ("primary", "background", "surface", "text", "secondary",
+              "surface_variant", "outline", "error", "on_primary",
+              "text_secondary")
+
+    #: Custom :class:`ThemeExtension` bags registered with :meth:`extend`.
+    _extensions: dict = {}
+
     @classmethod
     def configure_reset(cls) -> None:
         """Restore every design token to the Pydrud default."""
         Tokens.reset()
+
+    @classmethod
+    @contextlib.contextmanager
+    def scope(cls, **overrides):
+        """Override theme roles/tokens for a subtree, then restore them.
+
+        Flutter's ``Theme(data: …)``: a screen, card or dialog can restyle
+        itself without touching globals. Pydrud resolves theme values at
+        build time, so wrap the widgets you construct::
+
+            with Theme.scope(primary="#FFEC4899", radius_card=4):
+                Column(children=[Button("Scoped"), Card(child=Text("…"))])
+
+        Colour roles and design tokens are both accepted. Nesting works.
+        """
+        saved_roles: dict = {}
+        saved_tokens = None
+        tokens: dict = {}
+        for name, value in overrides.items():
+            if name in cls._ROLES or name == "dark_mode":
+                saved_roles[name] = getattr(cls, name)
+                setattr(cls, name, value)
+            else:
+                tokens[name] = value
+        if tokens:
+            saved_tokens = Tokens.as_dict()
+            Tokens.update(**tokens)
+        try:
+            yield cls
+        finally:
+            for name, value in saved_roles.items():
+                setattr(cls, name, value)
+            if saved_tokens is not None:
+                Tokens.reset()
+                Tokens.update(**saved_tokens)
+
+    @classmethod
+    def extend(cls, extension: ThemeExtension) -> ThemeExtension:
+        """Register a :class:`ThemeExtension` under its name."""
+        cls._extensions[extension.name] = extension
+        return extension
+
+    @classmethod
+    def extension(cls, name: str) -> ThemeExtension:
+        """Look up a registered :class:`ThemeExtension` by name."""
+        try:
+            return cls._extensions[name]
+        except KeyError:
+            known = ", ".join(sorted(cls._extensions)) or "none"
+            raise KeyError(f"No ThemeExtension named {name!r}. "
+                           f"Registered: {known}") from None
+
+    @classmethod
+    def extensions(cls) -> dict:
+        """Every registered extension, keyed by name."""
+        return dict(cls._extensions)
 
     @classmethod
     def tokens(cls) -> dict:

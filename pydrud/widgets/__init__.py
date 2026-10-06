@@ -16,7 +16,8 @@ from pydrud.widgets.basic import (
     Switch, ProgressBar, LinearProgress, Slider, Dropdown, Radio,
 )
 from pydrud.widgets.theme import (Colors, Icons, Theme, ColorScheme, Typography,
-                                  Spacing, Radius, Elevation, Motion)
+                                  Spacing, Radius, Elevation, Motion,
+                                  TextTheme, ThemeExtension)
 from pydrud.widgets.tokens import Tokens
 from pydrud.widgets.material import (
     ListTile, ExpansionTile, Chip, AssistChip, FilterChip, InputChip,
@@ -128,6 +129,8 @@ __all__ = [
     "Theme",
     "ColorScheme",
     "Typography",
+    "TextTheme",
+    "ThemeExtension",
     # material
     "ListTile",
     "ExpansionTile",
