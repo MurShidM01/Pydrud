@@ -166,9 +166,9 @@ Runnable example apps ship in [`examples/`](examples/):
 | [`todo_app.py`](examples/todo_app.py) | `Store` reactive state, list CRUD, filters, `SearchField` |
 | [`weather_app.py`](examples/weather_app.py) | Async HTTP, responsive layout, cards and charts |
 
-The `pydrud create` starter app is itself a full showcase (Scaffold, AppBar,
-bottom navigation, forms and theming), and `pydrud docs --serve` generates a
-searchable HTML reference for every widget, prop and service.
+The `pydrud create` starter is a focused, responsive counter app showcasing
+Scaffold, AppBar, a floating action button and PSS theming. `pydrud docs --serve`
+generates a searchable HTML reference for every widget, prop and service.
 
 ---
 ## Installation

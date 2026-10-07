@@ -131,6 +131,7 @@ class FloatingActionButton(Widget):
             "expand": self.expand,
             "visible": self.visible,
             "tooltip": self.tooltip,
+            "semantics": self.semantics,
             "has_events": bool(self.event_handlers),
             "events": sorted(self.event_handlers.keys()),
             "props": {"_fab": True},

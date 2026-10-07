@@ -4,11 +4,10 @@
 A native Android app written in Python with
 [Pydrud](https://github.com/MurShidM01/Pydrud) {{ pydrud_version }}.
 
-The starter app is the **Pydrud Native Playground** — a single, polished
-screen of small working demos (native Toasts, Snackbars, dialogs, haptics,
-clipboard, share, permissions; Material components; reactive state; stack
-navigation) so you can see everything Pydrud does the moment the app
-launches. Open `src/app/screens/playground.py` and start editing.
+The starter is a focused, responsive **counter app** with a large live total,
+clear decrement/reset controls, a floating action button, and a polished
+Pydrud Style Sheet (PSS) theme. Open `src/app/screens/playground.py` to shape
+the screen, or edit `src/app/theme.pss` to tune its visual design.
 
 ## Run it
 
@@ -54,10 +53,10 @@ assets, permissions, capabilities and deep links. Edit it and run
 `pydrud sync`. Keep Python packages and the theme seed in `pydrud.toml`; app
 code under `src/app/` is never overwritten by sync.
 
-The starter enables `haptics` and `notifications` in `pydrud.yaml` so the
-Vibrate and Permission buttons work immediately. For other Android features,
-prefer Python-first commands such as `pydrud capabilities add haptics` and
-`pydrud permissions add camera`; do not hand-edit generated Android files.
+The starter counter needs no special Android permissions or capabilities.
+Add only the features your app uses with Python-first commands such as
+`pydrud capabilities add haptics` or `pydrud permissions add camera`; do not
+hand-edit generated Android files.
 
 ## PSS stylesheets
 
@@ -105,6 +104,11 @@ host; a separately installed Pydash preview client connects over the
 single-run authenticated LAN preview protocol. The client receives widget
 trees and patches, never project source code. No Android SDK, NDK, Gradle,
 adb, or embedded-Python build is part of this project.
+
+The starter screen is a focused, responsive **counter app** with a live total,
+decrement/reset controls, a floating action button, and a polished Pydrud
+Style Sheet (PSS) theme. Open `src/app/screens/playground.py` to shape the
+screen, or edit `src/app/theme.pss` to tune its visual design.
 
 ## Run it
 

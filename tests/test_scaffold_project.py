@@ -231,8 +231,11 @@ class TestGeneratedProject(unittest.TestCase):
                 for w in widgets
                 if w._widget_type == "Text"
             ]
-            self.assertIn("Pydrud Native Playground", texts)
-            self.assertIn("Native Android, powered by Python", texts)
+            self.assertIn("Count the things that matter.", texts)
+            self.assertIn("A little progress, one tap at a time.", texts)
+            self.assertIn("0", texts)
+            self.assertIsNotNone(tree.find_by_key("inc_btn"))
+            self.assertIsNotNone(tree.find_by_key("counter_panel"))
         finally:
             sys.path.remove(self.path("src"))
             for mod in [m for m in list(sys.modules) if m.startswith("app")]:
@@ -301,7 +304,7 @@ class TestGeneratedProject(unittest.TestCase):
             from app.main import main
 
             tester = AppTester(main, title="demo_app").start()
-            print("RENDERS:", tester.shows("Pydrud Native Playground"))
+            print("RENDERS:", tester.shows("Count the things that matter."))
             tester.stop()
         """)
         env = dict(os.environ, PYTHONPATH=src, PYTHONDONTWRITEBYTECODE="1")

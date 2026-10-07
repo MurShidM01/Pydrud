@@ -1,8 +1,7 @@
 """Small reusable UI components shared by the starter screens.
 
-Keep application-wide building blocks here. As the app grows, add focused
-modules beside this one (for example ``components/profile.py``) rather than
-turning a screen into a collection of local helper functions.
+The generated counter uses the responsive page wrapper below. The remaining
+helpers are kept as ready-to-reuse building blocks for screens you add later.
 """
 
 from pydrud import (
@@ -25,27 +24,53 @@ def section(title, key):
 
 
 def demo_button(label, icon, key, on_click):
-    """One playground action: a tonal button that always answers back."""
+    """One reusable tonal action button."""
     return Button(label, key=key, icon=icon, variant="tonal",
                   full_width=True).on_click(on_click)
 
 
 def page_body(key, children):
-    """A scrolling column with a readable responsive gutter."""
-    gutter = Responsive.value(phone=Spacing.GUTTER, tablet=Spacing.XXL)
+    """A padded, scrollable body with responsive gutters and a readable cap.
+
+    Phones use the available width. On tablets and desktops the body is
+    centred and capped, keeping the counter panel comfortable rather than
+    stretching it across the whole display. Extra room below the content
+    keeps the floating action button from covering the last control.
+    """
+    gutter = Responsive.value(
+        compact=Spacing.GUTTER,
+        medium=Spacing.XXL,
+        expanded=Spacing.XXL,
+        large=Spacing.HUGE,
+    )
     content = Column(
         key=f"{key}_scroll",
+        class_="page-content",
         scroll=True,
-        spacing=Spacing.LG,
+        spacing=Responsive.value(compact=Spacing.LG, medium=Spacing.XL,
+                                 expanded=Spacing.XXL),
         style={"padding": EdgeInsets(
-            left=gutter, right=gutter, top=Spacing.LG,
-            bottom=Spacing.HUGE).to_dict()},
+            left=gutter,
+            right=gutter,
+            top=Responsive.value(compact=Spacing.XL, medium=Spacing.XXL),
+            bottom=112,
+        ).to_dict()},
         children=children,
     )
     if not Responsive.is_tablet():
         return content
+
+    max_width = Responsive.value(
+        medium=600, expanded=720, large=840, xlarge=960,
+    )
     return Center(
         key=f"{key}_center",
-        child=Container(key=f"{key}_wrap", width=640, height="match",
-                        child=content),
+        expand=1,
+        child=Container(
+            key=f"{key}_wrap",
+            width=max_width,
+            height="match",
+            class_="responsive-content",
+            child=content,
+        ),
     )
