@@ -9,6 +9,8 @@ opt in with ``camera: true`` or simply by declaring the CAMERA permission.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import shutil
 import tempfile
@@ -23,6 +25,14 @@ CAMERA_DEPENDENCIES = (
     "androidx.camera:camera-core",
     "com.google.mlkit:barcode-scanning",
 )
+
+
+@contextlib.contextmanager
+def captured_stdout():
+    """Capture everything a command prints."""
+    stream = io.StringIO()
+    with contextlib.redirect_stdout(stream):
+        yield stream
 
 
 class TestCameraIsOptIn(unittest.TestCase):
@@ -165,7 +175,11 @@ class TestCameraIsOptIn(unittest.TestCase):
                   encoding="utf-8") as handle:
             handle.write('app_name: "lean"\npackage: "com.example.lean"\n'
                          'standalone: true\n')
-        self.assertTrue(sync_project(self.project, update_runtime=False))
+        with captured_stdout() as out:
+            self.assertTrue(sync_project(self.project, update_runtime=False))
 
         self.assertIn("androidx.camera:camera-core", self.gradle())
         self.assertIn("bindCameraPreview", self.activity())
+        # …and the sync says so, so the upgrade is not the only way to learn
+        # that those ~10 MB can be dropped.
+        self.assertIn("inherited from an older project", out.getvalue())

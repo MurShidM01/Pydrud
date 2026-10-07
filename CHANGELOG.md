@@ -50,7 +50,8 @@ All notable changes to Pydrud are documented here.
   bundled` and writes the resolved choice back to `pydrud.yaml`.
 * Projects generated before `camera:` existed keep the stack across the
   upgrade: an existing `build.gradle.kts` that already lists CameraX is the
-  default, so no app loses a camera it already uses.
+  default, so no app loses a camera it already uses. That `sync` prints a
+  hint pointing at `camera: false` so the inheritance is not invisible.
 * `pydrud analyze` now reports `CameraPreview` / `page.camera` use in a
   project whose APK does not bundle the camera stack, naming `camera: true`
   and `pydrud sync` as the fix. The bundled runtime under `src/pydrud` is

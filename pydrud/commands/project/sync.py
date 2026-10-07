@@ -118,9 +118,13 @@ def _sync_context(project_dir: str, found: dict) -> dict:
     # permission (`pydrud permissions add camera`). Projects generated
     # before this knob existed already ship CameraX, and an upgrade must
     # not silently take CameraPreview away from them — hence the fallback.
-    camera = _config_bool(
-        config, "camera", _camera_already_bundled(project_dir)) or "CAMERA" in (
+    camera_permission = "CAMERA" in (
         set(permissions) | set(generated_permissions))
+    camera = (_config_bool(config, "camera", _camera_already_bundled(project_dir))
+              or camera_permission)
+    # True when the stack is bundled for a reason the YAML does not state:
+    # an older project inherited it, so nobody knows it can be dropped.
+    camera_inherited = camera and "camera" not in config and not camera_permission
 
     abi_filters_list = _config_list(
         config, "abi_filters", ("arm64-v8a", "armeabi-v7a", "x86_64"))
@@ -182,6 +186,7 @@ def _sync_context(project_dir: str, found: dict) -> dict:
             config, "firebase", found.get("firebase", False)
             or os.path.isfile(os.path.join(project_dir, "google-services.json"))),
         "camera": camera,
+        "camera_inherited": camera_inherited,
         "shrink": "true" if _config_bool(config, "shrink", False) else "false",
         "pip_packages": Requirements(project_dir).requirement_strings(),
         "seed_color": seed,
@@ -416,6 +421,10 @@ def sync_project(project_dir: str, *, update_runtime: bool = True) -> bool:
     # Persist the resolved camera choice: the YAML always shows why the
     # (heavy) CameraX + ML Kit stack is — or is not — in the APK.
     set_scalar(project_dir, "camera", bool(ctx.get("camera", False)))
+    if ctx.get("camera_inherited"):
+        print(info("Camera stack inherited from an older project — set "
+                   "'camera: false' in pydrud.yaml and re-sync to drop "
+                   "~10 MB of CameraX/ML Kit from the APK."))
 
     persist_runtime(project_dir, descriptor.runtime)
     _stamp_version(project_dir)

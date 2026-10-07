@@ -1353,7 +1353,8 @@ default. Set `camera: true` — or simply declare the CAMERA permission with
 widget renders its fallback child and camera calls answer with an error
 explaining how to enable the stack, instead of a silent blank box. Projects
 generated before this setting existed keep the stack on their next `sync`, so
-upgrading Pydrud never removes a camera your app already uses.
+upgrading Pydrud never removes a camera your app already uses — that `sync`
+prints a hint telling you `camera: false` will drop it again.
 
 `pydrud.toml` stores the top-level `runtime` choice plus `[python.packages]`
 and `[theme]`. Its legacy `[app]` identity fields are kept in sync with YAML
