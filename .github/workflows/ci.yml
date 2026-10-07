@@ -69,9 +69,24 @@ jobs:
         run: python -m compileall -q pydrud tests tools
 
       # -ra summarises skips/xfails so a test silently dropping out is
-      # visible in the log instead of hiding behind a green tick.
+      # visible in the log instead of hiding behind a green tick. The log
+      # is teed so the failing-step output can also be rendered as a job
+      # summary: `pipefail` keeps a pytest failure failing the step.
       - name: Test
-        run: python -m pytest -ra -q
+        run: |
+          set -o pipefail
+          python -m pytest -ra -q 2>&1 | tee pytest.log
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Tests — CPython ${{ env.PYTHON_VERSION }}"
+            echo
+            echo '```'
+            tail -n 12 pytest.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   generated-java:
     name: Generated Android sources
