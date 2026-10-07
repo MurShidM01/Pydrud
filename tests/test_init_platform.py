@@ -7,7 +7,6 @@ path fix and the UI-queue startup race fix.
 
 from __future__ import annotations
 
-import os
 import sys
 
 import pytest
@@ -330,7 +329,6 @@ def test_preview_doctor_skips_ndk_cmake_and_checks_shell(
 
 @pytest.mark.skipif(not HAS_JAVALANG, reason="javalang not installed")
 def test_preview_java_parses_and_resolves():
-    import os as _os
     from jinja2 import Environment, PackageLoader
 
     from pydrud.android.javacheck import check_sources
