@@ -25,7 +25,6 @@ from pydrud.core.styles.parser import (
 from pydrud.core.styles.resolver import (
     resolve_styles,
     RendererProfile,
-    AndroidRendererProfile,
 )
 
 __all__ = [
@@ -46,5 +45,4 @@ __all__ = [
     "Diagnostic",
     "resolve_styles",
     "RendererProfile",
-    "AndroidRendererProfile",
 ]

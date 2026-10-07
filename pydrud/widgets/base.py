@@ -87,13 +87,19 @@ class Widget:
         self._auto_key: bool = key is None
         #: Unique identifier; auto-generated if omitted.
         self.key: str = key or _gen_key()
-        #: Style dictionary (see pydrud.widgets.styling for helpers).
+        #: Inline style dictionary (see pydrud.widgets.styling for helpers).
         self.style: dict = dict(style) if style else {}
-        #: CSS-like class names applied to this widget.
-        #: Stored as ``class_<name>`` keys in style for renderer access.
-        self.class_: list[str] = list(class_) if class_ else []
-        for cls in self.class_:
-            self.style[f"class_{cls}"] = True
+        #: CSS-like classes used by the Python-side stylesheet resolver only.
+        #: They are deliberately separate from ``style`` and never go on wire.
+        if isinstance(class_, str):
+            self.class_ = [name for name in class_.split() if name]
+        else:
+            self.class_ = list(class_) if class_ else []
+        if any(not isinstance(name, str) for name in self.class_):
+            raise TypeError("class_ entries must be strings")
+        #: PSS declarations are stored separately so inline style remains
+        #: authoritative and stylesheet edits do not leave stale values.
+        self._resolved_style: dict = {}
         #: Flex / weight factor inside a Row or Column.
         self.expand: Optional[int] = expand
         #: Whether the widget is visible.
@@ -177,15 +183,33 @@ class Widget:
     # ── style helpers ────────────────────────────────────────────────────
 
     def with_style(self, **props) -> "Widget":
-        """Merge extra style properties into this widget (chainable)."""
+        """Merge extra inline style properties into this widget (chainable)."""
         self.style.update(props)
         return self
+
+    def _effective_style(self) -> dict:
+        """Return PSS declarations overlaid by inline widget styles.
+
+        The PSS result is kept separately from ``style`` so an edited sheet
+        can remove a declaration cleanly and inline values always win.
+        """
+        return {**self._resolved_style, **self.style}
+
+    def _serialise_style(self):
+        """Return the effective style without Python-only class markers."""
+        style = {
+            key: value
+            for key, value in self._effective_style().items()
+            if not (isinstance(key, str) and key.startswith("class_"))
+        }
+        return _serialise_value(style)
 
     # ── serialisation ────────────────────────────────────────────────────
 
     def to_dict(self) -> dict:
         """Recursively serialise this widget and its children to a JSON-safe dict."""
         root = self.unwrap()
+        _merge_unwrapped_style(self, root)
         validate_tree_keys(root)
         return _serialise_tree(root)
 
@@ -230,7 +254,7 @@ class Widget:
         return {
             "type": self._widget_type,
             "key": self.key,
-            "style": _serialise_value(self.style),
+            "style": self._serialise_style(),
             "expand": self.expand,
             "visible": self.visible,
             "tooltip": self.tooltip,
@@ -320,6 +344,24 @@ class Widget:
         return f"{self._widget_type}(key={self.key!r})"
 
 
+def _merge_unwrapped_style(source: "Widget", rendered: "Widget") -> None:
+    """Carry a composite widget's effective style to its rendered root.
+
+    Composite wrappers may rebuild their implementation node inside
+    ``unwrap()``. Applying the wrapper's resolved/inline styles here keeps PSS
+    behavior intact without adding wrapper metadata to the wire tree.
+    """
+    if rendered is source:
+        return
+    inherited = {
+        key: value
+        for key, value in source._effective_style().items()
+        if not (isinstance(key, str) and key.startswith("class_"))
+    }
+    if inherited:
+        rendered.style = {**rendered.style, **inherited}
+
+
 def _serialise_tree(root: "Widget") -> dict:
     """Serialise a widget tree without recursion (PB-001).
 
@@ -342,6 +384,7 @@ def _serialise_tree(root: "Widget") -> dict:
         kids: list[Widget] = []
         for child in widget.children:
             rendered = child.unwrap()
+            _merge_unwrapped_style(child, rendered)
             kids.append(rendered)
             stack.append(rendered)
         children_of[id(widget)] = kids

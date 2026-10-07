@@ -123,13 +123,11 @@ class FloatingActionButton(Widget):
         overriding ``to_dict``, so a FAB nested in a deep tree stays
         iterative.
         """
-        from pydrud.widgets.base import _serialise_value
-
         self.rebuild()
         return {
             "type": "Container",
             "key": self.key,
-            "style": _serialise_value(self.style),
+            "style": self._serialise_style(),
             "expand": self.expand,
             "visible": self.visible,
             "tooltip": self.tooltip,

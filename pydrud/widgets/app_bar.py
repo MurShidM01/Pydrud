@@ -148,7 +148,7 @@ class AppBar(Widget):
             # Hairline separator instead of a shadow — the modern look.
             bar_style["border"] = Border.only(
                 bottom=True, color=Theme.outline, width=1).to_dict()
-        bar_style.update(self.style)
+        bar_style.update(self._effective_style())
 
         return Container(
             key=f"{self.key}._bar",
