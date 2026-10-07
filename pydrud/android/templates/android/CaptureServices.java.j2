@@ -36,6 +36,13 @@ public class CaptureServices {
 
     /** Request code for the speech-recognition activity. */
     private static final int SPEECH_REQUEST = 9701;
+
+{% if not (camera | default(false)) %}
+    /** Answered when a camera command reaches a build without the camera stack. */
+    private static final String CAMERA_DISABLED =
+        "camera is not bundled in this build; set camera: true in pydrud.yaml "
+        + "and run 'pydrud sync'";
+{% endif %}
     private String speechRequestId = "";
 
     private android.location.LocationListener locationListener;
@@ -50,11 +57,22 @@ public class CaptureServices {
         final String requestId = msg.optString("request_id", "");
         try {
             switch (cmd) {
+{% if camera | default(false) %}
                 case "camera_flash":       cameraFlash(requestId, msg); return true;
                 case "camera_zoom":        cameraZoom(requestId, msg); return true;
                 case "camera_record":      cameraRecord(requestId, msg); return true;
                 case "camera_record_stop": cameraRecordStop(requestId); return true;
                 case "camera_scan":        cameraScan(requestId, msg); return true;
+{% else %}
+                // The camera stack (CameraX + ML Kit) is opt-in; without it
+                // these commands are answered with an actionable error rather
+                // than being reported as unknown.
+                case "camera_flash":       fail(requestId, CAMERA_DISABLED); return true;
+                case "camera_zoom":        fail(requestId, CAMERA_DISABLED); return true;
+                case "camera_record":      fail(requestId, CAMERA_DISABLED); return true;
+                case "camera_record_stop": fail(requestId, CAMERA_DISABLED); return true;
+                case "camera_scan":        fail(requestId, CAMERA_DISABLED); return true;
+{% endif %}
                 case "speech_listen":      speechListen(requestId, msg); return true;
                 case "color_picker":       colorPicker(requestId, msg); return true;
                 case "location_watch":     locationWatch(requestId, msg); return true;
@@ -93,6 +111,7 @@ public class CaptureServices {
         bridge.sendEvent("result", "", data);
     }
 
+{% if camera | default(false) %}
     // ── camera extras ────────────────────────────────────────────────────
 
     private void cameraFlash(final String requestId, final JSONObject msg) {
@@ -164,6 +183,7 @@ public class CaptureServices {
         activity.setScanning(key, enabled);
         reply(requestId, enabled);
     }
+{% endif %}
 
     // ── speech recognition ───────────────────────────────────────────────
 

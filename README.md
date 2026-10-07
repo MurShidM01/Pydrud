@@ -1322,6 +1322,7 @@ capabilities:
   - "notifications"
 firebase: false
 shrink: false
+camera: false
 python_version: "3.11"
 framework_version: "2.1.0"
 protocol_version: 2
@@ -1342,6 +1343,17 @@ updates YAML and the generated manifest: `pydrud capabilities add contacts` or
 answers with that same suggestion — the camera permission is always a
 deliberate declaration.) Runtime dangerous
 permissions still require `page.permissions.request(...)` and user consent.
+
+`camera:` controls whether the **camera stack** is bundled. CameraX and ML Kit
+together ship roughly 10 MB of native libraries (`libimage_processing_util_jni.so`
+and `libbarhopper_v3.so`) into every APK, so they are opt-in and off by
+default. Set `camera: true` — or simply declare the CAMERA permission with
+`pydrud permissions add camera` — and run `pydrud sync` to bundle them for
+`CameraPreview`, `page.camera` and barcode/QR scanning. Without them the
+widget renders its fallback child and camera calls answer with an error
+explaining how to enable the stack, instead of a silent blank box. Projects
+generated before this setting existed keep the stack on their next `sync`, so
+upgrading Pydrud never removes a camera your app already uses.
 
 `pydrud.toml` stores the top-level `runtime` choice plus `[python.packages]`
 and `[theme]`. Its legacy `[app]` identity fields are kept in sync with YAML
@@ -1370,8 +1382,10 @@ as `pydrud analyze --json` remains plain JSON.
 | `pydrud init android --standalone` | Add the Android platform with embedded Python (offline APK) |
 | `pydrud dev [project_dir]` | Run host Python, start authenticated LAN preview, print QR/URI; no ADB |
 | `pydrud dev --host <ip> --port <port>` | Configure preview listener (`--connect-host` overrides the QR address) |
-| `pydrud build` / `pydrud build --release` | Build a debug/release APK (Android platform only) |
-| `pydrud run` | Build + install + launch on Android (Android platform only) |
+| `pydrud build` / `pydrud build --debug` | Build a debuggable debug APK (debug is the default variant) |
+| `pydrud build --release` | Build a release APK (Android platform only) |
+| `pydrud run` / `pydrud run --debug` | Build + install + launch the debug APK on Android |
+| `pydrud run --release` | Build + install + launch a release APK on Android |
 | `pydrud watch` | Standalone-only Android Hot Reload runner; use `pydrud dev` otherwise |
 | `pydrud devices` | List connected Android devices (`adb devices -l`) |
 | `pydrud analyze` | Static analysis of Python UI code and PSS stylesheets (runtime-aware) |

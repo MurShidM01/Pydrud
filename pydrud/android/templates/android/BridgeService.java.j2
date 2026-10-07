@@ -36,6 +36,13 @@ public class BridgeService {
     private static final int PORT = 8595;
     private static final int PROTOCOL_VERSION = {{ protocol_version | default(2) }};
     private static final int MAX_FRAME_BYTES = 2 * 1024 * 1024;
+{% if not (camera | default(false)) %}
+
+    /** Answered when a camera command reaches a build without the camera stack. */
+    private static final String CAMERA_DISABLED =
+        "camera is not bundled in this build; set camera: true in pydrud.yaml "
+        + "and run 'pydrud sync'";
+{% endif %}
 
     private final {{ app_name }}Activity activity;
     private final FrameLayout rootView;
@@ -399,6 +406,7 @@ public class BridgeService {
                 case "route_transition": activity.setRouteTransition(
                                             json.optString("transition", "fade"),
                                             json.optInt("duration", 220)); break;
+{% if camera | default(false) %}
                 case "camera_start":    activity.startCamera(
                                             json.optString("key", ""),
                                             json.optString("facing", "back"));
@@ -410,6 +418,15 @@ public class BridgeService {
                                                 ? "back" : "front");
                                         replyOk(json); break;
                 case "camera_capture":  handleCapture(json); break;
+{% else %}
+                // The camera stack (CameraX + ML Kit) is opt-in; without it
+                // these commands are answered with an actionable error rather
+                // than being reported as unknown.
+                case "camera_start":    replyError(json, CAMERA_DISABLED); break;
+                case "camera_stop":     replyError(json, CAMERA_DISABLED); break;
+                case "camera_switch":   replyError(json, CAMERA_DISABLED); break;
+                case "camera_capture":  replyError(json, CAMERA_DISABLED); break;
+{% endif %}
                 // Ack for a `job` event we dispatched to Python while the app
                 // was in the foreground — nothing to do, but it must not be
                 // logged as an unknown command.
@@ -477,6 +494,7 @@ public class BridgeService {
         sendEvent("result", "", data);
     }
 
+{% if camera | default(false) %}
     private void handleCapture(final JSONObject json) {
         final String requestId = json.optString("request_id", "");
         activity.runOnUiThread(() -> activity.capturePhoto(
@@ -494,6 +512,7 @@ public class BridgeService {
                 sendEvent("result", "", data);
             }));
     }
+{% endif %}
 
     private void handleEndRefresh() {
         activity.runOnUiThread(() -> activity.endRefresh());

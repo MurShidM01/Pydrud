@@ -15,6 +15,7 @@ Usage::
 from __future__ import annotations
 import ast
 import os
+import re
 
 # The one list of valid style keys, shared with the .pss engine. Do not
 # copy it here: a second copy silently drifts out of date.
@@ -131,6 +132,7 @@ def run_analysis(path: str = "src", *, runtime: str | None = None) -> list[dict]
         }]
 
     issues.extend(_check_shadowing_issues(src_dir))
+    issues.extend(_check_camera_optin(src_dir))
 
     for root, _dirs, files in os.walk(src_dir):
         # Skip __pycache__ and virtual environments.
@@ -782,6 +784,89 @@ def _check_shadowing_issues(src_dir: str) -> list[dict]:
                     "message": f"Package shadowing: directory '{dir_path}' shadows module '{py_path}'. "
                                "Python import resolution prioritizes package directories over modules with the same name.",
                 })
+    return issues
+
+
+# ── Check 11b: app code that needs an unbundled camera stack ────────────────
+
+
+#: Source patterns that only work when the camera stack is bundled.
+_CAMERA_USE = re.compile(r"\bCameraPreview\s*\(|\bpage\s*\.\s*camera\b")
+
+
+def _project_root_of(src_dir: str) -> str | None:
+    """The Pydrud project directory containing *src_dir*, if there is one."""
+    current = os.path.abspath(src_dir)
+    while True:
+        if os.path.isfile(os.path.join(current, "pydrud.yaml")):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+
+
+def _check_camera_optin(src_dir: str) -> list[dict]:
+    """Report ``CameraPreview``/``page.camera`` use without the camera stack.
+
+    CameraX and ML Kit are opt-in because they add ~10 MB of native
+    libraries to every APK. A project that uses them but never enabled
+    ``camera:`` builds fine and then shows a placeholder at runtime, which
+    is a confusing way to discover the setting — so say it here instead.
+    """
+    root = _project_root_of(src_dir)
+    if root is None:
+        return []
+
+    from pydrud.commands.project import (
+        _camera_already_bundled, android_platform_present,
+    )
+    from pydrud.commands.project.config import _config_bool
+    from pydrud.commands.project_config import load_project_config
+
+    if not android_platform_present(root):
+        return []  # Pydash renders through the client app, not this APK.
+
+    config = load_project_config(root)
+    if _config_bool(config, "camera", _camera_already_bundled(root)):
+        return []
+    permissions = config.get("permissions")
+    if isinstance(permissions, list) and any(
+            str(name).strip().upper() == "CAMERA" for name in permissions):
+        return []
+
+    issues: list[dict] = []
+    for folder, dirs, files in os.walk(src_dir):
+        dirs[:] = [d for d in dirs if d not in {"__pycache__", ".venv", "venv"}]
+        # ``src/pydrud`` is the framework copy bundled into the APK: it
+        # defines CameraPreview rather than using it, so it is not app code.
+        if os.path.relpath(folder, src_dir).split(os.sep)[:1] == ["pydrud"]:
+            continue
+        for name in sorted(files):
+            if not name.endswith(".py"):
+                continue
+            path = os.path.join(folder, name)
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    lines = handle.readlines()
+            except OSError:
+                continue
+            for number, line in enumerate(lines, start=1):
+                if line.lstrip().startswith("#"):
+                    continue
+                if _CAMERA_USE.search(line):
+                    issues.append({
+                        "file": os.path.relpath(path, src_dir),
+                        "line": number,
+                        "severity": _SEVERITY_WARNING,
+                        "message": (
+                            "camera use without the camera stack: this build "
+                            "does not bundle CameraX/ML Kit, so the widget "
+                            "shows its fallback and page.camera calls fail. "
+                            "Set 'camera: true' in pydrud.yaml (or run "
+                            "'pydrud permissions add camera'), then "
+                            "'pydrud sync'."),
+                    })
     return issues
 
 

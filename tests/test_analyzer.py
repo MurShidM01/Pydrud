@@ -1,10 +1,17 @@
 """Static analyzer: findings, de-duplication and registry drift."""
 
+import contextlib
 import inspect
+import io
+import os
+import shutil
+import tempfile
 import unittest
 
 import pydrud
-from pydrud.commands.analyzer import _WIDGET_CLASSES, _analyze_file
+from pydrud.commands.analyzer import _WIDGET_CLASSES, _analyze_file, run_analysis
+from pydrud.commands.project import create_project
+from pydrud.commands.project_config import set_scalar
 from pydrud.widgets.base import Widget
 
 NESTED = """
@@ -93,6 +100,65 @@ class TestHostOnlyImports(unittest.TestCase):
                   "import pydrud.icons\n"
                   "from pydrud.core.diff import TreeDiff\n")
         self.assertEqual(_analyze_file(source, "x.py"), [])
+
+
+class TestCameraOptInAnalysis(unittest.TestCase):
+    """``pydrud analyze`` catches camera use the APK cannot serve."""
+
+    SCREEN = ("from pydrud import CameraPreview, Column\n\n"
+              "def home_screen(page):\n"
+              "    return Column(children=[CameraPreview(key=\"cam\")])\n")
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="pydrud-analyze-camera-")
+        self.cwd = os.getcwd()
+        os.chdir(self.tmp)
+        create_project("camapp", org="com.example", runtime="chaquopy")
+        self.project = os.path.join(self.tmp, "camapp")
+        self.src = os.path.join(self.project, "src")
+        with open(os.path.join(self.src, "app", "screens", "home.py"), "w",
+                  encoding="utf-8") as handle:
+            handle.write(self.SCREEN)
+
+    def tearDown(self):
+        os.chdir(self.cwd)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def camera_issues(self):
+        return [issue for issue in run_analysis(self.src, runtime="chaquopy")
+                if "camera stack" in issue["message"]]
+
+    def test_camera_use_without_the_stack_is_reported(self):
+        issues = self.camera_issues()
+        self.assertEqual(len(issues), 1, issues)
+        self.assertEqual(issues[0]["file"], os.path.join("app", "screens",
+                                                         "home.py"))
+        self.assertEqual(issues[0]["severity"], "warning")
+        self.assertIn("camera: true", issues[0]["message"])
+
+    def test_enabling_the_stack_clears_the_warning(self):
+        set_scalar(self.project, "camera", True)
+        self.assertEqual(self.camera_issues(), [])
+
+    def test_the_bundled_runtime_is_not_reported(self):
+        """``src/pydrud`` *defines* CameraPreview; it does not use it."""
+        with open(os.path.join(self.src, "app", "screens", "home.py"), "w",
+                  encoding="utf-8") as handle:
+            handle.write("from pydrud import Text\n")
+        self.assertEqual(self.camera_issues(), [])
+
+    def test_pydash_projects_are_never_reported(self):
+        """Pydash renders through the client app, which ships a camera."""
+        pydash = os.path.join(self.tmp, "preview")
+        with contextlib.redirect_stdout(io.StringIO()):
+            create_project("preview", org="com.example")
+        src = os.path.join(pydash, "src")
+        with open(os.path.join(src, "app", "screens", "home.py"), "w",
+                  encoding="utf-8") as handle:
+            handle.write(self.SCREEN)
+        issues = [issue for issue in run_analysis(src, runtime="pydash")
+                  if "camera stack" in issue["message"]]
+        self.assertEqual(issues, [])
 
 
 class TestWidgetRegistryDrift(unittest.TestCase):

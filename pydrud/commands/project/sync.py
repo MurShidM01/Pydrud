@@ -9,7 +9,7 @@ import re
 import sys
 
 from pydrud.compatibility import COMPATIBILITY, HOST_COMPATIBILITY
-from pydrud.commands.project_config import load_project_config
+from pydrud.commands.project_config import load_project_config, set_scalar
 from pydrud.runtime.runtime import Runtime, persist_runtime, resolve_runtime
 from pydrud.utils import tui
 from pydrud.utils.colors import fail, info
@@ -23,6 +23,24 @@ from pydrud.commands.project.paths import (
     _camel, _JAVA_TEMPLATES, _normalise_color, _slugify, _version, _write_template,
 )
 from pydrud.commands.project.templates import _render_managed_android
+
+
+def _camera_already_bundled(project_dir: str) -> bool:
+    """Whether an existing generated Android project already ships CameraX.
+
+    Every project generated before the camera stack became opt-in bundled it
+    unconditionally. Syncing such a project with a newer Pydrud must not
+    silently break its ``CameraPreview`` widgets and ``page.camera`` calls,
+    so "already there" is the default for them. New projects have no
+    ``build.gradle.kts`` yet (or one without CameraX) and start lean.
+    """
+    gradle = os.path.join(project_dir, "android", "app", "build.gradle.kts")
+    try:
+        with open(gradle, encoding="utf-8") as handle:
+            return "androidx.camera" in handle.read()
+    except OSError:
+        return False
+
 
 def _sync_context(project_dir: str, found: dict) -> dict:
     """Resolve the complete Android template context from ``pydrud.yaml``."""
@@ -92,6 +110,18 @@ def _sync_context(project_dir: str, found: dict) -> dict:
     )) if capability_names else set()
     permissions = [name for name in permissions if name not in generated_permissions]
 
+    # Camera stack (CameraX + ML Kit barcode scanning) is opt-in. Those
+    # libraries ship ~10 MB of native code that every APK would otherwise
+    # carry — and that the NDK stripper then complains about — so they are
+    # only bundled when the project actually asks for a camera: either
+    # explicitly with `camera: true`, or implicitly by declaring the CAMERA
+    # permission (`pydrud permissions add camera`). Projects generated
+    # before this knob existed already ship CameraX, and an upgrade must
+    # not silently take CameraPreview away from them — hence the fallback.
+    camera = _config_bool(
+        config, "camera", _camera_already_bundled(project_dir)) or "CAMERA" in (
+        set(permissions) | set(generated_permissions))
+
     abi_filters_list = _config_list(
         config, "abi_filters", ("arm64-v8a", "armeabi-v7a", "x86_64"))
     if not abi_filters_list:
@@ -151,6 +181,7 @@ def _sync_context(project_dir: str, found: dict) -> dict:
         "firebase": _config_bool(
             config, "firebase", found.get("firebase", False)
             or os.path.isfile(os.path.join(project_dir, "google-services.json"))),
+        "camera": camera,
         "shrink": "true" if _config_bool(config, "shrink", False) else "false",
         "pip_packages": Requirements(project_dir).requirement_strings(),
         "seed_color": seed,
@@ -382,12 +413,17 @@ def sync_project(project_dir: str, *, update_runtime: bool = True) -> bool:
     if update_runtime and standalone:
         _bundle_pydrud_source(project_dir)
 
+    # Persist the resolved camera choice: the YAML always shows why the
+    # (heavy) CameraX + ML Kit stack is — or is not — in the APK.
+    set_scalar(project_dir, "camera", bool(ctx.get("camera", False)))
+
     persist_runtime(project_dir, descriptor.runtime)
     _stamp_version(project_dir)
     print(tui.render_summary(
         "Project synchronized",
         (("Java classes", count), ("Package", ctx["package"]),
-         ("Runtime", "updated" if update_runtime else "kept")),
+         ("Runtime", "updated" if update_runtime else "kept"),
+         ("Camera", "bundled" if ctx.get("camera") else "not bundled")),
     ))
     print(tui.render_next_steps((("pydrud run", "rebuild and launch"),)))
     return True

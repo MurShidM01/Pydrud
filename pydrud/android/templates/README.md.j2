@@ -58,6 +58,12 @@ Add only the features your app uses with Python-first commands such as
 `pydrud capabilities add haptics` or `pydrud permissions add camera`; do not
 hand-edit generated Android files.
 
+CameraX and ML Kit (`CameraPreview`, `page.camera`, barcode/QR scanning) are
+opt-in because they add roughly 10 MB of native libraries to the APK. They
+are off until you set `camera: true` in `pydrud.yaml` — or just run
+`pydrud permissions add camera` — and `pydrud sync`. Until then the widget
+renders its fallback child and camera calls report how to enable them.
+
 ## PSS stylesheets
 
 `src/app/theme.pss` is the starter stylesheet: its classes are attached in
@@ -91,6 +97,7 @@ for syntax and examples.
 | `pydrud pip add requests` | add a Python package to the APK build |
 | `pydrud permissions add camera` | add a permission to the manifest |
 | `pydrud capabilities add haptics` | enable generated feature bundles |
+| `pydrud build --debug` | build a debuggable debug APK (the default variant) |
 | `pydrud build --release` | build a release APK |
 | `pydrud doctor` | check your Android toolchain |
 {% else %}

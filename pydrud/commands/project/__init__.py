@@ -35,8 +35,9 @@ from pydrud.commands.project.platforms import (
 )
 from pydrud.commands.project.scaffold import create_project
 from pydrud.commands.project.sync import (
-    _discover_project, _remove_generated_java, _stamp_version,
-    _sync_context, _sync_generated_metadata, _sync_toml_identity, sync_project,
+    _camera_already_bundled, _discover_project, _remove_generated_java,
+    _stamp_version, _sync_context, _sync_generated_metadata,
+    _sync_toml_identity, sync_project,
 )
 from pydrud.commands.project.templates import (
     _render_app_package, _render_managed_android, _render_native_layer,
@@ -56,6 +57,7 @@ __all__ = [
     "_config_list", "_validate_package", "_toml_section", "_project_seed",
     "_gradle_value", "_manifest_permissions",
     "_render_native_layer", "_render_app_package", "_render_managed_android",
+    "_camera_already_bundled",
     "bundled_runtime_size_kb", "_strip_runtime_comments", "_bundle_pydrud_source",
     "_copy_icon_resources",
     "_sync_context", "_remove_generated_java", "_sync_generated_metadata",

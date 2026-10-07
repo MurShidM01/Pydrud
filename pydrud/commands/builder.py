@@ -25,15 +25,24 @@ class Builder:
 
     # ── public ────────────────────────────────────────────────────────────
 
-    def build(self, release: bool = False) -> str | None:
-        """Run the Gradle build and return the output APK path."""
+    def build(self, release: bool = False, debug: bool = False) -> str | None:
+        """Run the Gradle build and return the output APK path.
+
+        ``--debug`` is the default variant; it exists so scripts and CI logs
+        can state the intent instead of relying on the absence of
+        ``--release``.
+        """
         started = time.perf_counter()
         variant_name = "release" if release else "debug"
+        details: list[tuple[str, str]] = [("Variant", variant_name)]
+        if debug and not release:
+            details.append(("Debug", "debuggable APK (default variant)"))
+        details.append(("Project", self.root))
         print(tui.render_command_header(
             "build",
             f"Building {os.path.basename(os.path.abspath(self.root))}",
             subtitle="Compiling Python and Android sources into a native APK",
-            details=(("Variant", variant_name), ("Project", self.root)),
+            details=tuple(details),
         ))
 
         gradlew = self._gradlew()
@@ -106,7 +115,7 @@ class Builder:
         return None
 
     def run(self, device: str | None = None, release: bool = False,
-            watch: bool = False, interactive: bool = True):
+            watch: bool = False, interactive: bool = True, debug: bool = False):
         """Build, install, launch the app and start interactive Hot Reload (like ``flutter run``).
 
         Preview shells (``pydrud init android`` without ``--standalone``)
@@ -117,7 +126,7 @@ class Builder:
         from pydrud.commands.project import android_is_standalone
 
         if not android_is_standalone(self.root):
-            apk = self.build(release=release)
+            apk = self.build(release=release, debug=debug)
             if not apk or not self._check_adb():
                 return 1
             if not self._install_and_launch(apk, device):
@@ -357,21 +366,26 @@ class Builder:
 
         config = self._load_config(self.root)
 
-        # buildPython: an explicit PYDRUD_PYTHON wins, otherwise pick an
-        # interpreter matching the app's Python. If only a different minor
-        # version is installed, disable source bytecode compilation instead
-        # of letting Chaquopy print an alarming (but harmless) warning.
+        # buildPython only exists for standalone (Chaquopy) targets: a
+        # preview shell ships no interpreter at all, so probing — and
+        # reporting — a Python version there is pure noise.
         from pydrud.commands.project import (
             APP_PYTHON_VERSION, _detect_build_python, _python_version_of,
+            android_is_standalone,
         )
-        target = config.get("python_version", "") or APP_PYTHON_VERSION
-        if not os.environ.get("PYDRUD_PYTHON"):
-            env["PYDRUD_PYTHON"] = _detect_build_python(target)
-        selected_python = env.get("PYDRUD_PYTHON", "")
-        selected_version = _python_version_of(selected_python)
-        env["PYDRUD_COMPILE_PYC"] = (
-            "true" if selected_version == target else "false"
-        )
+        if android_is_standalone(self.root):
+            # An explicit PYDRUD_PYTHON wins, otherwise pick an interpreter
+            # matching the app's Python. If only a different minor version
+            # is installed, disable source bytecode compilation instead of
+            # letting Chaquopy print an alarming (but harmless) warning.
+            target = config.get("python_version", "") or APP_PYTHON_VERSION
+            if not os.environ.get("PYDRUD_PYTHON"):
+                env["PYDRUD_PYTHON"] = _detect_build_python(target)
+            selected_python = env.get("PYDRUD_PYTHON", "")
+            selected_version = _python_version_of(selected_python)
+            env["PYDRUD_COMPILE_PYC"] = (
+                "true" if selected_version == target else "false"
+            )
 
         # NDK version: pydrud.yaml > SDK auto-detection > hardcoded fallback.
         ndk_version = config.get("ndk", "")
