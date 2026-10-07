@@ -12,7 +12,7 @@ import unittest
 from unittest import mock
 
 from pydrud import App, State, Text
-from pydrud.core.devserver import DevServer
+from pydrud.platforms.android.devserver import DevServer
 from pydrud.runtime.navigation import Router
 from pydrud.utils import tui
 from pydrud.commands.devrunner import DevRunner, _KeyReader

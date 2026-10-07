@@ -1,7 +1,7 @@
 """Persistent logical UI elements.
 
 An Element is the runtime identity between a declarative Python Widget and the
-native Android View which materializes it.  Elements survive widget rebuilds
+native view which materializes it. Elements survive widget rebuilds
 when identity is preserved, allowing native state to remain intact.
 """
 
@@ -45,7 +45,7 @@ class Element:
 class ElementTree:
     """Persistent keyed element registry.
 
-    The tree is deliberately independent from the Android transport so tests
+    The tree is deliberately independent from any renderer transport so tests
     can validate identity/reuse without requiring a device.
     """
 

@@ -1,18 +1,20 @@
 """
-A fake Android device for end-to-end testing of the Pydrud bridge.
+A platform-neutral reference renderer for end-to-end testing of the Pydrud
+runtime bridge.
 
-``FakeDevice`` speaks exactly the protocol the Java ``BridgeService`` /
-``ViewFactory`` implement:
+``FakeRenderer`` speaks the renderer protocol used by a client:
 
-* it listens on 127.0.0.1 and accepts the Python app's connection;
-* it sends a ``ready`` event with screen metrics, and ``rotate()`` /
-  ``resize()`` / ``show_keyboard()`` replay the ``metrics`` events a real
-  device sends when the window changes;
+* it listens on a local socket and accepts the Python app's connection;
+* it sends a ``ready`` event with metrics and explicitly advertised optional
+  capabilities;
 * it applies ``full_render`` and ``render`` (patch) commands to an in-memory
-  mirror of the native view tree, using the same semantics as
-  ``ViewFactory.applyPatch``;
+  tree, using the protocol's keyed-patch semantics;
 * it can push ``click`` / ``change`` / ``back`` / ``lifecycle`` events back
   into the app and records every command it received.
+
+``FakeDevice`` remains as a backwards-compatible alias for older tests and
+applications. This local protocol test helper does not implement Pydash's
+authenticated LAN-preview handshake.
 
 That makes it possible to run a complete Pydrud app in CI and assert on what
 the device would actually display.
@@ -100,11 +102,22 @@ def _fill_node(node: "RenderedNode", data: dict) -> None:
     node.parent = None
 
 
-class FakeDevice:
-    """A test double for the Android side of the bridge."""
+class FakeRenderer:
+    """A protocol-v2 test renderer with configurable client capabilities."""
+
+    DEFAULT_CAPABILITIES = {
+        "native_view": True,
+        "services": [
+            "dialog", "storage", "files", "clipboard", "share", "permissions",
+            "notifications", "location", "device", "haptics", "secure",
+            "background", "push", "shortcuts", "camera", "sensors",
+            "bluetooth", "nfc", "biometrics", "audio", "system_theme",
+        ],
+    }
 
     def __init__(self, host: str = "127.0.0.1", port: int = 0,
-                 width: int = 400, height: int = 800, density: float = 2.0):
+                 width: int = 400, height: int = 800, density: float = 2.0,
+                 capabilities: Optional[dict] = None):
         self.host = host
         self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -115,6 +128,8 @@ class FakeDevice:
         self.width = width
         self.height = height
         self.density = density
+        advertised = self.DEFAULT_CAPABILITIES if capabilities is None else capabilities
+        self.capabilities = dict(advertised)
 
         self.root: Optional[RenderedNode] = None
         self.commands: list[dict] = []
@@ -136,7 +151,7 @@ class FakeDevice:
 
     # ── lifecycle ─────────────────────────────────────────────────────────
 
-    def start(self) -> "FakeDevice":
+    def start(self) -> "FakeRenderer":
         self._running = True
         self._thread = threading.Thread(target=self._serve, daemon=True,
                                         name="fake-device")
@@ -154,7 +169,7 @@ class FakeDevice:
         if self._thread is not None:
             self._thread.join(timeout=2)
 
-    def __enter__(self) -> "FakeDevice":
+    def __enter__(self) -> "FakeRenderer":
         return self.start()
 
     def __exit__(self, *exc) -> None:
@@ -244,7 +259,7 @@ class FakeDevice:
             },
         })
 
-    def on_command(self, cmd: str, value: Any) -> "FakeDevice":
+    def on_command(self, cmd: str, value: Any) -> "FakeRenderer":
         """Answer ``cmd`` with *value* (or ``value(msg)`` when callable)."""
         self.responders[cmd] = value
         return self
@@ -345,7 +360,7 @@ class FakeDevice:
 
     def _send(self, payload: dict) -> None:
         if self._conn is None:
-            raise RuntimeError("FakeDevice: no app connected")
+            raise RuntimeError("FakeRenderer: no app connected")
         self._conn.sendall((json.dumps(payload) + "\n").encode("utf-8"))
         self.events_sent += 1
 
@@ -357,6 +372,7 @@ class FakeDevice:
                 "width": self.width,
                 "height": self.height,
                 "density": self.density,
+                "capabilities": self.capabilities,
                 "status_bar_height": 24,
                 "navigation_bar_height": 16,
                 "text_scale": 1.0,
@@ -526,12 +542,23 @@ class FakeDevice:
         return self._activity_finished
 
 
-def run_app(app, device: FakeDevice) -> threading.Thread:
+# Preserve the original public name while exposing the neutral renderer name.
+FakeDevice = FakeRenderer
+
+
+def run_app(app, device: FakeRenderer) -> threading.Thread:
     """Run ``app.run()`` on a background thread connected to *device*."""
     app.host = device.host
     app.port = device.port
-    thread = threading.Thread(target=app.run, kwargs={"max_retries": 50},
-                              daemon=True, name="pydrud-app")
+    # The reference renderer exercises only the neutral bridge contract; it
+    # does not start Android's on-device diagnostics socket or log adapter.
+    app._dev_server_enabled = False
+    thread = threading.Thread(
+        target=app.run,
+        kwargs={"max_retries": 50, "use_platform_logging": False},
+        daemon=True,
+        name="pydrud-app",
+    )
     thread.start()
     if not device.wait_connected(timeout=5):
         raise AssertionError("app never connected to the fake device")
@@ -541,7 +568,7 @@ def run_app(app, device: FakeDevice) -> threading.Thread:
 class AppTester:
     """A one-liner harness for testing a whole app.
 
-    ``AppTester`` boots a :class:`FakeDevice`, runs the app against it on a
+    ``AppTester`` boots a :class:`FakeRenderer`, runs the app against it on a
     background thread, and gives you intention-revealing helpers (``tap``,
     ``type_in``, ``shows``) instead of raw keys and sockets::
 
@@ -556,14 +583,18 @@ class AppTester:
     """
 
     def __init__(self, target=None, *, app=None, width: int = 400,
-                 height: int = 800, density: float = 2.0, title: str = "Test"):
+                 height: int = 800, density: float = 2.0, title: str = "Test",
+                 capabilities: Optional[dict] = None):
         if target is None and app is None:
             raise ValueError("AppTester needs target= or app=")
-        self.device = FakeDevice(width=width, height=height, density=density)
+        self.device = FakeRenderer(
+            width=width, height=height, density=density,
+            capabilities=capabilities,
+        )
         if app is None:
             from pydrud.runtime.app import App
 
-            app = App(target=target, title=title)
+            app = App(target=target, title=title, dev_server=False)
         self.app = app
         self._thread: Optional[threading.Thread] = None
 
@@ -725,7 +756,7 @@ class AppTester:
         """Return the rendered node for *key*, or ``None`` if absent.
 
         This is the key-based counterpart to :attr:`texts` and mirrors the
-        lookup helper available on ``RenderedNode``/``FakeDevice``.
+        lookup helper available on ``RenderedNode``/``FakeRenderer``.
         """
         return self.node(key)
 

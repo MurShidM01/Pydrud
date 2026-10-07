@@ -93,10 +93,10 @@ def _config_list(config: dict, key: str, default=()) -> list[str]:
 _VALID_RUNTIMES = ("pydash", "chaquopy")
 
 
-def _config_runtime(config: dict, key: str = "runtime", default: str = "chaquopy") -> str:
+def _config_runtime(config: dict, key: str = "runtime", default: str = "pydash") -> str:
     """Read and validate the ``runtime`` key from project config.
 
-    Missing key defaults to ``"chaquopy"`` (legacy behaviour); unknown
+    Missing key defaults to the toolchain-free ``"pydash"`` runtime; unknown
     values raise :class:`ProjectConfigError`.
     """
     value = config.get(key)

@@ -260,6 +260,9 @@ def rejection_message(error: PreviewProtocolError) -> dict[str, Any]:
 def _normalize_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
     """Bound client-controlled dimensions before they reach layout code."""
     values = dict(metrics)
+    if "platform_version" not in values and "sdk" in values:
+        # Compatibility for preview clients using the pre-neutral metric name.
+        values["platform_version"] = values["sdk"]
     if "width" not in values and "width_dp" in values:
         values["width"] = values["width_dp"]
     if "height" not in values and "height_dp" in values:
@@ -294,7 +297,6 @@ def _normalize_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
         "keyboard_height": (0.0, 100_000.0, None),
         "refresh_rate": (1.0, 1_000.0, None),
         "smallest_width": (0.0, 100_000.0, None),
-        "sdk": (0.0, 10_000.0, None),
     }
     normalized: dict[str, Any] = {}
     for name, (minimum, maximum, default) in specs.items():
@@ -317,7 +319,7 @@ def _normalize_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
         normalized[name] = number
 
     normalized["dark"] = bool(values.get("dark", False))
-    for name in ("orientation", "ui_mode", "model"):
+    for name in ("orientation", "ui_mode", "model", "platform_version"):
         if name in values:
             normalized[name] = str(values[name])[:100]
     return normalized

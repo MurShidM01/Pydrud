@@ -7,11 +7,12 @@ Everything a native event can call back into lives here; split out of
 
 from __future__ import annotations
 
+import sys
 import traceback
 from typing import TYPE_CHECKING, Callable, Optional
 
-from pydrud.core.logcat import log_exception
 from pydrud.core.results import ResultCancelled
+from pydrud.runtime._capabilities import replace_unsupported_widgets
 from pydrud.widgets import Widget, assign_stable_keys, validate_tree_keys
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -164,9 +165,12 @@ class LifecycleMixin:
                 return
             except Exception:
                 pass
-        # A single, documented logcat tag (`Pydrud`) so a device traceback
-        # is findable with `adb logcat -s Pydrud` (DX-004).
-        log_exception(exc, tb_str)
+        # App.run installs the Android stdout/stderr adapter on-device. Host
+        # preview reports the same traceback through ordinary stderr without
+        # importing any platform logging implementation.
+        print(f"Error: {exc}", file=sys.stderr)
+        if tb_str.strip() and tb_str.strip() != "NoneType: None":
+            print(tb_str.rstrip(), file=sys.stderr)
 
     # ── tree building ─────────────────────────────────────────────────────
 
@@ -180,6 +184,7 @@ class LifecycleMixin:
                 self._report_error(exc)
         tree = self._page.build()
         assign_stable_keys(tree, prefix="_page")
+        tree = replace_unsupported_widgets(tree, self._native_capabilities)
         validate_tree_keys(tree)
         self._materialize_elements(tree)
         self._current_tree = tree

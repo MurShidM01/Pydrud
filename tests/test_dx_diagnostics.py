@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 
 from pydrud.commands.analyzer import _analyze_file
-from pydrud.core import logcat
+from pydrud.platforms.android import logging as logcat
 
 TEMPLATES = (Path(__file__).resolve().parent.parent / "pydrud" / "android"
              / "templates" / "android")

@@ -1,9 +1,9 @@
 """
 Background work, timers and rate limiting.
 
-Pydrud dispatches every UI event on one thread, exactly like Android's main
-looper.  Anything slow (HTTP, disk, sleeping) must therefore move off that
-thread or the UI freezes.  This module provides the three primitives that
+Pydrud dispatches every UI event on one thread. Anything slow (HTTP, disk,
+sleeping) must therefore move off that thread or the UI freezes. This module
+provides the three primitives that
 cover nearly all real app needs:
 
 * :class:`TaskRunner` — a small daemon thread pool (``page.run_task``) that

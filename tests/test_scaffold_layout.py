@@ -100,7 +100,7 @@ class TestGeneratedAppStructure(unittest.TestCase):
         cls.tmp = tempfile.mkdtemp(prefix="pydrud-structure-")
         cls.cwd = os.getcwd()
         os.chdir(cls.tmp)
-        create_project("struct_app", org="com.example")
+        create_project("struct_app", org="com.example", runtime="chaquopy")
         cls.src = os.path.join(cls.tmp, "struct_app", "src")
         sys.path.insert(0, cls.src)
         for mod in [m for m in list(sys.modules)

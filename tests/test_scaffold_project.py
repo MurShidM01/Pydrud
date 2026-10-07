@@ -251,20 +251,25 @@ class TestGeneratedProject(unittest.TestCase):
         for name in ("preview.py", "preview_server.py", "qr.py"):
             self.assertFalse(os.path.isfile(os.path.join(bundle, "core", name)),
                              f"host-only preview module '{name}' was bundled")
+        # Runtime-specific adapters are outside core, but the standalone
+        # runtime still needs its guarded Android logging and reload endpoint.
+        for name in ("logging.py", "devserver.py"):
+            self.assertTrue(os.path.isfile(os.path.join(
+                bundle, "platforms", "android", name)),
+                f"runtime adapter '{name}' was not bundled")
 
         # Measured with CRLF counted as one byte, so a Windows checkout
         # (core.autocrlf) reports the same size as a Unix one.
         #
         # The budget is a tripwire for *accidental* bloat — bundling the CLI,
-        # the templates or the launcher icons adds megabytes, and that is what
-        # this number is here to catch. It sits roughly 40 KB above the real
-        # bundle (707 KB after v2.1.0 added the cross-platform style
-        # vocabulary in pydrud.core.styles) so deliberate runtime work has
-        # room; move it, with the measurement, when features need it.
+        # templates or launcher icons adds megabytes. The complete Python-side
+        # PSS parser, resolver and transactional loader bring the measured
+        # runtime to 770.4 KB; keep about 50 KB of headroom for small runtime
+        # additions while retaining a tight ceiling.
         size_kb = bundled_runtime_size_kb(bundle)
         heaviest = "".join(f"\n  {s / 1024:6.1f} KB  {p}"
                            for s, p in bundle_files(bundle)[:5])
-        self.assertLess(size_kb, 750,
+        self.assertLess(size_kb, 820,
                         f"bundled runtime is unexpectedly large "
                         f"({size_kb:.1f} KB); heaviest modules:{heaviest}")
 

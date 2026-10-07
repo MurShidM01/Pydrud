@@ -86,8 +86,21 @@ def _bundle_pydrud_source(project_dir: str):
     if os.path.isdir(dst):
         shutil.rmtree(dst)
 
-    shutil.copytree(pydrud_src, dst,
-                    ignore=shutil.ignore_patterns(*BUNDLE_EXCLUDES))
+    # ``android`` is excluded only at the package root: it contains the
+    # generator templates, while ``platforms/android`` contains runtime
+    # adapters required by standalone apps. A basename-only ignore pattern
+    # would accidentally remove both.
+    patterns = tuple(name for name in BUNDLE_EXCLUDES if name != "android")
+    ignore_patterns = shutil.ignore_patterns(*patterns)
+    package_root = os.path.normcase(os.path.abspath(pydrud_src))
+
+    def ignore_runtime_sources(directory: str, names: list[str]) -> set[str]:
+        ignored = set(ignore_patterns(directory, names))
+        if os.path.normcase(os.path.abspath(directory)) == package_root:
+            ignored.add("android")
+        return ignored
+
+    shutil.copytree(pydrud_src, dst, ignore=ignore_runtime_sources)
     _strip_runtime_comments(dst)
 
     files = sum(len(f) for _, _, f in os.walk(dst))

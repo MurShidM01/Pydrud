@@ -24,7 +24,7 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
-#: Easing functions, matching the names used by the Android renderer.
+#: Easing functions shared with renderers that animate these values.
 CURVES: dict[str, Callable[[float], float]] = {
     "linear": lambda t: t,
     "ease_in": lambda t: t * t,

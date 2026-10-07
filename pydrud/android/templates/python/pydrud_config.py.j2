@@ -1,6 +1,6 @@
 """Generated Pydrud configuration for the {{ project_name }} app.
 
-Edit pydrud.yaml and run `pydrud sync`; this module is regenerated.
+Edit pydrud.yaml and run `pydrud sync` for Android projects.
 """
 
 # ── App metadata ─────────────────────────────────────────────────────────────
@@ -9,6 +9,7 @@ PACKAGE = "{{ package }}"
 VERSION = "{{ version_name | default("1.0.0") }}"
 VERSION_CODE = {{ version_code | default(1) }}
 ASSETS_DIR = "{{ assets_dir | default("assets") }}"
+{% if runtime == "chaquopy" %}
 PERMISSIONS = [{% for permission in permissions | default([]) %}"{{ permission }}"{% if not loop.last %}, {% endif %}{% endfor %}]
 CAPABILITIES = [{% for capability in capabilities_list | default([]) %}"{{ capability }}"{% if not loop.last %}, {% endif %}{% endfor %}]
 
@@ -17,6 +18,7 @@ MIN_SDK = {{ min_sdk }}
 TARGET_SDK = {{ target_sdk }}
 COMPILE_SDK = {{ compile_sdk | default(target_sdk) }}
 
-# ── Bridge (do not change unless you know what you're doing) ─────────────────
+# ── Local Chaquopy bridge ────────────────────────────────────────────────────
 BRIDGE_HOST = "127.0.0.1"
 BRIDGE_PORT = 8595
+{% endif %}

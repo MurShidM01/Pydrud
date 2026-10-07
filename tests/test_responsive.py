@@ -1,6 +1,6 @@
 """Tests for the Responsive scaling system."""
 
-from pydrud.core.responsive import Responsive
+from pydrud.core.responsive import MediaQuery, Responsive
 
 
 def reset():
@@ -130,3 +130,13 @@ def test_density_property():
     Responsive.init(360, 640, 2.625)
     assert Responsive.density() == 2.625
     reset()
+
+
+def test_platform_version_is_neutral_with_legacy_sdk_alias():
+    MediaQuery.reset()
+    assert MediaQuery.platform_version == ""
+    MediaQuery.update(platform_version="34")
+    assert MediaQuery.platform_version == "34"
+    assert MediaQuery.sdk == 34
+    assert MediaQuery.of()["sdk"] == 34
+    MediaQuery.reset()

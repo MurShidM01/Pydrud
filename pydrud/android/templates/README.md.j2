@@ -1,3 +1,4 @@
+{% if runtime == "chaquopy" %}
 # {{ project_name }}
 
 A native Android app written in Python with
@@ -12,8 +13,8 @@ launches. Open `src/app/screens/playground.py` and start editing.
 ## Run it
 
 ```bash
-pydrud dev              # host Python + LAN live-preview QR (requires a Pydash client)
 pydrud run              # build, install, launch with Flutter-style Hot Reload (r/R)
+pydrud dev              # host Python + LAN live-preview QR (requires a Pydash client)
 python run.py           # headless: build the widget tree on your computer
 pydrud test             # run the tests in tests/
 ```
@@ -26,13 +27,13 @@ APK, while `run` uses the generated Android app and embedded Python runtime.
 ```
 {{ project_name }}/
 ├── run.py                  dev runner (headless / bridge client)
-├── pydrud.yaml             SDK, NDK, package name, versions
-├── pydrud.toml             Python packages bundled into the APK
+├── pydrud.yaml             Android SDK, NDK, package name and versions
+├── pydrud.toml             Chaquopy Python packages and theme seed
 ├── assets/                 images and fonts shipped with the app
-├── android/                the generated native layer — `pydrud sync` refreshes it
+├── android/                generated native layer — `pydrud sync` refreshes it
 ├── tests/                  app tests driven by pydrud.testing.AppTester
 └── src/
-    ├── pydrud_config.py    runtime configuration for the device
+    ├── pydrud_config.py    Android runtime configuration
     └── app/
         ├── main.py         route registration + start-up entry point
         ├── config.py       app name, tagline, accent colour
@@ -41,18 +42,8 @@ APK, while `run` uses the generated Android app and embedded Python runtime.
         ├── jobs.py         background work (WorkManager)
         ├── ui.py           compatibility imports for older generated apps
         ├── components/     reusable UI shared by multiple screens
-        │   └── common.py   sections, demo buttons and page layout
         └── screens/        one module per screen
-            ├── playground.py   the Pydrud Native Playground
-            └── details.py      the pushed screen (navigation demo)
 ```
-
-## Add a screen
-
-1. Create `src/app/screens/profile.py` with a `profile_screen(page)` function.
-2. Export it from `src/app/screens/__init__.py`.
-3. Register it in `src/app/main.py`: `router.define("profile", profile_screen)`.
-4. Navigate to it from any handler with `router.push("profile")`.
 
 ## Android configuration
 
@@ -62,23 +53,110 @@ assets, permissions, capabilities and deep links. Edit it and run
 `pydrud sync`. Keep Python packages and the theme seed in `pydrud.toml`; app
 code under `src/app/` is never overwritten by sync.
 
-The playground enables `haptics` and `notifications` in `pydrud.yaml` so the
-Vibrate and Permission buttons work immediately. For your own features, prefer
-Python-first commands such as `pydrud capabilities add haptics` and
-`pydrud permissions add camera`; never hand-edit generated Android files.
+The starter enables `haptics` and `notifications` in `pydrud.yaml` so the
+Vibrate and Permission buttons work immediately. For other Android features,
+prefer Python-first commands such as `pydrud capabilities add haptics` and
+`pydrud permissions add camera`; do not hand-edit generated Android files.
+
+## Add a screen
+
+1. Create `src/app/screens/profile.py` with a `profile_screen(page)` function.
+2. Export it from `src/app/screens/__init__.py`.
+3. Register it from `src/app/main.py`: `router.define("profile", profile_screen)`.
+4. Navigate to it from a handler with `router.push("profile")`.
 
 ## Useful commands
 
-Pydrud commands share the Hot Reload runner's terminal UI: clear phases,
-status badges, summaries and next-step hints.
-
 | Command | What it does |
 | --- | --- |
+| `pydrud run` | build, install and launch on an attached Android device |
 | `pydrud dev` | run Python locally and wait for an authenticated Pydash preview client |
 | `pydrud sync` | apply `pydrud.yaml` and regenerate managed Android files |
 | `pydrud analyze` | static checks on your Python UI code |
-| `pydrud pip add requests` | bundle a Python package into the APK |
+| `pydrud pip add requests` | add a Python package to the APK build |
 | `pydrud permissions add camera` | add a permission to the manifest |
 | `pydrud capabilities add haptics` | enable generated feature bundles |
-| `pydrud build --release` | signed release build |
-| `pydrud doctor` | check your toolchain |
+| `pydrud build --release` | build a release APK |
+| `pydrud doctor` | check your Android toolchain |
+{% else %}
+# {{ project_name }}
+
+A cross-platform Python UI project using
+[Pydrud](https://github.com/MurShidM01/Pydrud) {{ pydrud_version }}.
+
+This project uses the **Pydash** runtime by default. Python executes on the
+host; a separately installed Pydash preview client connects over the
+single-run authenticated LAN preview protocol. The client receives widget
+trees and patches, never project source code. No Android SDK, NDK, Gradle,
+adb, or embedded-Python build is part of this project.
+
+## Run it
+
+```bash
+pydrud dev              # run Python locally and print a Pydash connection QR/URI
+pydrud test             # run the tests in tests/
+pydrud analyze          # check the Python UI code
+```
+
+Use the matching preview client to scan the QR or enter the printed URI. Keep
+the host and client on a trusted network; the pairing token is single-run and
+is not encrypted by the preview transport. Do not expose the preview port to
+the public internet.
+
+## Project layout
+
+```
+{{ project_name }}/
+├── run.py                  local helper for building the widget tree
+├── pydrud.yaml             project name, package identity and runtime
+├── pydrud.toml             Python package declarations and theme seed
+├── assets/                 images and fonts used by the app
+├── tests/                  app tests driven by pydrud.testing.AppTester
+└── src/
+    ├── pydrud_config.py    portable app metadata
+    └── app/
+        ├── main.py         route registration + start-up entry point
+        ├── config.py       app name, tagline, accent colour
+        ├── state.py        the State objects every screen shares
+        ├── runtime.py      the router and live App handle (`refresh()`)
+        ├── ui.py           compatibility imports for generated apps
+        ├── components/     reusable UI shared by multiple screens
+        └── screens/        one module per screen
+```
+
+## Python packages
+
+`pydrud pip add <package>` records a dependency in `pydrud.toml`; it does not
+install packages into the host Python environment. Install declared packages
+in the environment that runs `pydrud dev`. Package availability is therefore
+controlled by that host environment, not by an APK build.
+
+## Optional client features
+
+Device services and widget types depend on what the connected renderer
+advertises. Unsupported service calls fail immediately with an actionable
+`Result` error, and widgets absent from an explicit `widget_types` catalogue
+are displayed as visible text placeholders. `NativeView` is Android-specific
+and remains unavailable unless the client explicitly advertises it.
+
+## Add a screen
+
+1. Create `src/app/screens/profile.py` with a `profile_screen(page)` function.
+2. Export it from `src/app/screens/__init__.py`.
+3. Register it from `src/app/main.py`: `router.define("profile", profile_screen)`.
+4. Navigate to it from a handler with `router.push("profile")`.
+
+## Useful commands
+
+| Command | What it does |
+| --- | --- |
+| `pydrud dev` | run Python and wait for a token-authenticated preview client |
+| `pydrud test` | run the project's Python tests |
+| `pydrud analyze` | static checks on your Python UI code |
+| `pydrud docs` | generate an offline API reference |
+| `pydrud pip add requests` | record a host-side Python dependency |
+
+For an Android-only standalone APK, start a separate project with
+`pydrud init <name> --runtime chaquopy`. That opt-in target requires the
+Android toolchain and uses `pydrud run`, `pydrud build`, and `pydrud sync`.
+{% endif %}

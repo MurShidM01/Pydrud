@@ -121,6 +121,12 @@ def test_hello_authentication_and_capability_negotiation():
     assert normalized["last_revision"] == 0
     assert normalized["client"]["name"] == "Protocol test client"
 
+    legacy = hello(session)
+    legacy["metrics"] = {"sdk": 34}
+    normalized_legacy = validate_client_hello(legacy, session)
+    assert normalized_legacy["metrics"]["platform_version"] == "34"
+    assert "sdk" not in normalized_legacy["metrics"]
+
     with pytest.raises(PreviewProtocolError) as auth:
         validate_client_hello(hello(session, token="wrong"), session)
     assert auth.value.code == "authentication_failed"

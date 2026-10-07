@@ -3,15 +3,15 @@ Runtime selection for Pydrud projects.
 
 Pydrud supports two runtimes:
 
-* ``pydash`` (default) — live development inside the Pydash client app.
-  No Android build toolchain required. Cross-platform (Android + iOS).
-* ``chaquopy`` (opt-in, legacy default) — standalone APK with embedded
-  CPython via Chaquopy. Android-only.
+* ``pydash`` (default) — host-side development for a cross-platform preview
+  client. It requires no Android build toolchain.
+* ``chaquopy`` (opt-in) — an Android-only standalone APK with embedded CPython.
 
 A project's runtime is declared in ``pydrud.toml`` under ``runtime:``.
-When absent (legacy projects), the project resolves to ``chaquopy`` so
-it never silently changes behaviour. ``pydrud sync`` persists the
-explicit value so future reads are stable.
+New and otherwise unconfigured projects resolve to ``pydash``. For compatibility,
+a project that already has a generated Android Gradle target but no runtime
+key is treated as legacy Chaquopy until it is synchronized; successful sync
+persists that inferred selection so subsequent reads are explicit.
 """
 
 from __future__ import annotations
@@ -30,13 +30,13 @@ class Runtime(Enum):
     def resolve(cls, raw: object | None) -> "Runtime":
         """Normalise a user-provided value to a :class:`Runtime`.
 
-        * ``None`` / missing → :attr:`CHAQUOPY` (legacy default).
+        * ``None`` / missing → :attr:`PYDASH` (toolchain-free default).
         * Known strings → the matching enum member.
         * Anything else → raises :class:`RuntimeError` with a helpful
           message listing the valid values.
         """
         if raw is None:
-            return cls.CHAQUOPY
+            return cls.PYDASH
         text = str(raw).strip().lower()
         try:
             return cls(text)
@@ -72,8 +72,8 @@ class RuntimeDescriptor:
             raise RuntimeError(
                 f"'pydrud {command}' builds an Android app binary, but this "
                 f"project runs in pydash mode (no binary is produced). "
-                f"Use 'pydrud dev' for live preview, or set "
-                f"runtime: chaquopy in pydrud.toml for a standalone APK."
+                f"Use 'pydrud dev' for live preview, or create a standalone "
+                f"APK project with 'pydrud init <name> --runtime chaquopy'."
             )
 
     def assert_chaquopy(self) -> None:
@@ -91,8 +91,23 @@ def resolve_runtime(project_dir: str = ".") -> RuntimeDescriptor:
     raw: object | None = None
     if os.path.isfile(toml_path):
         raw = _read_toml_runtime(toml_path)
-    runtime = Runtime.resolve(raw)
+    if raw is None and _has_legacy_android_target(os.path.abspath(project_dir)):
+        # Preserve existing generated APK projects that predate the runtime
+        # field. New projects without an explicit runtime still choose Pydash.
+        runtime = Runtime.CHAQUOPY
+    else:
+        runtime = Runtime.resolve(raw)
     return RuntimeDescriptor(runtime=runtime)
+
+
+def _has_legacy_android_target(project_dir: str) -> bool:
+    """Whether *project_dir* contains a generated Android/Gradle target."""
+    android_dir = os.path.join(project_dir, "android")
+    return any(os.path.isfile(os.path.join(android_dir, *parts)) for parts in (
+        ("app", "build.gradle.kts"),
+        ("app", "build.gradle"),
+        ("build.gradle.kts",),
+    ))
 
 
 def _read_toml_runtime(path: str) -> object | None:

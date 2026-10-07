@@ -222,7 +222,7 @@ class RenderMixin:
         self._send(json.dumps({"cmd": "theme", **payload}) + "\n")
 
     def _request_system_theme(self) -> None:
-        """Fetch Android 12+ dynamic colours when ``Theme.system()`` opted in."""
+        """Fetch optional system palette colours when ``Theme.system()`` opts in."""
         try:
             from pydrud.widgets.theme import Theme as _Theme
             if not _Theme._uses_system() or not self._connected:
@@ -299,9 +299,18 @@ class RenderMixin:
 
     def _handle_ready(self, d: dict) -> None:
         """First contact: negotiate native capabilities, then render."""
-        self._native_capabilities = dict(d.get("capabilities") or {})
+        advertised = d.get("capabilities")
+        negotiated = dict(advertised) if isinstance(advertised, dict) else {}
+        if negotiated != self._native_capabilities:
+            # The first snapshot has not been sent yet. Drop provisional
+            # offline element types before applying client-specific fallbacks.
+            self._elements.clear()
+        self._native_capabilities = negotiated
+        # Build the initial native tree only after capability negotiation, so
+        # no unsupported node is ever sent. As in the previous startup flow,
+        # apply real metrics and send a follow-up snapshot for responsive layout.
+        self.render()
         self._apply_metrics(d)
-        # Device metrics may change the layout — re-render with real sizes.
         self.render()
 
     def _handle_metrics(self, d: dict) -> None:

@@ -1,31 +1,37 @@
 #!/usr/bin/env python3
-"""Development runner for {{ project_name }}.
-
-Runs the app's Python side on your computer. Without an Android device
-listening on the bridge port it starts in headless mode, which is useful for
-checking that the widget tree builds and for unit-testing your screens::
-
-    python run.py            # headless (prints the widget tree summary)
-    python run.py --tree     # dump the full widget tree as JSON
-"""
+"""Local runner for {{ project_name }}."""
 
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+SRC_DIR = os.path.join(PROJECT_DIR, "src")
+if SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)
 
+{% if runtime == "pydash" %}
+if __name__ == "__main__":
+    if "--tree" in sys.argv:
+        from pydrud.commands.preview import load_preview_app
+
+        app = load_preview_app(PROJECT_DIR)
+        print(app.build().to_json())
+    else:
+        from pydrud.commands.preview import PreviewRunner
+
+        raise SystemExit(PreviewRunner(PROJECT_DIR).run())
+{% else %}
 from app.main import main  # noqa: E402
-from pydrud import App     # noqa: E402
-
+from pydrud import App  # noqa: E402
 
 if __name__ == "__main__":
     app = App(target=main, title="{{ project_name }}")
-
     if "--tree" in sys.argv:
         print(app.build().to_json())
-        sys.exit(0)
+        raise SystemExit(0)
 
     tree = app.build()
     widgets = sum(1 for _ in tree.walk())
     print(f"[Pydrud] Widget tree built: {widgets} widgets")
     app.run(max_retries=3)
+{% endif %}
