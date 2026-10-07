@@ -3,7 +3,9 @@ import java.io.FileInputStream
 
 plugins {
     id("com.android.application")
+{% if standalone | default(true) %}
     id("com.chaquo.python")
+{% endif %}
 {%- if firebase %}
     id("com.google.gms.google-services")
 {%- endif %}
@@ -22,7 +24,9 @@ if (hasKeystore) {
 android {
     namespace = "{{ package }}"
     compileSdk = {{ compile_sdk }}
+{% if standalone | default(true) %}
     ndkVersion = System.getenv("PYDRUD_NDK_VERSION") ?: "{{ ndk | default("28.2.13676358") }}"
+{% endif %}
 
     defaultConfig {
         applicationId = "{{ package }}"
@@ -69,7 +73,7 @@ android {
     }
 
     bundle {
-        language { enableSplit = false }   // Chaquopy needs every locale
+        language { enableSplit = false }   // one APK with every locale
     }
 
     packaging {
@@ -85,7 +89,9 @@ android {
     }
 }
 
-// Chaquopy — embed Python in the APK.
+{% if standalone | default(true) %}
+// Chaquopy — embed Python in the APK (standalone target only; the preview
+// shell runs Python on the host under `pydrud dev` instead).
 chaquopy {
     defaultConfig {
         buildPython(System.getenv("PYDRUD_PYTHON") ?: "{{ python_executable }}")
@@ -114,6 +120,7 @@ chaquopy {
         }
     }
 }
+{% endif %}
 
 dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")

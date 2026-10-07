@@ -1,5 +1,7 @@
 // Top-level build file for {{ project_name }} (Pydrud)
 plugins {
     id("com.android.application") version "{{ agp_version | default("8.13.2") }}" apply false
+{% if standalone | default(true) %}
     id("com.chaquo.python") version "{{ chaquopy_version | default("17.0.0") }}" apply false
+{% endif %}
 }

@@ -632,8 +632,8 @@ class PydashBackend(PackageBackend):
             message=(
                 "Pydash has no Gradle or APK dependency sync. Install declared "
                 "packages in the host Python environment used by 'pydrud dev'. "
-                "Create an Android target with 'pydrud init <name> "
-                "--runtime chaquopy' to use Gradle."
+                "Add an Android target with 'pydrud init android "
+                "--standalone' to use Gradle."
             ),
         )
 

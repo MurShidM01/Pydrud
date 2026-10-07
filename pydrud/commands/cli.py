@@ -1,5 +1,5 @@
 """
-Pydrud CLI — ``pydrud init``, ``run``, ``sync``, ``build``, ``clean``, ``doctor``.
+Pydrud CLI — ``pydrud create``, ``init``, ``run``, ``sync``, ``build``, ``clean``, ``doctor``.
 
 Powered by Click.
 """
@@ -75,9 +75,9 @@ def main():
 
     \b
     Quick start:
-        pydrud init my_app
+        pydrud create my_app
         cd my_app
-        pydrud run
+        pydrud dev
     """
     pass
 
@@ -107,16 +107,71 @@ def _show_error(message: str, hint: str = "") -> None:
 @click.option("--runtime", "runtime_", default=None,
               type=click.Choice(["pydash", "chaquopy"], case_sensitive=False),
               help="Runtime for the new project. Defaults to pydash (live preview).")
-def init(name, org, min_sdk, target_sdk, accent, runtime_):
+def create(name, org, min_sdk, target_sdk, accent, runtime_):
     """Create a new Pydrud project.
 
     By default creates a pydash project (live preview — no Android
     toolchain required). Pass ``--runtime chaquopy`` for a standalone
-    Android APK build path.
+    Android APK build path, or add the Android platform later with
+    ``pydrud init android`` inside the project.
     """
     from pydrud.commands.project import create_project
     create_project(name, org=org, min_sdk=min_sdk, target_sdk=target_sdk,
                    runtime=runtime_ or "pydash", accent=accent)
+
+
+@main.command()
+@click.argument("platform", required=False, default=None)
+@click.option("--standalone", is_flag=True, default=False,
+              help="For android: embed Python with Chaquopy for a fully "
+                   "offline APK. Without it, a preview shell is generated "
+                   "that renders 'pydrud dev' over the LAN.")
+def init(platform, standalone):
+    """Add a native platform to this project (``pydrud init android``).
+
+    Run inside a project created with ``pydrud create``. Only ``android``
+    is supported in this release; ios, linux, windows, web and macos are
+    reserved for future platforms.
+    """
+    from pydrud.commands.project import (
+        FUTURE_PLATFORMS, SUPPORTED_PLATFORMS, init_platform,
+    )
+
+    if not platform:
+        root = _find_project_root()
+        _show_header("init", "Add a native platform",
+                     "Generate a native shell from this project's configuration",
+                     details=(("Project", os.path.basename(root) if root else "—"),))
+        for name in SUPPORTED_PLATFORMS:
+            present = root and os.path.isdir(os.path.join(root, name))
+            click.echo(tui.neutral_badge(
+                f"{name} — {'already added' if present else 'available'}"))
+        click.echo(tui.neutral_badge(
+            "planned: " + ", ".join(n for n in FUTURE_PLATFORMS
+                                    if n != "window")))
+        click.echo(tui.render_next_steps((
+            ("pydrud init android", "add the Android platform"),
+            ("pydrud create <name>", "create a new app instead"),
+        )))
+        return
+
+    platform = platform.strip().lower()
+    if platform not in SUPPORTED_PLATFORMS:
+        if platform in FUTURE_PLATFORMS:
+            _show_error(f"Platform '{platform}' is not available yet.",
+                        "Only 'android' is supported in this release.")
+            sys.exit(1)
+        _show_error(f"Unknown platform '{platform}'.",
+                    "To create a new app, use 'pydrud create <name>'. "
+                    "To add Android to this project, use 'pydrud init android'.")
+        sys.exit(1)
+
+    root = _project_or_exit()
+    if standalone and platform != "android":
+        _show_error("--standalone only applies to the android platform.")
+        sys.exit(1)
+    if not init_platform(root, platform, standalone=standalone):
+        sys.exit(1)
 
 
 @main.command()
@@ -250,6 +305,7 @@ def watch(device, release, no_interactive):
     """Start the Chaquopy Android Hot Reload runner."""
     _require_chaquopy("watch")
     from pydrud.commands.builder import Builder
+    from pydrud.commands.project import android_is_standalone
 
     root = _find_project_root()
     if not root:
@@ -257,6 +313,13 @@ def watch(device, release, no_interactive):
                     "Run this command from a directory containing pydrud.yaml.")
         sys.exit(1)
 
+    if not android_is_standalone(root):
+        _show_error("'pydrud watch' pushes code to on-device Python, but "
+                    "this Android shell is a preview build without an "
+                    "embedded interpreter.",
+                    "Use 'pydrud dev' for live preview, or upgrade with "
+                    "'pydrud init android --standalone'.")
+        sys.exit(1)
     builder = Builder(root)
     builder.run(device=device, release=release, watch=True, interactive=not no_interactive)
 
@@ -369,11 +432,25 @@ def _require_chaquopy(command: str) -> None:
         _show_error(
             message,
             hint=(
-                "Use 'pydrud dev' for live preview, or create an Android APK "
-                "project with 'pydrud init <name> --runtime chaquopy'."
+                "Use 'pydrud dev' for live preview, or add the Android "
+                "platform with 'pydrud init android' ('--standalone' for a "
+                "chaquopy offline APK)."
             ),
         )
         sys.exit(1)
+
+
+def _preview_shell(project_dir: str) -> bool:
+    """Whether *project_dir* has an Android shell without embedded Python."""
+    from pydrud.commands.project import (
+        android_is_standalone, android_platform_present,
+    )
+    from pydrud.runtime.runtime import Runtime, resolve_runtime
+
+    if resolve_runtime(project_dir).runtime is not Runtime.CHAQUOPY:
+        return False
+    return (android_platform_present(project_dir)
+            and not android_is_standalone(project_dir))
 
 
 def _resolve_pip_backend(project_dir: str):
@@ -422,7 +499,12 @@ def pip_add(packages, force, no_sync):
             f"{entry['description']}{warning}"))
 
     gradle_info = "—"
-    if runtime == "chaquopy" and not no_sync:
+    if runtime == "chaquopy" and not no_sync and _preview_shell(root):
+        gradle_info = "recorded; ships with standalone builds"
+        click.echo(tui.neutral_badge(
+            "Preview shell: recorded in pydrud.toml. Packages ship inside "
+            "the APK after 'pydrud init android --standalone'."))
+    elif runtime == "chaquopy" and not no_sync:
         result = backend.sync_gradle(root)
         if result.success:
             import os.path as _osp
@@ -460,7 +542,10 @@ def pip_remove(packages):
             removed += 1
         else:
             click.echo(tui.neutral_badge(name))
-    if runtime == "chaquopy":
+    if runtime == "chaquopy" and _preview_shell(root):
+        click.echo(tui.neutral_badge(
+            "Preview shell: nothing to sync into Gradle."))
+    elif runtime == "chaquopy":
         result = backend.sync_gradle(root)
         if not result.success:
             click.echo(tui.warn_badge(result.message), err=True)
@@ -555,10 +640,14 @@ def pip_sync():
 
     root = _project_or_exit()
     backend, runtime = _resolve_pip_backend(root)
-    if runtime == "pydash":
+    if runtime == "pydash" or _preview_shell(root):
         result = backend.sync_gradle(root)
+        subtitle = result.message
+        if runtime == "chaquopy":
+            subtitle = ("Preview shell: dependencies stay in pydrud.toml "
+                        "until 'pydrud init android --standalone'.")
         _show_header("pip sync", "Synchronize Python packages",
-                     result.message,
+                     subtitle,
                      details=(("Project", os.path.basename(root)),
                               ("Runtime", runtime)))
         return

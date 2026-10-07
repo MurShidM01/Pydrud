@@ -1,5 +1,5 @@
 """
-Tests for ``pydrud init`` — the generated project must be complete,
+Tests for ``pydrud create`` — the generated project must be complete,
 syntactically valid (Python *and* Java) and runnable.
 """
 

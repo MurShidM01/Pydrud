@@ -180,3 +180,39 @@ def set_list(project_dir: str, key: str, values: Iterable[str]) -> None:
         lines[start:end] = replacement
     with open(path, "w", encoding="utf-8") as handle:
         handle.write("\n".join(lines) + "\n")
+
+
+def set_scalar(project_dir: str, key: str, value: object) -> None:
+    """Set a top-level scalar while preserving the rest of the file.
+
+    Booleans render as ``true``/``false`` and numbers unquoted; anything
+    else is double-quoted with :func:`quote_yaml`. Used by
+    ``pydrud init android`` to record platform choices such as
+    ``standalone:`` without disturbing hand-written comments.
+    """
+    path = os.path.join(project_dir, "pydrud.yaml")
+    if not os.path.isfile(path):
+        return
+    with open(path, encoding="utf-8") as handle:
+        lines = handle.read().splitlines()
+
+    if isinstance(value, bool):
+        rendered = "true" if value else "false"
+    elif isinstance(value, (int, float)):
+        rendered = str(value)
+    else:
+        rendered = quote_yaml(value)
+    replacement = f"{key}: {rendered}"
+    for index, line in enumerate(lines):
+        if line[:1].isspace():
+            continue
+        found = _KEY_VALUE.match(line)
+        if found and found.group("key") == key:
+            lines[index] = replacement
+            break
+    else:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.append(replacement)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines) + "\n")

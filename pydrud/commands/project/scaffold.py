@@ -1,8 +1,10 @@
 """
-``pydrud init`` — scaffold a new Pydrud project.
+``pydrud create`` — scaffold a new Pydrud project.
 
 By default creates a pydash project (no Android toolchain needed).
-Pass ``runtime="chaquopy"`` to generate a full standalone Android project.
+Pass ``runtime="chaquopy"`` to generate a full standalone Android project
+with embedded Python; alternatively create a pydash project and add the
+Android platform later with ``pydrud init android``.
 """
 
 from __future__ import annotations
@@ -44,9 +46,11 @@ def create_project(
     ``runtime`` controls whether an Android project is generated::
 
         pydash (default) — no Android directory; use ``pydrud dev`` for
-            live preview in the Pydash client.
-        chaquopy — full Android project with embedded CPython; use
-            ``pydrud run`` / ``pydrud build`` to produce an APK.
+            live preview in the Pydash client. Add ``android/`` later with
+            ``pydrud init android`` (preview shell) or
+            ``pydrud init android --standalone`` (offline APK).
+        chaquopy — full standalone Android project with embedded CPython;
+            use ``pydrud run`` / ``pydrud build`` to produce an APK.
     """
     # Validate early so a typo never silently falls through to chaquopy.
     try:
@@ -137,6 +141,10 @@ def create_project(
         "cleartext_traffic": True,
         "assets_dir": "assets",
         "runtime": chosen,
+        # Direct ``--runtime chaquopy`` projects are always the standalone
+        # target: the activity boots ``app.main.start_app()`` on device.
+        "standalone": True,
+        "python_entry": "app.main",
     }
 
     subtitle = (
@@ -145,7 +153,7 @@ def create_project(
         else "Scaffolding a native Android application powered by Python"
     )
     print(tui.render_command_header(
-        "init",
+        "create",
         f"Creating {name}",
         subtitle=subtitle,
         details=(("Package", package), ("Directory", project_dir),

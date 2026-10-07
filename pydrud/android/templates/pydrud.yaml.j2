@@ -6,6 +6,11 @@ version_name: "{{ version_name | default("1.0.0") }}"
 runtime: "{{ runtime | default("pydash") }}"
 
 {% if runtime == "chaquopy" %}
+# Android target shape. `standalone: true` embeds Python with Chaquopy for a
+# fully offline APK; `false` builds the preview shell that renders `pydrud
+# dev` over the authenticated LAN protocol (no Chaquopy, no NDK needed).
+standalone: {{ "true" if (standalone | default(true)) else "false" }}
+
 # Android SDK and native targets
 min_sdk: {{ min_sdk }}
 target_sdk: {{ target_sdk }}
@@ -39,11 +44,12 @@ gradle_version: "{{ gradle_version | default("8.14.4") }}"
 {% else %}
 # The Pydash preview uses the host Python process and the authenticated LAN
 # renderer. No Android SDK, NDK, Gradle, ABI, manifest or permission values are
-# used by this runtime.
+# used by this runtime. Run `pydrud init android` inside the project to add
+# the Android platform later (`--standalone` for an offline Chaquopy APK).
 assets_dir: "{{ assets_dir | default("assets") }}"
 {% endif %}
 
 # Framework and renderer protocol metadata
-framework_version: "{{ pydrud_runtime_version | default("2.0.2") }}"
+framework_version: "{{ pydrud_runtime_version | default("2.1.0") }}"
 protocol_version: {{ protocol_version | default(2) }}
 pydrud_version: "{{ pydrud_version }}"

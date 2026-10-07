@@ -14,8 +14,9 @@ from pydrud.commands.project.paths import (
 def _render_native_layer(project_dir: str, java_package_path: str, ctx: dict):
     """Write the Java renderer and its theme resources.
 
-    Shared by ``pydrud init`` and ``pydrud sync`` so an existing project can
-    pick up a new Pydrud release without being recreated.
+    Shared by ``pydrud create``, ``pydrud init android`` and ``pydrud sync``
+    so an existing project can pick up a new Pydrud release without being
+    recreated.
     """
     java_dir = f"{project_dir}/android/app/src/main/java/{java_package_path}"
     _ensure_dir(java_dir)
@@ -58,6 +59,8 @@ def _render_app_package(project_dir: str, ctx: dict) -> None:
         _write_template(template,
                         os.path.join(project_dir, "src", "app", *relative.split("/")),
                         ctx)
+    _write_template("python/app/theme.pss.j2",
+                    os.path.join(project_dir, "src", "app", "theme.pss"), ctx)
 
 
 def _render_managed_android(project_dir: str, ctx: dict) -> None:

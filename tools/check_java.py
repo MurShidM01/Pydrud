@@ -2,7 +2,7 @@
 """
 Render every generated Java template and parse it, without a JDK.
 
-``pydrud init`` writes a dozen Java sources from Jinja templates. A typo in
+``pydrud create``/``init android`` write a dozen Java sources from Jinja templates. A typo in
 one of them only shows up minutes later, as a Gradle compile error on a
 line number that does not exist in the template. This script renders each
 template with a representative context and parses the result with

@@ -1,0 +1,209 @@
+package {{ package }};
+
+import android.content.Context;
+import android.content.res.Configuration;
+import android.os.Build;
+import android.util.DisplayMetrics;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.InputStream;
+import java.io.OutputStreamWriter;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+
+/**
+ * PreviewClient — connects a preview-shell APK to ``pydrud dev``.
+ *
+ * <p>Generated for ``pydrud init android`` (the default, Chaquopy-free
+ * target). It performs the authenticated {@code preview_hello} handshake
+ * from {@code docs/PREVIEW_PROTOCOL.md} and then hands the live socket to
+ * {@link BridgeService}, which reuses the exact same render-transaction and
+ * event pipeline as the standalone target. Dormant in standalone builds,
+ * where the activity boots embedded Python instead.
+ */
+public class PreviewClient {
+
+    private static final String TAG = "PydrudPreview";
+    private static final int PREVIEW_PROTOCOL_VERSION = 1;
+    private static final int RENDERER_PROTOCOL_VERSION = {{ protocol_version | default(2) }};
+    private static final int CONNECT_TIMEOUT_MS = 10000;
+
+    /** Handshake outcome, delivered on a background thread. */
+    public interface Callback {
+        /** The handshake succeeded; {@code socket} is ready to serve. */
+        void onPreviewConnected(Socket socket);
+
+        /** The handshake failed; {@code message} is safe to show. */
+        void onPreviewError(String message);
+    }
+
+    /**
+     * Connect to a ``pydrud dev`` server and run the handshake.
+     *
+     * @param host    connectable LAN host from the connection URI
+     * @param port    preview TCP port (8597 unless overridden)
+     * @param session single-run session id from the connection URI
+     * @param token   single-run bearer token from the connection URI
+     * @param context used for display metrics in the hello frame
+     * @param callback receives the connected socket or an error
+     */
+    public static void connect(final String host, final int port,
+                               final String session, final String token,
+                               final Context context, final Callback callback) {
+        new Thread(() -> {
+            Socket socket = new Socket();
+            try {
+                socket.connect(new InetSocketAddress(host, port),
+                    CONNECT_TIMEOUT_MS);
+                OutputStreamWriter writer = new OutputStreamWriter(
+                    socket.getOutputStream(), "UTF-8");
+                writer.write(buildHello(context, session, token).toString());
+                writer.write("\n");
+                writer.flush();
+
+                socket.setSoTimeout(CONNECT_TIMEOUT_MS);
+                String line = readLineRaw(socket.getInputStream());
+                socket.setSoTimeout(0);
+                if (line == null || line.trim().isEmpty()) {
+                    throw new java.io.IOException(
+                        "connection closed before the handshake finished");
+                }
+                JSONObject reply = new JSONObject(line.trim());
+                String type = reply.optString("type", "");
+                if ("preview_welcome".equals(type)) {
+                    callback.onPreviewConnected(socket);
+                } else if ("preview_reject".equals(type)) {
+                    closeQuietly(socket);
+                    String code = "rejected";
+                    String detail = "the server refused the connection";
+                    try { code = reply.getString("code"); }
+                    catch (Exception ignored) { }
+                    try { detail = reply.getString("message"); }
+                    catch (Exception ignored) { }
+                    callback.onPreviewError(code + ": " + detail);
+                } else {
+                    closeQuietly(socket);
+                    callback.onPreviewError(
+                        "unexpected reply: " + type);
+                }
+            } catch (Exception e) {
+                closeQuietly(socket);
+                String detail = e.getMessage();
+                if (detail == null || detail.isEmpty()) {
+                    detail = e.getClass().getSimpleName();
+                }
+                callback.onPreviewError(detail);
+            }
+        }, "pydrud-preview-connect").start();
+    }
+
+    /** The {@code preview_hello} frame; mirrors BridgeService.sendReady. */
+    private static JSONObject buildHello(Context context, String session,
+                                         String token) throws Exception {
+        DisplayMetrics dm = context.getResources().getDisplayMetrics();
+        Configuration cfg = context.getResources().getConfiguration();
+        float density = dm.density <= 0 ? 2f : dm.density;
+
+        JSONObject metrics = new JSONObject();
+        metrics.put("width", Math.max(1, Math.round(dm.widthPixels / density)));
+        metrics.put("height", Math.max(1, Math.round(dm.heightPixels / density)));
+        metrics.put("width_px", dm.widthPixels);
+        metrics.put("height_px", dm.heightPixels);
+        metrics.put("density", density);
+        metrics.put("dpi", dm.densityDpi);
+        metrics.put("text_scale", cfg.fontScale <= 0 ? 1.0 : cfg.fontScale);
+        metrics.put("orientation", cfg.orientation
+            == Configuration.ORIENTATION_LANDSCAPE ? "landscape" : "portrait");
+        metrics.put("dark", (cfg.uiMode & Configuration.UI_MODE_NIGHT_MASK)
+            == Configuration.UI_MODE_NIGHT_YES);
+        metrics.put("platform_version", String.valueOf(Build.VERSION.SDK_INT));
+        metrics.put("model", String.valueOf(Build.MODEL));
+
+        JSONObject capabilities = new JSONObject();
+        capabilities.put("transactional_render", true);
+        capabilities.put("revisioned_render", true);
+        capabilities.put("ack_nack", true);
+        capabilities.put("resync", true);
+        capabilities.put("coalescing", true);
+        capabilities.put("native_animation_clock", true);
+        capabilities.put("native_view", true);
+        JSONArray services = new JSONArray();
+        String[] optionalServices = {
+            "dialog", "storage", "files", "clipboard", "share",
+            "permissions", "notifications", "location", "device",
+            "haptics", "secure", "background", "push", "shortcuts",
+            "camera", "sensors", "bluetooth", "nfc", "biometrics",
+            "audio", "system_theme"
+        };
+        for (String service : optionalServices) services.put(service);
+        capabilities.put("services", services);
+        JSONArray widgetTypes = new JSONArray();
+        String[] supportedWidgetTypes = {
+            "Container", "Center", "Padding", "SizedBox", "Positioned",
+            "Card", "Stack", "Column", "ListView", "Row", "GridView",
+            "Spacer", "Divider", "Text", "Button", "TextField", "Image",
+            "Icon", "Checkbox", "Switch", "Radio", "ProgressBar", "Slider",
+            "RangeSlider", "PageView", "Dropdown", "Canvas", "RichText",
+            "Markdown", "MapView", "CameraPreview", "ReorderableList",
+            "InfiniteList", "NativeView", "ListTile", "ExpansionTile", "Chip",
+            "Badge", "Avatar", "Banner", "Tooltip", "Tabs", "BottomNavigationBar",
+            "NavigationRail", "Drawer", "SegmentedButton", "SearchBar", "Rating",
+            "CircularProgress", "Skeleton", "RefreshIndicator", "Stepper", "WebView",
+            "VideoPlayer", "Chart", "PopupMenu", "Form", "FormField",
+            "GestureDetector", "InkWell", "Dismissible", "Draggable", "Hero",
+            "AnimatedContainer", "AnimatedOpacity", "AnimatedScale",
+            "AnimatedRotation", "AnimatedSwitcher", "FadeIn", "SlideIn", "ScaleIn"
+        };
+        for (String widgetType : supportedWidgetTypes) widgetTypes.put(widgetType);
+        capabilities.put("widget_types", widgetTypes);
+        capabilities.put("commands", new JSONArray());
+
+        JSONObject client = new JSONObject();
+        client.put("name", "Pydrud Android");
+        client.put("version", "{{ pydrud_runtime_version | default('2.1.0') }}");
+        client.put("platform", "android");
+
+        JSONObject hello = new JSONObject();
+        hello.put("type", "preview_hello");
+        hello.put("protocol", "pydrud.preview");
+        hello.put("protocol_version", PREVIEW_PROTOCOL_VERSION);
+        hello.put("renderer_protocol_version", RENDERER_PROTOCOL_VERSION);
+        hello.put("session_id", session);
+        hello.put("token", token);
+        hello.put("client", client);
+        hello.put("capabilities", capabilities);
+        hello.put("last_revision", 0);
+        hello.put("metrics", metrics);
+        return hello;
+    }
+
+    /**
+     * Read one NDJSON line without buffering past the newline.
+     *
+     * <p>A {@code BufferedReader} may read the frames that follow the
+     * handshake into its own buffer, which would lose them when the socket
+     * is handed to {@link BridgeService}. Reading byte-by-byte is slower,
+     * but it runs exactly once per connection.
+     */
+    private static String readLineRaw(InputStream in) throws Exception {
+        java.io.ByteArrayOutputStream line = new java.io.ByteArrayOutputStream();
+        int next;
+        while ((next = in.read()) != -1) {
+            if (next == '\n') break;
+            if (next != '\r') line.write(next);
+            if (line.size() > 2 * 1024 * 1024) {
+                throw new java.io.IOException("handshake reply is too large");
+            }
+        }
+        if (next == -1 && line.size() == 0) return null;
+        return line.toString("UTF-8");
+    }
+
+    private static void closeQuietly(Socket socket) {
+        try {
+            if (socket != null) socket.close();
+        } catch (Exception ignored) { }
+    }
+}

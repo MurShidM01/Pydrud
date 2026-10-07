@@ -29,6 +29,10 @@ from pydrud.commands.project.python_runtime import (
     APP_PYTHON_VERSION, BUILD_PYTHON_VERSIONS, _build_python_candidates,
     _detect_build_python, _python_version_of, _resolve_executable,
 )
+from pydrud.commands.project.platforms import (
+    FUTURE_PLATFORMS, SUPPORTED_PLATFORMS, android_is_standalone,
+    android_platform_present, android_python_entry, init_platform,
+)
 from pydrud.commands.project.scaffold import create_project
 from pydrud.commands.project.sync import (
     _discover_project, _remove_generated_java, _stamp_version,
@@ -39,7 +43,9 @@ from pydrud.commands.project.templates import (
 )
 
 __all__ = [
-    "create_project", "sync_project",
+    "create_project", "sync_project", "init_platform",
+    "SUPPORTED_PLATFORMS", "FUTURE_PLATFORMS", "android_is_standalone",
+    "android_platform_present", "android_python_entry",
     "BUNDLE_EXCLUDES", "_APP_MODULES", "_JAVA_TEMPLATES", "_JAVA_KEYWORDS",
     "_ensure_dir", "_write_template", "_sanitize_package", "_slugify", "_camel",
     "_detect_sdk", "_detect_ndk", "_version_key", "_normalise_color", "_theme_colors",

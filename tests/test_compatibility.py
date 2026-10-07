@@ -2,7 +2,7 @@ from pydrud.compatibility import COMPATIBILITY, HOST_COMPATIBILITY
 
 
 def test_host_compatibility_is_cross_platform():
-    assert HOST_COMPATIBILITY.framework_version == "2.0.3"
+    assert HOST_COMPATIBILITY.framework_version == "2.1.0"
     assert HOST_COMPATIBILITY.protocol_version == 2
     assert HOST_COMPATIBILITY.python_version == "3.11"
 

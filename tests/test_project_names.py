@@ -1,6 +1,6 @@
 """
 Project names become Java class names, package segments, directories and a
-Python module — all with different rules.  ``pydrud init 2cool`` used to
+Python module — all with different rules.  ``pydrud create 2cool`` used to
 generate ``public class 2coolActivity``, which does not compile.
 """
 

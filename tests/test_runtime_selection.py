@@ -63,6 +63,8 @@ def test_default_scaffold_is_pydash_and_never_probes_android_toolchain(tmp_path,
         assert android_only not in yaml
     assert "Android SDK, NDK, Gradle" in readme
     assert "android/" not in readme
+    assert "pydrud init android" in readme
+    assert (project / "src" / "app" / "theme.pss").is_file()
     assert "PreviewRunner" in runner
     assert "start_app" not in entry
     assert "android" not in entry.lower()
@@ -140,7 +142,7 @@ def test_generated_test_suites_run_for_both_runtimes(tmp_path, monkeypatch):
         assert result.returncode == 0, (
             f"Generated {runtime} suite failed:\n{result.stdout}\n{result.stderr}"
         )
-        assert "3 passed" in result.stdout
+        assert "4 passed" in result.stdout
 
         tree_result = subprocess.run(
             [sys.executable, "run.py", "--tree"],

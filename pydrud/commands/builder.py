@@ -38,7 +38,7 @@ class Builder:
 
         gradlew = self._gradlew()
         if not gradlew:
-            print(fail("Gradle wrapper not found. Run `pydrud init` first."))
+            print(fail("Gradle wrapper not found. Run `pydrud init android` first."))
             return None
 
         if not self._validate_environment():
@@ -107,7 +107,28 @@ class Builder:
 
     def run(self, device: str | None = None, release: bool = False,
             watch: bool = False, interactive: bool = True):
-        """Build, install, launch the app and start interactive Hot Reload (like ``flutter run``)."""
+        """Build, install, launch the app and start interactive Hot Reload (like ``flutter run``).
+
+        Preview shells (``pydrud init android`` without ``--standalone``)
+        carry no on-device interpreter, so they are installed and launched
+        while ``pydrud dev`` serves the UI; only standalone targets start
+        the on-device Hot Reload runner.
+        """
+        from pydrud.commands.project import android_is_standalone
+
+        if not android_is_standalone(self.root):
+            apk = self.build(release=release)
+            if not apk or not self._check_adb():
+                return 1
+            if not self._install_and_launch(apk, device):
+                return 1
+            print(tui.render_next_steps((
+                ("pydrud dev", "start the preview server on this machine"),
+                ("connect in the app",
+                 "paste the pydrud:// URI shown by the server"),
+            )))
+            return 0
+
         from pydrud.commands.devrunner import DevRunner
 
         runner = DevRunner(

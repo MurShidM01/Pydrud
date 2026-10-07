@@ -720,15 +720,16 @@ class AppTester:
     def _quiet(self, target: int) -> bool:
         """True when nothing is in flight in either direction.
 
-        ``_ui_queue`` is deliberately *not* checked here: a queued UI
-        callback is always paired with a ``__ui__`` wake-up on the event
-        queue, so waiting on the event queue already covers it — and
-        treating the callback queue alone as "busy" could spin forever if
-        the wake-up were ever lost. It still feeds :meth:`_epoch`, so a
-        callback that drains mid-wait keeps us waiting.
+        A callback can be queued just before its ``__ui__`` wake-up is
+        consumed (or while the event loop is starting). Check both queues so
+        a stable-but-nonempty UI queue cannot make ``settle`` return early.
+        The timeout remains the safety valve if a wake-up is ever lost.
         """
         app = self.app
-        if app._events_handled < target or not app._event_queue.empty():
+        ui_queue = getattr(app, "_ui_queue", None)
+        if (app._events_handled < target
+                or not app._event_queue.empty()
+                or (ui_queue is not None and not ui_queue.empty())):
             return False
         # A handler may have requested a render that the device has not
         # applied yet; waiting for it is what makes `prop()` reliable

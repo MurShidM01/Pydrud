@@ -200,6 +200,9 @@ _JAVA_TEMPLATES = (
     "EventBinder", "NativeViewFactory", "ViewAnimator", "BuiltinViews",
     # MaterialViews collaborator (navigation family).
     "MaterialNavigationViews",
+    # Preview-mode client for `pydrud init android` (dormant in standalone
+    # builds, where the activity boots embedded Python instead).
+    "PreviewClient",
 )
 
 

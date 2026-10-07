@@ -8,6 +8,7 @@ import androidx.work.Data;
 import androidx.work.Worker;
 import androidx.work.WorkerParameters;
 
+{% if standalone | default(true) %}
 import com.chaquo.python.PyObject;
 import com.chaquo.python.Python;
 import com.chaquo.python.android.AndroidPlatform;
@@ -18,7 +19,7 @@ import com.chaquo.python.android.AndroidPlatform;
  *
  * WorkManager may start this long after the Activity is gone, so the worker
  * boots its own Python interpreter when needed and calls
- * {@code app.main.run_background_job(name, inputs_json)}.
+ * {@code {{ python_entry | default('app.main') }}.run_background_job(name, inputs_json)}.
  */
 public class PydrudWorker extends Worker {
 
@@ -43,7 +44,7 @@ public class PydrudWorker extends Worker {
             if (!Python.isStarted()) {
                 Python.start(new AndroidPlatform(getApplicationContext()));
             }
-            PyObject module = Python.getInstance().getModule("app.main");
+            PyObject module = Python.getInstance().getModule("{{ python_entry | default('app.main') }}");
             PyObject result = module.callAttr("run_background_job", job,
                                               inputs == null ? "{}" : inputs);
             String text = result == null ? "" : result.toString();
@@ -59,3 +60,29 @@ public class PydrudWorker extends Worker {
         }
     }
 }
+{% else %}
+/**
+ * Preview-shell stub: background Python jobs need the standalone target.
+ *
+ * <p>The preview shell ({@code pydrud init android}) runs Python on the
+ * developer machine, so there is no interpreter to run a WorkManager job.
+ * Re-run with {@code --standalone} (or set {@code standalone: true} and
+ * {@code pydrud sync}) for background work.
+ */
+public class PydrudWorker extends Worker {
+
+    private static final String TAG = "PydrudWorker";
+
+    public PydrudWorker(@NonNull Context context,
+                        @NonNull WorkerParameters params) {
+        super(context, params);
+    }
+
+    @NonNull
+    @Override
+    public Result doWork() {
+        Log.w(TAG, "background jobs need a standalone build; see `pydrud init android --standalone`");
+        return Result.failure();
+    }
+}
+{% endif %}
