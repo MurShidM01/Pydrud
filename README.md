@@ -885,7 +885,11 @@ def test_login():
 
 Interactions settle before they return, and lookups retry for a moment,
 so a tap that triggers navigation, a timer or an async handler does not
-have to be followed by a hand-written sleep.
+have to be followed by a hand-written sleep. `AppTester` and `run_app()`
+also wait for the app's startup renders to reach the device before they
+hand control back, so the first frame can be asserted on directly
+(`pydrud.testing.wait_for_render_convergence` is that same wait, for
+hand-rolled harnesses).
 
 ### Styling
 

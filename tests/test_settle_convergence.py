@@ -9,9 +9,39 @@ intermediate frame.
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
-from pydrud import Button, Text
+from pydrud import App, Button, Text
 from pydrud.testing import AppTester
+
+
+def test_preparing_a_frame_is_never_reported_as_idle():
+    """IC-002: the pipeline must not look idle mid-render.
+
+    ``_render_pending`` is consumed by the call that serves it, so for the
+    whole diff/encode/send window the only evidence of work is
+    ``_render_in_progress``. If that flag were not consulted, a harness could
+    observe "everything acknowledged" while a frame was still on its way —
+    which is what made a tap land as a full re-render instead of a patch.
+    """
+    from pydrud.testing import _render_converged
+
+    observed = []
+    real = App._send_desired_tree_now
+
+    def spy(self, *, force_snapshot):
+        observed.append(_render_converged(self))
+        return real(self, force_snapshot=force_snapshot)
+
+    def main(page):
+        page.add(Text("hi", key="t"), Button("Go", key="go"))
+
+    with mock.patch.object(App, "_send_desired_tree_now", spy):
+        with AppTester(main) as app:
+            app.tap("go")
+
+    assert observed, "no frame was ever prepared"
+    assert not any(observed), "a frame being prepared looked like an idle pipeline"
 
 
 class TestSettleConvergence(unittest.TestCase):

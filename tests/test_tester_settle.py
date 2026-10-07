@@ -11,7 +11,7 @@ from __future__ import annotations
 import unittest
 
 from pydrud import App, Button, Column, State, Text
-from pydrud.testing import AppTester
+from pydrud.testing import AppTester, FakeDevice, run_app
 
 
 def _counter_app():
@@ -58,6 +58,66 @@ class TestSettle(unittest.TestCase):
             tester.tap("btn")
             self.assertGreater(tester.device.events_sent, before)
             self.assertGreaterEqual(tester.app._events_handled, before)
+
+
+class TestStartupHandoff(unittest.TestCase):
+    """IC-002: the harness must not hand back a half-started app.
+
+    ``ready`` makes the app send an initial snapshot and then a follow-up
+    once the real window metrics are known, deferred behind the first ACK.
+    Returning as soon as the socket was up meant a test could start
+    measuring renders mid-startup — and a tap in that window was coalesced
+    into the pending forced snapshot instead of being patched in.
+    """
+
+    def _counter_app(self):
+        count = State(0, name="startup_counter")
+
+        def build(page):
+            def bump(_event):
+                count.value += 1
+                app = App.current()
+                if app is not None:
+                    app.update()
+
+            page.add(Column(key="root", children=[
+                Text(str(count.value), key="value"),
+                Button("+", key="inc").on_click(bump),
+            ]))
+
+        return build
+
+    def test_run_app_returns_once_the_startup_frames_have_landed(self):
+        device = FakeDevice().start()
+        app = App(target=self._counter_app(), title="startup")
+        try:
+            run_app(app, device)
+            self.assertGreaterEqual(
+                device.full_renders, 2,
+                "the metrics-driven follow-up frame must be included")
+            self.assertEqual(app._desired_revision, app._confirmed_revision)
+            self.assertFalse(app._inflight)
+            self.assertFalse(app._render_pending)
+        finally:
+            app.stop()
+            device.stop()
+
+    def test_the_first_tap_after_startup_is_patched(self):
+        device = FakeDevice().start()
+        app = App(target=self._counter_app(), title="startup")
+        try:
+            run_app(app, device)
+            before = device.full_renders
+
+            device.click("inc")
+            self.assertTrue(device.wait_for(
+                lambda d: d.root.find("value").props["value"] == "1"))
+            self.assertEqual(device.full_renders, before,
+                             "a tap after startup must patch, not re-snapshot")
+            self.assertEqual(device.patch_batches[-1][-1]["op"], "update")
+        finally:
+            app.stop()
+            device.stop()
 
 
 class TestAppCurrent(unittest.TestCase):

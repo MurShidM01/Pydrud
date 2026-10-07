@@ -57,6 +57,9 @@ class TestStarterCounterAppEndToEnd(unittest.TestCase):
             stylesheet=os.path.join(self.project, "src", "app", "theme.pss"),
         )
         self.app.attach_router(starter.router)
+        # Returns once the startup render sequence (the initial snapshot and
+        # the metrics-driven follow-up) has been applied by the device, so
+        # tests never observe a half-started app.
         run_app(self.app, self.device)
         self.assertTrue(self.device.wait_for(lambda d: d.root is not None))
 
@@ -85,6 +88,8 @@ class TestStarterCounterAppEndToEnd(unittest.TestCase):
 
     def test_floating_action_button_increments_without_full_renders(self):
         device = self.device
+        # Startup has already converged, so every render counted below is
+        # caused by the taps themselves.
         before = device.full_renders
 
         device.click("inc_btn")

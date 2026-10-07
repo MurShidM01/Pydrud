@@ -104,6 +104,24 @@ ships a working stylesheet.
   the UI actor instead of running inline and racing the first frame; the
   `AppTester.settle()` harness also waits on the UI queue. This removes the
   intermittent Windows-only stall growing a list past the frame budget.
+* **IC-002** — an interaction handled while a frame is being prepared no
+  longer looks like an idle pipeline, and the test harness no longer hands
+  control back mid-startup. `_render_pending` covers a render *queued*
+  behind an in-flight frame, so between the ACK that unblocked a deferred
+  render and that frame being registered in ``_inflight`` the app looked
+  completely idle for as long as diffing and encoding took — a tap landing
+  in that window was coalesced into the pending forced snapshot instead of
+  being patched in. The window is now covered by ``_render_in_progress``,
+  which the `AppTester` settle/convergence checks consult. On top of that,
+  `run_app()` (and therefore `AppTester.start()`) returns only once the
+  startup render sequence has reached the device: the `ready` handshake
+  sends an initial snapshot and then a metrics-driven follow-up deferred
+  behind the first ACK, so waiting for "connected" let a test read the tree,
+  or count `device.full_renders`, against a half-started app.
+  `pydrud.testing.wait_for_render_convergence()` exposes that wait for
+  hand-rolled harnesses. Together these are the flake that made
+  `tests/test_starter_app_e2e.py` fail on a loaded CI runner ("counter taps
+  should update incrementally") while passing on a fast local machine.
 
 ### Scope
 * The Pydash companion renderer/client is not implemented, bundled, or
