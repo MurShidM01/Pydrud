@@ -353,8 +353,8 @@ def _require_chaquopy(command: str) -> None:
             f"'pydrud {command}' builds an Android app binary, but this "
             f"project runs in pydash mode (no binary is produced).",
             hint=(
-                f"Use 'pydrud dev' for live preview in the Pydash client, or "
-                f"set runtime: chaquopy in pydrud.toml for a standalone APK."
+                "Use 'pydrud dev' for live preview in the Pydash client, or "
+                "set runtime: chaquopy in pydrud.toml for a standalone APK."
             ),
         )
         sys.exit(1)
@@ -376,11 +376,8 @@ def _resolve_pip_backend(project_dir: str):
               help="Only record it in pydrud.toml; do not touch Gradle.")
 def pip_add(packages, force, no_sync):
     """Add one or more packages (e.g. ``pydrud pip add yt-dlp``)."""
-    from pydrud.commands.packages import PackageError
-
     root = _project_or_exit()
     backend, runtime = _resolve_pip_backend(root)
-    runtime_label = "Chaquopy" if runtime == "chaquopy" else "Pydash"
     subtitle = ("Recording dependencies for the Android build"
                 if runtime == "chaquopy" else
                 "Recording host-side dependencies (not bundled into an APK)")
@@ -426,8 +423,6 @@ def pip_add(packages, force, no_sync):
 @click.argument("packages", nargs=-1, required=True)
 def pip_remove(packages):
     """Remove packages from the project."""
-    from pydrud.commands.packages import PackageError
-
     root = _project_or_exit()
     backend, runtime = _resolve_pip_backend(root)
     _show_header("pip remove", "Remove Python packages",
@@ -530,7 +525,7 @@ def pip_search(query):
 @pip.command("sync")
 def pip_sync():
     """Re-apply pydrud.toml to the build system (after editing it by hand)."""
-    from pydrud.commands.packages import PackageError, Requirements
+    from pydrud.commands.packages import Requirements
 
     root = _project_or_exit()
     backend, runtime = _resolve_pip_backend(root)

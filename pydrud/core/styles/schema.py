@@ -24,7 +24,6 @@ canonical form.
 """
 
 from __future__ import annotations
-from typing import Literal
 
 #: A known style key together with the kind of value it accepts.
 _StyleEntry = tuple[str, str]  # (canonical_name, kind)

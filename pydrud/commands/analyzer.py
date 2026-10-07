@@ -16,6 +16,8 @@ from __future__ import annotations
 import ast
 import os
 
+# The one list of valid style keys, shared with the .pss engine. Do not
+# copy it here: a second copy silently drifts out of date.
 from pydrud.core.styles import VALID_STYLE_KEYS as _VALID_STYLE_KEYS
 from pydrud.utils import tui
 
@@ -70,32 +72,6 @@ _WIDGET_CLASSES = {
     "Flex", "ExpansionPanelList",
     # v2.0.3 — the native escape hatch
     "NativeView",
-}
-
-# Style property keys known to be valid.
-_VALID_STYLE_KEYS = {
-    "bg", "opacity", "width", "height", "minWidth", "maxWidth",
-    "minHeight", "maxHeight", "padding", "margin", "border", "borderRadius",
-    "font", "textAlign", "alignment", "expand", "visible", "tooltip",
-    "rotate", "fit", "bgImage", "elevation", "position", "bottom", "right",
-    "top", "left", "spacing", "mainAxis", "crossAxisAlignment", "scroll",
-    "variant", "icon", "buttonSize", "disabled", "multiline", "password",
-    "readOnly", "keyboard", "activeColor", "color", "thickness",
-    "textScale", "status_bar_color", "icon_brightness",
-    "borderLeft", "borderRight", "borderTop", "borderBottom",
-    "columns", "circular", "divisions", "maxLines", "overflow", "selectable",
-    "tristate", "crossAxis", "mainAxisAlignment",
-    # v1.2
-    "animation", "scale", "rotation", "drawerSide", "fabPosition",
-    "safeArea", "resizeForKeyboard", "shadow", "aspectRatio", "zIndex",
-    # v1.5 — responsive
-    "safeAreaTop", "safeAreaBottom", "breakpoint",
-    # read by the native renderer (ViewFactory / MaterialViews)
-    "gradient", "feedback", "role", "pill", "accent", "size",
-    "minItemWidth", "maxColumns", "tabletColumns",
-    # v2.0 — FractionallySizedBox factors (resolved by the renderer against
-    # the parent at layout time)
-    "widthFactor", "heightFactor",
 }
 
 

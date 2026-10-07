@@ -19,8 +19,6 @@ import os
 from dataclasses import dataclass
 from enum import Enum
 
-import click
-
 
 class Runtime(Enum):
     """The active runtime for a Pydrud project."""
