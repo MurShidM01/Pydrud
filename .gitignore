@@ -54,6 +54,7 @@ __pycache__/
 .coverage
 htmlcov/
 . pytest_cache/
+.debug_issues/
 
 # OS
 Thumbs.db
