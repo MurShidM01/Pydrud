@@ -44,6 +44,8 @@ Edit a screen, then run ``pydrud run`` for interactive Flutter-style hot
 reload (press ``r`` for hot reload, ``R`` for hot restart).
 """
 
+import os
+
 from pydrud import App, Theme
 
 from app.config import ACCENT, APP_NAME
@@ -66,7 +68,11 @@ def main(page):
 def start_app():
     """Called by MainActivity via Chaquopy."""
     Theme.seed(ACCENT)
-    app = bind(App(target=router.build_root(), title=APP_NAME))
+    app = bind(App(
+        target=router.build_root(),
+        title=APP_NAME,
+        stylesheet=os.path.join(os.path.dirname(__file__), "theme.pss"),
+    ))
     app.attach_router(router)
     # Deep links ({{ scheme }}://details), launcher shortcuts and push
     # notification taps all arrive here and are routed automatically.

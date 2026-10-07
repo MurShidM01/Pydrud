@@ -72,8 +72,8 @@ class RuntimeDescriptor:
             raise RuntimeError(
                 f"'pydrud {command}' builds an Android app binary, but this "
                 f"project runs in pydash mode (no binary is produced). "
-                f"Use 'pydrud dev' for live preview, or create a standalone "
-                f"APK project with 'pydrud init <name> --runtime chaquopy'."
+                f"Use 'pydrud dev' for live preview, or add the Android "
+                f"platform with 'pydrud init android'."
             )
 
     def assert_chaquopy(self) -> None:

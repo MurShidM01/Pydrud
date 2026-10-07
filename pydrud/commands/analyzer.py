@@ -91,7 +91,14 @@ def _analysis_runtime(path: str, runtime: str | None) -> str:
         if (os.path.isfile(os.path.join(candidate, "pydrud.toml"))
                 or os.path.isfile(os.path.join(candidate, "pydrud.yaml"))
                 or os.path.isfile(os.path.join(candidate, "pydrud.yml"))):
-            return resolve_runtime(candidate).runtime.value
+            resolved = resolve_runtime(candidate).runtime.value
+            if resolved == Runtime.CHAQUOPY.value:
+                # A preview shell runs Python on the host, exactly like
+                # Pydash; only standalone targets bundle source into an APK.
+                from pydrud.commands.project import android_is_standalone
+                if not android_is_standalone(candidate):
+                    return Runtime.PYDASH.value
+            return resolved
         parent = os.path.dirname(candidate)
         if parent == candidate:
             break
@@ -100,7 +107,7 @@ def _analysis_runtime(path: str, runtime: str | None) -> str:
 
 
 def run_analysis(path: str = "src", *, runtime: str | None = None) -> list[dict]:
-    """Run static analysis on all Python files under *path*.
+    """Run static analysis on Python and PSS stylesheet files under *path*.
 
     When omitted, *runtime* is inferred from the nearest Pydrud project
     configuration; an unconfigured project defaults to Pydash. This matters
@@ -144,7 +151,37 @@ def run_analysis(path: str = "src", *, runtime: str | None = None) -> list[dict]
                         "severity": _SEVERITY_WARNING,
                         "message": f"Could not parse: {exc}",
                     })
+            elif fname.endswith(".pss"):
+                fpath = os.path.join(root, fname)
+                rel_path = os.path.relpath(fpath, src_dir)
+                issues.extend(_analyze_stylesheet(fpath, rel_path))
 
+    return issues
+
+
+def _analyze_stylesheet(fpath: str, rel_path: str) -> list[dict]:
+    """Report PSS syntax errors and unknown-property warnings."""
+    from pydrud.core.styles.parser import parse_pss
+
+    try:
+        with open(fpath, encoding="utf-8") as handle:
+            sheet = parse_pss(handle.read(), filename=rel_path)
+    except Exception as exc:
+        return [{
+            "file": rel_path,
+            "line": 0,
+            "severity": _SEVERITY_WARNING,
+            "message": f"Could not parse stylesheet: {exc}",
+        }]
+    issues = []
+    for diagnostic in sheet.diagnostics:
+        issues.append({
+            "file": rel_path,
+            "line": diagnostic.line,
+            "severity": (_SEVERITY_ERROR if diagnostic.kind == "error"
+                         else _SEVERITY_WARNING),
+            "message": f"PSS: {diagnostic.message}",
+        })
     return issues
 
 

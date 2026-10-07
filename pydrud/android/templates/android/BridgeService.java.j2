@@ -122,6 +122,25 @@ public class BridgeService {
         writer = null;
     }
 
+    /**
+     * Preview mode: serve an already-connected ``pydrud dev`` socket.
+     *
+     * <p>Used by the ``pydrud init android`` shell, where Python runs on the
+     * developer machine instead of on the device. The handshake is already
+     * done ({@link PreviewClient}); from here the render-transaction and
+     * event pipeline is identical to the standalone target.
+     */
+    public void serveExternalConnection(final Socket socket) {
+        running = true;
+        clientSocket = socket;
+        writer = null;
+        Log.i(TAG, "Preview connected to host");
+        new Thread(() -> {
+            serveClient(socket);
+            closeClient();
+        }, "pydrud-preview").start();
+    }
+
     // ── Server loop ───────────────────────────────────────────────────────
 
     private void runServer() {
@@ -182,7 +201,7 @@ public class BridgeService {
         try {
             JSONObject data = collectMetrics();
             data.put("protocol_version", PROTOCOL_VERSION);
-            data.put("renderer_version", "{{ pydrud_runtime_version | default('2.0.2') }}");
+            data.put("renderer_version", "{{ pydrud_runtime_version | default('2.1.0') }}");
             JSONObject capabilities = new JSONObject();
             capabilities.put("transactional_render", true);
             capabilities.put("revisioned_render", true);

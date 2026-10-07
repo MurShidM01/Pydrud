@@ -184,11 +184,17 @@ def _remove_generated_java(project_dir: str, found: dict) -> None:
 
 
 def _sync_generated_metadata(project_dir: str, ctx: dict) -> None:
-    """Refresh generated non-app metadata without touching ``src/app``."""
+    """Refresh generated non-app metadata without touching ``src/app``.
+
+    ``setup.py`` only exists for the standalone target (Chaquopy's pip
+    install step); preview shells run Python on the host and never need it.
+    """
     _write_template("python/pydrud_config.py.j2",
-                    os.path.join(project_dir, "src", "pydrud_config.py"), ctx)
-    _write_template("python/setup.py.j2",
-                    os.path.join(project_dir, "setup.py"), ctx)
+                    os.path.join(project_dir, "src", "pydrud_config.py"),
+                    {**ctx, "runtime": "chaquopy"})
+    if ctx.get("standalone", True):
+        _write_template("python/setup.py.j2",
+                        os.path.join(project_dir, "setup.py"), ctx)
 
 
 def _sync_toml_identity(project_dir: str, ctx: dict) -> None:
@@ -285,27 +291,38 @@ def sync_project(project_dir: str, *, update_runtime: bool = True) -> bool:
     Package, app name, SDK/toolchain versions, release metadata, assets,
     permissions and deep-link settings all flow from the system-level YAML
     manifest. The generated Java package is migrated when identity changes.
-    User code under ``src/app/`` is never touched.
+    Hand-written code under ``src/app/`` is never overwritten (the managed
+    standalone adapter ``android_main.py`` is refreshed, and ``jobs.py`` is
+    only seeded when missing).
 
     Pydash projects have no Android layer, so this command is an informational
-    no-op for them. ``sync`` refreshes an already-generated Chaquopy project;
-    to create that Android-only target, scaffold a project with
-    ``pydrud init <name> --runtime chaquopy``.
+    no-op for them. ``sync`` refreshes an already-generated Android project;
+    to create that target inside an existing project, run
+    ``pydrud init android`` (preview shell) or
+    ``pydrud init android --standalone`` (offline APK with embedded Python).
     """
+    # Local import: platforms.py builds on these sync helpers.
+    from pydrud.commands.project.platforms import (
+        android_is_standalone, android_python_entry,
+    )
+
     # Resolve runtime first so we can short-circuit for pydash projects.
     descriptor = resolve_runtime(project_dir)
     if descriptor.runtime is Runtime.PYDASH:
         persist_runtime(project_dir, Runtime.PYDASH)
         print(tui.warn_badge(
             "This project runs in pydash mode — no Android project exists. "
-            "Run 'pydrud dev' to start a live preview, or create a separate "
-            "Android project with 'pydrud init <name> --runtime chaquopy'."
+            "Run 'pydrud dev' to start a live preview, or add the Android "
+            "platform with 'pydrud init android'."
         ))
         return True
 
     found = _discover_project(project_dir)
     if not found:
         print(fail("No generated Android sources found — is this a Pydrud project?"))
+        if not os.path.isdir(os.path.join(project_dir, "android")):
+            print(info("Run 'pydrud init android' to generate the Android "
+                       "platform for this project."))
         return False
 
     try:
@@ -313,13 +330,24 @@ def sync_project(project_dir: str, *, update_runtime: bool = True) -> bool:
     except (ProjectConfigError, ValueError) as exc:
         print(fail(f"Invalid pydrud.yaml: {exc}"))
         return False
+    standalone = android_is_standalone(project_dir)
+    ctx["standalone"] = standalone
+    entry = android_python_entry(project_dir)
+    if (standalone and entry == "app.main"
+            and not _main_defines_start_app(project_dir)):
+        # A pydash entry point has no start_app for the device to call
+        # (e.g. a preview shell flipped to standalone via YAML): the
+        # managed adapter below boots it without touching user code.
+        entry = "app.android_main"
+    ctx["python_entry"] = entry
 
     print(tui.render_command_header(
         "sync",
         f"Syncing {ctx['project_name']}",
         subtitle="Applying pydrud.yaml to the generated Android project",
         details=(("Package", ctx["package"]), ("Pydrud", _version()),
-                 ("Runtime", ctx["pydrud_runtime_version"])),
+                 ("Runtime", ctx["pydrud_runtime_version"]),
+                 ("Mode", "standalone" if standalone else "preview")),
     ))
 
     identity_changed = (found["package"] != ctx["package"]
@@ -328,6 +356,19 @@ def sync_project(project_dir: str, *, update_runtime: bool = True) -> bool:
     _render_managed_android(project_dir, ctx)
     _sync_generated_metadata(project_dir, ctx)
     _sync_toml_identity(project_dir, ctx)
+    if standalone:
+        # Managed standalone entry point (init-android projects only) and
+        # the background-jobs adapter, created when missing. Hand-written
+        # app code is never overwritten: jobs.py is only seeded, while
+        # android_main.py is regenerated because it is a managed file.
+        if ctx["python_entry"] == "app.android_main":
+            _write_template(
+                "python/app/android_main.py.j2",
+                os.path.join(project_dir, "src", "app", "android_main.py"),
+                ctx)
+        jobs_path = os.path.join(project_dir, "src", "app", "jobs.py")
+        if not os.path.isfile(jobs_path):
+            _write_template("python/app/jobs.py.j2", jobs_path, ctx)
     # Fill in any launcher icon files the project is missing (never
     # overwriting icons the user generated or replaced themselves).
     _copy_icon_resources(project_dir, overwrite=False)
@@ -338,7 +379,7 @@ def sync_project(project_dir: str, *, update_runtime: bool = True) -> bool:
         detail += " + package migration"
     print(info(f"Rewrote {count} Java classes + {detail}"))
 
-    if update_runtime:
+    if update_runtime and standalone:
         _bundle_pydrud_source(project_dir)
 
     persist_runtime(project_dir, descriptor.runtime)
@@ -350,6 +391,16 @@ def sync_project(project_dir: str, *, update_runtime: bool = True) -> bool:
     ))
     print(tui.render_next_steps((("pydrud run", "rebuild and launch"),)))
     return True
+
+
+def _main_defines_start_app(project_dir: str) -> bool:
+    """Whether ``src/app/main.py`` defines the device entry point."""
+    try:
+        with open(os.path.join(project_dir, "src", "app", "main.py"),
+                  encoding="utf-8") as handle:
+            return "def start_app" in handle.read()
+    except OSError:
+        return False
 
 
 def _stamp_version(project_dir: str) -> None:

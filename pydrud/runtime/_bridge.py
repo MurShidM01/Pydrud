@@ -89,9 +89,20 @@ class BridgeMixin:
             except Exception as exc:
                 self._report_error(exc)
             return
-        if not self._running or self._ui_thread_id is None:
+        if not self._running:
             fn(*args, **kwargs)
             return
+        reader = self._reader_thread
+        loop_alive = reader is not None and reader.is_alive()
+        if self._ui_thread_id is None and not loop_alive:
+            # Headless or fully disconnected: no event loop will ever drain
+            # the queue, so run inline exactly as before.
+            fn(*args, **kwargs)
+            return
+        # Queue callbacks while the app is starting too. ``_running`` becomes
+        # true before the bridge event loop publishes ``_ui_thread_id``; doing
+        # the callback inline in that window races the initial render and can
+        # lose a state update on slower hosts (notably Windows).
         try:
             self._ui_queue.put_nowait((fn, args, kwargs))
             self._event_queue.put_nowait("__ui__")

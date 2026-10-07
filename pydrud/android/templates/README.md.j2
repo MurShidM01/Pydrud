@@ -40,6 +40,7 @@ APK, while `run` uses the generated Android app and embedded Python runtime.
         ├── state.py        the State objects every screen shares
         ├── runtime.py      the router and the live App handle (`refresh()`)
         ├── jobs.py         background work (WorkManager)
+        ├── theme.pss       starter stylesheet (classes via `class_=`)
         ├── ui.py           compatibility imports for older generated apps
         ├── components/     reusable UI shared by multiple screens
         └── screens/        one module per screen
@@ -60,12 +61,16 @@ prefer Python-first commands such as `pydrud capabilities add haptics` and
 
 ## PSS stylesheets
 
-Put `*.pss` files anywhere under `src/`; Pydrud discovers them and reloads
-stylesheet changes without re-executing Python. Selectors can target widget
-types, explicit keys, or Python-side classes attached with `class_=`. Inline
-`style=` values override stylesheet declarations. A syntax error keeps that
-file's last known-good rules active and reports a diagnostic; moving or
-deleting a stylesheet removes its old rules on the next rebuild. See the Pydrud
+`src/app/theme.pss` is the starter stylesheet: its classes are attached in
+the screens with `class_`, so editing the file re-skins the app without
+touching Python. Put more `*.pss` files anywhere under `src/`; Pydrud
+discovers them and reloads stylesheet changes without re-executing Python.
+Selectors can target widget types, explicit keys, or Python-side classes
+attached with `class_=`. Inline `style=` values override stylesheet
+declarations. A syntax error keeps that file's last known-good rules active
+and reports a diagnostic; moving or deleting a stylesheet removes its old
+rules on the next rebuild. `pydrud analyze` validates stylesheets along with
+your Python code. See the Pydrud
 [PSS stylesheet guide](https://github.com/MurShidM01/Pydrud/blob/main/docs/PSS_STYLESHEETS.md)
 for syntax and examples.
 
@@ -83,7 +88,7 @@ for syntax and examples.
 | `pydrud run` | build, install and launch on an attached Android device |
 | `pydrud dev` | run Python locally and wait for an authenticated Pydash preview client |
 | `pydrud sync` | apply `pydrud.yaml` and regenerate managed Android files |
-| `pydrud analyze` | static checks on your Python UI code |
+| `pydrud analyze` | static checks on your Python UI code and stylesheets |
 | `pydrud pip add requests` | add a Python package to the APK build |
 | `pydrud permissions add camera` | add a permission to the manifest |
 | `pydrud capabilities add haptics` | enable generated feature bundles |
@@ -130,10 +135,15 @@ the public internet.
         ├── config.py       app name, tagline, accent colour
         ├── state.py        the State objects every screen shares
         ├── runtime.py      the router and live App handle (`refresh()`)
+        ├── theme.pss       starter stylesheet (classes via `class_=`)
         ├── ui.py           compatibility imports for generated apps
         ├── components/     reusable UI shared by multiple screens
         └── screens/        one module per screen
 ```
+
+Run `pydrud init android` here to add the Android platform: a preview
+shell that renders `pydrud dev` on a phone (no Chaquopy or NDK needed),
+or pass `--standalone` for an offline APK with embedded Python.
 
 ## Python packages
 
@@ -152,12 +162,16 @@ and remains unavailable unless the client explicitly advertises it.
 
 ## PSS stylesheets
 
-Put `*.pss` files anywhere under `src/`; Pydrud discovers them and reloads
-stylesheet changes without re-executing Python. Selectors can target widget
-types, explicit keys, or Python-side classes attached with `class_=`. Inline
-`style=` values override stylesheet declarations. A syntax error keeps that
-file's last known-good rules active and reports a diagnostic; moving or
-deleting a stylesheet removes its old rules on the next rebuild. See the Pydrud
+`src/app/theme.pss` is the starter stylesheet: its classes are attached in
+the screens with `class_`, so editing the file re-skins the app without
+touching Python. Put more `*.pss` files anywhere under `src/`; Pydrud
+discovers them and reloads stylesheet changes without re-executing Python.
+Selectors can target widget types, explicit keys, or Python-side classes
+attached with `class_=`. Inline `style=` values override stylesheet
+declarations. A syntax error keeps that file's last known-good rules active
+and reports a diagnostic; moving or deleting a stylesheet removes its old
+rules on the next rebuild. `pydrud analyze` validates stylesheets along with
+your Python code. See the Pydrud
 [PSS stylesheet guide](https://github.com/MurShidM01/Pydrud/blob/main/docs/PSS_STYLESHEETS.md)
 for syntax and examples.
 
@@ -178,7 +192,10 @@ for syntax and examples.
 | `pydrud docs` | generate an offline API reference |
 | `pydrud pip add requests` | record a host-side Python dependency |
 
-For an Android-only standalone APK, start a separate project with
-`pydrud init <name> --runtime chaquopy`. That opt-in target requires the
-Android toolchain and uses `pydrud run`, `pydrud build`, and `pydrud sync`.
+For an installable Android app, run `pydrud init android` in this project:
+it generates the native shell from `pydrud.yaml`, so the package name and
+versions stay in sync automatically. The default preview shell needs only
+the JDK, SDK and Gradle (no Chaquopy, NDK or CMake); add `--standalone` for
+a fully offline APK with embedded Python. Either way the new shell uses
+`pydrud run`, `pydrud build`, and `pydrud sync`.
 {% endif %}

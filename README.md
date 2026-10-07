@@ -27,7 +27,7 @@
 | 1 | [Quick Start](#quick-start) | 8 | [Responsive](#responsive-v15) |
 | 2 | [Runtime Modes](#runtime-modes) | 9 | [Bottom Navigation & Tabs](#bottom-navigation-and-tabs-v15) |
 | 3 | [What You Get](#what-you-get) | 10 | [System UI](#set_system_ui-v101) |
-| 4 | [What's New in v2.0.3](#whats-new-in-v203) | 11 | [Architecture](#architecture) |
+| 4 | [What's New in v2.1.0](#whats-new-in-v210) | 11 | [Architecture](#architecture) |
 | 5 | [Examples](#examples) | 12 | [Android Project Configuration](#android-project-configuration) |
 | 6 | [Installation](#installation) | 13 | [CLI Reference](#cli-reference) |
 | 7 | [Widget Reference](#widget-reference) | 14 | [PSS Stylesheets](#pss-stylesheets) |
@@ -43,26 +43,30 @@ connects to a compatible preview renderer over the authenticated LAN protocol.
 It does not require an Android SDK or produce an APK.
 
 ```bash
-pip install pydrud                    # Install the framework
-pydrud init my_app --org com.example  # Defaults to the pydash runtime
+pip install pydrud                      # Install the framework
+pydrud create my_app --org com.example  # Defaults to the pydash runtime
 cd my_app
-pydrud dev                            # Start the host app and print a QR/URI
+pydrud dev                              # Start the host app and print a QR/URI
 ```
 
-For an Android-only standalone APK, explicitly opt into Chaquopy:
+For an installable Android app, add the platform inside the project:
 
 ```bash
-pydrud init my_android_app --org com.example --runtime chaquopy
-cd my_android_app
-pydrud run                            # Build, install and launch on Android
+pydrud init android               # Preview shell: no Chaquopy, NDK or CMake needed
+pydrud run                        # Build, install and launch on Android
 ```
+
+Need a fully offline APK with embedded Python? Use
+`pydrud init android --standalone` instead (or pass
+`--runtime chaquopy` to `pydrud create` to scaffold it directly).
 
 ## Runtime Modes
 
 | Runtime | What runs where | Build requirements | How to select |
 |---------|-----------------|--------------------|---------------|
-| **Pydash (default)** | Python and app state stay on the host; a separately provided renderer receives widget snapshots/patches and returns events. No APK is produced. | Host Python. No Android SDK, NDK, Gradle, or ADB for `pydrud dev`. | `pydrud init <name>` or `--runtime pydash` |
-| **Chaquopy (opt-in)** | CPython is bundled in a generated Android project and widgets are rendered as native Android Views. | Android SDK/NDK, JDK/Gradle; a connected device or emulator for install/run. | `pydrud init <name> --runtime chaquopy` |
+| **Pydash (default)** | Python and app state stay on the host; a separately provided renderer receives widget snapshots/patches and returns events. No APK is produced. | Host Python. No Android SDK, NDK, Gradle, or ADB for `pydrud dev`. | `pydrud create <name>` or `--runtime pydash` |
+| **Android preview shell** | Python stays on the host; the generated APK renders `pydrud dev` over the authenticated LAN protocol. | JDK, Android SDK, Gradle; a device or emulator for install/run. No Chaquopy, NDK or CMake. | `pydrud init android` inside the project |
+| **Android standalone (opt-in Chaquopy)** | CPython is bundled in the generated Android project and widgets are rendered as native Android Views, fully offline. | Android SDK/NDK, JDK/Gradle; a connected device or emulator for install/run. | `pydrud init android --standalone`, or `pydrud create <name> --runtime chaquopy` |
 
 The Pydash companion client is a separate project and is not built, bundled, or
 validated by this repository. Pydrud supplies its authenticated host-side
@@ -73,9 +77,11 @@ diff, and protocol-v2 render transaction contracts.
 New projects without a runtime setting default to Pydash. For compatibility,
 a pre-existing generated Android project with no `runtime` key is detected as
 Chaquopy and keeps that behavior; `pydrud sync` writes the inferred choice
-back to `pydrud.toml`. A runtime switch is not an in-place project conversion:
-create a separate Chaquopy project with `pydrud init <name> --runtime
-chaquopy` when you want an APK.
+back to `pydrud.toml`. The Android target shape is recorded separately as
+`standalone:` in `pydrud.yaml` (`true` embeds Python with Chaquopy, `false`
+builds the preview shell); older projects without the key keep whatever
+their Gradle files already do, so `sync` never silently changes an APK
+project into a preview shell or vice versa.
 
 
 ---
@@ -136,21 +142,19 @@ bridge.
 
 ---
 
-## What's New in v2.0.3
+## What's New in v2.1.0
 
-The production-readiness release: every finding from the 2.0.2 adversarial
-QA report is closed, on top of a richer UI layer and a fully modularised
-codebase. The complete, itemised history (v1.0.1 → v2.0.3) lives in
+The platform release: apps are created with `pydrud create`, the Android
+shell is added afterwards with `pydrud init android`, and stylesheets ship
+in every starter. The complete, itemised history (v1.0.1 → v2.1.0) lives in
 [CHANGELOG.md](CHANGELOG.md).
 
 | Area | Highlights |
 |------|------------|
-| Reliability | Deep widget trees no longer raise `RecursionError`; oversized frames are windowed instead of wedging the renderer; Canvas repaints on device; hot reload is revision-safe |
-| Renderer | Recycler-based virtualised lists; managed image pipeline (decode pool + LRU cache); crash-proof keyed view tags; edge-to-edge insets re-applied on rotation |
-| New widgets | `Flex`, `PageView` / `Carousel`, `RangeSlider`, `PopupMenu` / `DropdownMenu`, `NavigationBar`, `Dismissible`, `InfiniteList` |
-| Accessibility | `semanticsLabel`, live-region announcements, touch-target enforcement (§14.7) |
-| Developer experience | `AppTester.settle()`, analyzer icon suggestions + build-time-only import detection, once-per-key unknown-style warnings, offline HTML docs |
-| Project structure | Every Python module and Java template is now under 1,000 lines — `ViewFactory` split into 8 collaborator classes, `MaterialViews` into 2, and five Python packages modularised |
+| CLI | `pydrud create` replaces `pydrud init <name>` for new apps; `pydrud init android` adds the native platform to an existing project (ios/linux/windows/web/macos reserved for later) |
+| Android without Chaquopy | The default `android/` shell renders `pydrud dev` over the authenticated LAN protocol — JDK + SDK + Gradle only, no Chaquopy, NDK or CMake; `--standalone` embeds CPython for offline APKs |
+| PSS stylesheets | Every new app ships `src/app/theme.pss` wired to its screens via `class_`; `pydrud analyze` now validates stylesheets alongside Python |
+| Reliability | Hot-reload file paths are POSIX on every OS (Windows fix); state updates during app startup queue instead of racing the first frame |
 
 
 ## Examples
@@ -162,7 +166,7 @@ Runnable example apps ship in [`examples/`](examples/):
 | [`todo_app.py`](examples/todo_app.py) | `Store` reactive state, list CRUD, filters, `SearchField` |
 | [`weather_app.py`](examples/weather_app.py) | Async HTTP, responsive layout, cards and charts |
 
-The `pydrud init` starter app is itself a full showcase (Scaffold, AppBar,
+The `pydrud create` starter app is itself a full showcase (Scaffold, AppBar,
 bottom navigation, forms and theming), and `pydrud docs --serve` generates a
 searchable HTML reference for every widget, prop and service.
 
@@ -1279,9 +1283,11 @@ orchestrator plus cohesive collaborator classes:
 
 ## Android project configuration
 
-This section applies only to projects created with `--runtime chaquopy`.
-Pydash projects do not have an Android project or use the Android fields in
-`pydrud.yaml`.
+This section applies once a project has the Android platform — added with
+`pydrud init android` (preview shell by default, `--standalone` for embedded
+Python) or scaffolded directly with `pydrud create <name> --runtime
+chaquopy`. Pure Pydash projects do not have an Android project or use the
+Android fields in `pydrud.yaml`.
 
 For Chaquopy projects, `pydrud.yaml` is the system-level source of truth for
 generated Android files. Change it and run `pydrud sync`; the command updates
@@ -1294,6 +1300,7 @@ identity discovered under `android/`.
 app_name: "Taskflow"
 package: "com.example.taskflow"
 runtime: "chaquopy"
+standalone: true
 version_code: 2
 version_name: "1.1.0"
 min_sdk: 24
@@ -1312,7 +1319,7 @@ capabilities:
 firebase: false
 shrink: false
 python_version: "3.11"
-framework_version: "2.0.3"
+framework_version: "2.1.0"
 protocol_version: 2
 chaquopy_version: "17.0.0"
 agp_version: "8.13.2"
@@ -1352,30 +1359,32 @@ as `pydrud analyze --json` remains plain JSON.
 
 | Command | Description |
 |---------|-------------|
-| `pydrud init <name>` | Create a Pydash project by default; no Android toolchain or APK |
-| `pydrud init <name> --runtime chaquopy` | Opt into the standalone Android APK project |
-| `pydrud init <name> --org com.example` | Set the project/package prefix |
+| `pydrud create <name>` | Create a Pydash project by default; no Android toolchain or APK |
+| `pydrud create <name> --runtime chaquopy` | Opt into the standalone Android APK project |
+| `pydrud create <name> --org com.example` | Set the project/package prefix |
+| `pydrud init android` | Add the Android preview shell to this project (no Chaquopy/NDK/CMake) |
+| `pydrud init android --standalone` | Add the Android platform with embedded Python (offline APK) |
 | `pydrud dev [project_dir]` | Run host Python, start authenticated LAN preview, print QR/URI; no ADB |
 | `pydrud dev --host <ip> --port <port>` | Configure preview listener (`--connect-host` overrides the QR address) |
-| `pydrud build` / `pydrud build --release` | Build a debug/release APK (Chaquopy only) |
-| `pydrud run` | Build + install + launch on Android (Chaquopy only) |
-| `pydrud watch` | Chaquopy-only Android Hot Reload runner; use `pydrud dev` for Pydash |
+| `pydrud build` / `pydrud build --release` | Build a debug/release APK (Android platform only) |
+| `pydrud run` | Build + install + launch on Android (Android platform only) |
+| `pydrud watch` | Standalone-only Android Hot Reload runner; use `pydrud dev` otherwise |
 | `pydrud devices` | List connected Android devices (`adb devices -l`) |
-| `pydrud analyze` | Runtime-aware static analysis (keys, styles, platform/import compatibility) |
+| `pydrud analyze` | Static analysis of Python UI code and PSS stylesheets (runtime-aware) |
 | `pydrud analyze --path src` | Custom source directory |
 | `pydrud analyze --json` | Machine-readable JSON output |
-| `pydrud clean` | Clean Chaquopy/Android build artifacts |
-| `pydrud sync` | Refresh the generated Android layer (Chaquopy only; Pydash is a no-op) |
+| `pydrud clean` | Clean Android build artifacts |
+| `pydrud sync` | Refresh the generated Android layer (Android platform only; Pydash is a no-op) |
 | `pydrud doctor` | Check host requirements and, when relevant, Android toolchain requirements |
 | `pydrud pip add <pkg>...` | Pydash records host dependencies; Chaquopy validates packages and syncs Gradle |
 | `pydrud pip remove <pkg>...` | Remove declarations; Chaquopy also updates Gradle |
 | `pydrud pip list [--all] [--category ai]` | List project declarations or the Android package catalogue |
 | `pydrud pip search <term>` | Search the Android catalogue; Pydash also accepts unlisted host packages |
-| `pydrud pip sync` | Apply package declarations to Gradle (Chaquopy only) |
-| `pydrud permissions add\|remove <name>...` | Update YAML and the Android manifest (Chaquopy only) |
-| `pydrud capabilities add\|remove <name>...` | Enable Android feature bundles (Chaquopy only) |
-| `pydrud icons [--source logo.png]` | Generate Android launcher icons (Chaquopy only) |
-| `pydrud keygen` | Create the Play Store upload keystore (Chaquopy only) |
+| `pydrud pip sync` | Apply package declarations to Gradle (standalone only) |
+| `pydrud permissions add\|remove <name>...` | Update YAML and the Android manifest (Android platform only) |
+| `pydrud capabilities add\|remove <name>...` | Enable Android feature bundles (Android platform only) |
+| `pydrud icons [--source logo.png]` | Generate Android launcher icons (Android platform only) |
+| `pydrud keygen` | Create the Play Store upload keystore (Android platform only) |
 | `pydrud docs [--serve]` | Offline HTML API reference |
 | `pydrud inspect [--tree] [--watch]` | Build a local static tree or inspect Android bridge traffic; `--watch` follows the Chaquopy bridge |
 
@@ -1400,7 +1409,11 @@ Python 3.10 or newer and the Pydrud package are sufficient to run host-side
 NDK, Gradle, or ADB. The independent Pydash companion renderer is not shipped
 or built by this repository.
 
-### Chaquopy Android APK workflow (opt-in)
+### Android APK workflows (added with `pydrud init android`)
+
+The default preview shell needs only the JDK, Android SDK and Gradle. The
+standalone target additionally needs the NDK, CMake and the Chaquopy plugin
+(applied automatically — there is nothing to install by hand):
 
 | Tool | Current project default | Notes |
 |------|-------------------------|-------|
@@ -1418,7 +1431,8 @@ needed for `pydrud run`, but not for host-side `pydrud dev` or the unit tests.
 
 ### Setting up Android SDK
 
-These steps are needed only for Chaquopy projects:
+These steps are needed only for projects with the Android platform
+(`pydrud init android`); pure Pydash projects never touch the SDK:
 
 <details>
 <summary><b>Windows</b></summary>
@@ -1506,7 +1520,7 @@ Pydrud/
 
 | Version | Focus |
 |---------|-------|
-| **Unreleased** | Pydash default/Chaquopy opt-in, runtime-aware packaging and analyzer, platform-neutral PSS parsing/resolution and hot reload |
+| **v2.1.0** | `create`/`init android` CLI, Chaquopy-free Android preview shell, starter PSS theme, Pydash default/Chaquopy opt-in, runtime-aware tooling, platform-neutral PSS engine |
 | **v1.0.0** | Core widgets, state, diffing, CLI, APK generation, responsive scaling |
 | **v1.0.1** | Router, Scaffold, AppBar, FAB, MediaQuery, Hot Reload, incremental patches, WidgetRegistry, analyze CLI |
 | **v1.1.0** | Stable keys + keyed diffing, 10 new widgets, Colors/Icons/Theme, working back button, FAB overlays, toast/snackbar/vibrate, lifecycle hooks, self-bootstrapping Gradle, FakeDevice test harness |

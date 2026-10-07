@@ -14,11 +14,13 @@ import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.activity.OnBackPressedCallback;
 
+{% if standalone | default(true) %}
 import com.chaquo.python.PyObject;
 import com.chaquo.python.Python;
 import com.chaquo.python.android.AndroidPlatform;
+{% endif %}
 
-public class {{ app_name }}Activity extends AppCompatActivity {
+public class {{ app_name }}Activity extends AppCompatActivity{% if not (standalone | default(true)) %} implements PreviewClient.Callback{% endif %} {
 
     private static final String TAG = "PydrudActivity";
 
@@ -119,6 +121,7 @@ public class {{ app_name }}Activity extends AppCompatActivity {
         bridge = new BridgeService(this, rootView, viewFactory, eventDispatcher);
         eventDispatcher.setBridge(bridge);
 
+        {% if standalone | default(true) %}
         new Thread(() -> {
             try {
                 try {
@@ -138,14 +141,20 @@ public class {{ app_name }}Activity extends AppCompatActivity {
                 bridge.start();
                 bridge.awaitListening(5000);
 
-                Log.i(TAG, "Invoking Python app.main.start_app()");
-                PyObject module = Python.getInstance().getModule("app.main");
+                Log.i(TAG, "Invoking Python {{ python_entry | default('app.main') }}.start_app()");
+                PyObject module = Python.getInstance().getModule("{{ python_entry | default('app.main') }}");
                 module.callAttr("start_app");
             } catch (Throwable t) {
                 Log.e(TAG, "Failed to start Python app", t);
                 runOnUiThread(() -> showFatal(t));
             }
         }, "pydrud-python").start();
+        {% else %}
+        // Preview shell (`pydrud init android`): Python runs on the developer
+        // machine under `pydrud dev`. Connect below; the renderer takes over
+        // once the preview handshake succeeds.
+        showPreviewConnect();
+        {% endif %}
     }
 
     // ── Window metrics ────────────────────────────────────────────────────
@@ -957,6 +966,155 @@ public class {{ app_name }}Activity extends AppCompatActivity {
         file.delete();
     }
 
+    {% if not (standalone | default(true)) %}
+    // ── Preview-shell connect screen ──────────────────────────────────────
+    // Compiled only for `pydrud init android` (no Chaquopy). Standalone
+    // builds boot embedded Python instead and never show this screen.
+
+    private android.widget.TextView previewStatus;
+    private android.widget.Button previewConnectButton;
+
+    /** Remember the last host/port so desktop iteration is one tap. */
+    private android.content.SharedPreferences previewPrefs() {
+        return getPreferences(MODE_PRIVATE);
+    }
+
+    /** Build the connect form programmatically (no XML to keep in sync). */
+    private void showPreviewConnect() {
+        android.widget.LinearLayout form = new android.widget.LinearLayout(this);
+        form.setOrientation(android.widget.LinearLayout.VERTICAL);
+        int pad = PydrudTheme.dp(24);
+        form.setPadding(pad, pad, pad, pad);
+        form.setBackgroundColor(PydrudTheme.background);
+
+        android.widget.TextView title = new android.widget.TextView(this);
+        title.setText("{{ project_name }} — Preview");
+        PydrudTheme.applyTextDefaults(title, 22f, 700, PydrudTheme.onBackground);
+        form.addView(title);
+
+        android.widget.TextView hint = new android.widget.TextView(this);
+        hint.setText("Run `pydrud dev` on your computer, then paste its "
+            + "pydrud:// connection URI — or enter the host details below.");
+        PydrudTheme.applyTextDefaults(hint, 14f, 400, PydrudTheme.onSurfaceVariant);
+        android.widget.LinearLayout.LayoutParams hintParams =
+            new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+        hintParams.topMargin = PydrudTheme.dp(8);
+        hintParams.bottomMargin = PydrudTheme.dp(16);
+        form.addView(hint, hintParams);
+
+        final android.widget.EditText uriField =
+            previewField(form, "Connection URI (pydrud://preview/…)", "");
+        final android.widget.EditText hostField = previewField(
+            form, "Host (e.g. 192.168.1.24)",
+            previewPrefs().getString("preview_host", ""));
+        final android.widget.EditText portField = previewField(
+            form, "Port", previewPrefs().getString("preview_port", "8597"));
+        final android.widget.EditText sessionField =
+            previewField(form, "Session", "");
+        final android.widget.EditText tokenField =
+            previewField(form, "Token", "");
+
+        previewConnectButton = new android.widget.Button(this);
+        previewConnectButton.setText("Connect");
+        previewConnectButton.setOnClickListener(v -> connectPreview(
+            uriField.getText().toString().trim(),
+            hostField.getText().toString().trim(),
+            portField.getText().toString().trim(),
+            sessionField.getText().toString().trim(),
+            tokenField.getText().toString().trim()));
+        form.addView(previewConnectButton);
+
+        previewStatus = new android.widget.TextView(this);
+        PydrudTheme.applyTextDefaults(previewStatus, 13f, 400,
+            PydrudTheme.onSurfaceVariant);
+        android.widget.LinearLayout.LayoutParams statusParams =
+            new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+        statusParams.topMargin = PydrudTheme.dp(12);
+        form.addView(previewStatus, statusParams);
+
+        android.widget.ScrollView scroll = new android.widget.ScrollView(this);
+        scroll.addView(form);
+        setContentView(scroll);
+    }
+
+    /** One labelled input row inside the connect form. */
+    private android.widget.EditText previewField(
+            android.widget.LinearLayout form, String hint, String value) {
+        android.widget.EditText field = new android.widget.EditText(this);
+        field.setHint(hint);
+        field.setText(value);
+        field.setSingleLine(true);
+        PydrudTheme.applyTextDefaults(field, 15f, 400, PydrudTheme.onSurface);
+        android.widget.LinearLayout.LayoutParams params =
+            new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+        params.bottomMargin = PydrudTheme.dp(10);
+        form.addView(field, params);
+        return field;
+    }
+
+    /** Validate the form, then open the authenticated preview session. */
+    private void connectPreview(String uri, String host, String portText,
+                                String session, String token) {
+        if (uri.startsWith("pydrud://")) {
+            try {
+                android.net.Uri parsed = android.net.Uri.parse(uri);
+                host = parsed.getQueryParameter("host");
+                portText = parsed.getQueryParameter("port");
+                session = parsed.getQueryParameter("session");
+                token = parsed.getQueryParameter("token");
+            } catch (Throwable t) {
+                previewStatus.setText("That URI could not be parsed.");
+                return;
+            }
+        }
+        int port;
+        try {
+            port = Integer.parseInt(portText == null ? "" : portText.trim());
+        } catch (NumberFormatException e) {
+            port = -1;
+        }
+        if (host == null || host.isEmpty() || port < 1 || port > 65535
+                || session == null || session.isEmpty()
+                || token == null || token.isEmpty()) {
+            previewStatus.setText(
+                "Enter the connection URI or all four fields.");
+            return;
+        }
+        previewConnectButton.setEnabled(false);
+        previewStatus.setText("Connecting to " + host + ":" + port + " …");
+        previewPrefs().edit()
+            .putString("preview_host", host)
+            .putString("preview_port", String.valueOf(port))
+            .apply();
+        PreviewClient.connect(host, port, session, token, this, this);
+    }
+
+    @Override
+    public void onPreviewConnected(final java.net.Socket socket) {
+        runOnUiThread(() -> {
+            setContentView(rootView);
+            bridge.serveExternalConnection(socket);
+            // A deep link that launched the app waits until the host is
+            // actually listening, so no link is ever dropped.
+            flushDeepLink();
+        });
+    }
+
+    @Override
+    public void onPreviewError(final String message) {
+        runOnUiThread(() -> {
+            previewStatus.setText("Connection failed: " + message);
+            previewConnectButton.setEnabled(true);
+        });
+    }
+
+    {% endif %}
     @Override
     protected void onDestroy() {
         sendLifecycle("destroy");

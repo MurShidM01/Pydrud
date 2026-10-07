@@ -6,7 +6,7 @@ All notable changes to Pydrud are documented here.
 
 | Version | Theme | Highlights |
 |---------|-------|------------|
-| [Unreleased](#unreleased) | Cross-platform runtime and PSS | Pydash default, runtime-aware tooling, platform-neutral stylesheets and hot reload |
+| [2.1.0](#210--2026-10-07) | Platforms and stylesheets | `create`/`init android` CLI, Chaquopy-free Android preview shell, starter PSS theme, Pydash default with runtime-aware tooling |
 | [2.0.3](#203--2026-10-06) | Production readiness | All QA findings closed, renderer hardening, accessibility, modular structure (no file > 1,000 lines) |
 | [2.0.2](#202--reliable-haptics-and-expanded-widget-catalogue) | Reliability & widgets | Clean logs, reliable haptics, expanded widget catalogue |
 | [2.0.1](#201--starter-capability-and-ui-hardening) | Starter & UI hardening | Capabilities system, the Native Playground starter app |
@@ -23,20 +23,53 @@ All notable changes to Pydrud are documented here.
 
 ---
 
-## [Unreleased]
+## [2.1.0] — 2026-10-07
+
+The platform release. Apps are created with `pydrud create`, the Android
+shell is added afterwards with `pydrud init android`, and every starter
+ships a working stylesheet.
+
+### Changed — `create`/`init` CLI and Android platforms
+* `pydrud create <name>` replaces `pydrud init <name>` for new apps (same
+  options). `pydrud init <platform>` is now the platform command, run inside
+  a project: `pydrud init android` generates `android/` from the project's
+  `pydrud.yaml`/`pydrud.toml` identity. `ios`, `linux`, `windows`, `web` and
+  `macos` are accepted as reserved future names with a clear "not yet"
+  message; anything else points at `pydrud create`.
+* The default Android target is a preview shell that renders `pydrud dev`
+  over the authenticated LAN preview protocol (v1 handshake, renderer v2):
+  it needs only the JDK, Android SDK and Gradle — no Chaquopy plugin, NDK
+  or CMake. The shell shows a connect screen (paste the `pydrud://` URI or
+  enter host/port/session/token) and then reuses the full native renderer,
+  services and event pipeline.
+* Chaquopy is now a per-project opt-in for offline APKs: `pydrud init
+  android --standalone` (or `pydrud create <name> --runtime chaquopy`)
+  embeds CPython, bundles the runtime, and boots the managed
+  `app.android_main` adapter so the user's `app/main.py` stays untouched.
+  The choice is recorded as `standalone:` in `pydrud.yaml`; re-running
+  `init android --standalone` upgrades a preview shell in place.
+* `pydrud sync` regenerates either target shape from YAML and never flips
+  one into the other implicitly: `standalone:` wins when present, otherwise
+  existing Gradle files decide (legacy projects stay standalone). `pydrud
+  run` installs preview shells and points at `pydrud dev`, while `pydrud
+  watch` stays standalone-only. `pydrud doctor` checks NDK/CMake/Chaquopy
+  for standalone targets and validates the preview client for shells;
+  `pydrud pip` records dependencies for shells and syncs Gradle only for
+  standalone builds. Analyzer import checks treat preview shells as
+  host-executed (Pydash rules).
 
 ### Changed — runtime selection and tooling
 * New and unconfigured projects default to the toolchain-free `pydash`
-  runtime; Chaquopy is an explicit Android-only opt-in selected with
-  `pydrud init <name> --runtime chaquopy`. Legacy generated Android projects
-  without a runtime key are still recognized as Chaquopy and keep their
-  behavior.
+  runtime; Chaquopy is an explicit Android-only opt-in. Legacy generated
+  Android projects without a runtime key are still recognized as Chaquopy
+  and keep their behavior.
 * Project scaffolding, `pydrud sync`, `pydrud doctor`, package management
-  and analyzer checks now follow the selected runtime. Android-only build,
-  watch and project-editing commands reject Pydash projects and point to
-  `pydrud dev`. Pydash dependencies are recorded for the host environment
-  instead of being filtered through Android's package catalogue or inserted
-  into Gradle. Chaquopy package policy and APK bundling remain Android-specific.
+  and analyzer checks follow the selected runtime. Android-only build and
+  project-editing commands reject pure Pydash projects and point to
+  `pydrud dev` or `pydrud init android`. Pydash dependencies are recorded
+  for the host environment instead of being filtered through Android's
+  package catalogue or inserted into Gradle. Chaquopy package policy and
+  APK bundling remain standalone-specific.
 * Android-only renderer profile, on-device development server and logcat
   adapters live under `pydrud/platforms/android`; shared protocol, PSS,
   diffing and style vocabulary remain in platform-neutral packages.
@@ -55,16 +88,29 @@ All notable changes to Pydrud are documented here.
   retain their last-known-good rules, while creating or deleting a stylesheet
   updates the active rules. Composite PSS values accept CSS-style bare keys
   and nested arrays/objects.
+* Every new app ships `src/app/theme.pss`, wired to its starter screens via
+  `class_`, and the generated test suite asserts the sheet parses cleanly
+  and styles the app. `pydrud analyze` validates `*.pss` files alongside
+  Python source.
 * The watcher handles created, edited, moved and deleted `.pss` files in both
   watchdog and polling modes. Documentation includes `docs/PSS_STYLESHEETS.md`,
   the architecture and preview-protocol guides, the generated-project README,
   and the root README.
 
+### Fixed
+* Hot-reload file paths are POSIX (`src/app/theme.pss`) on every OS: the
+  Windows backslash form broke stylesheet reconciliation on device.
+* A state update scheduled while the app is still starting now queues onto
+  the UI actor instead of running inline and racing the first frame; the
+  `AppTester.settle()` harness also waits on the UI queue. This removes the
+  intermittent Windows-only stall growing a list past the frame budget.
+
 ### Scope
 * The Pydash companion renderer/client is not implemented, bundled, or
-  validated here. This change provides the host-side preview endpoint; it does
-  not add a standalone Pydash export target. Android Gradle/APK/device
-  verification is also not claimed.
+  validated here. This change provides the host-side preview endpoint plus a
+  generated Android preview-shell client for it; it does not add a
+  standalone Pydash export target. Android Gradle/APK/device verification on
+  physical hardware is also not claimed.
 
 ## [2.0.3] — 2026-10-06
 

@@ -1,6 +1,6 @@
 """The generated project is a real, navigable Python project.
 
-``pydrud init`` must produce a package a team can grow: one module per
+``pydrud create`` must produce a package a team can grow: one module per
 concern, a README, and tests that pass out of the box.
 """
 
@@ -35,6 +35,7 @@ EXPECTED_FILES = (
     "src/app/screens/__init__.py",
     "src/app/screens/playground.py",
     "src/app/screens/details.py",
+    "src/app/theme.pss",
 )
 
 

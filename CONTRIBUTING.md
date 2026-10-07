@@ -23,7 +23,7 @@ backlog that CI does not.
 A new project must also be green out of the box:
 
 ```bash
-cd /tmp && pydrud init smoke --org com.example && cd smoke && pytest -q
+cd /tmp && pydrud create smoke --org com.example && cd smoke && pytest -q
 ```
 
 ## Where things go
@@ -48,7 +48,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). In short: runtime code in
   `AppTester` by key and visible text where you can.
 * **Templates are code.** Changes under `pydrud/android/templates/android/`
   must pass `tools/check_java.py`; changes under `.../python/` must leave
-  `pydrud init` + `pytest` green.
+  `pydrud create` + `pytest` green.
 * **Pydash and Chaquopy packaging are different.** Only the opt-in
   Chaquopy scaffold vendors the runtime into `src/pydrud/`; the default
   Pydash scaffold runs the installed package on the host. For the APK, CLI

@@ -417,7 +417,7 @@ def generate_icons(project_dir: str, *, source: Optional[str] = None,
 
     # Adaptive icon (API 26+): a full-bleed background layer plus the art
     # centred in the safe zone of the foreground layer — the same structure
-    # the `pydrud init` template ships, so both pipelines stay compatible.
+    # the `pydrud create` template ships, so both pipelines stay compatible.
     anydpi = os.path.join(res_dir, "mipmap-anydpi-v26")
     os.makedirs(anydpi, exist_ok=True)
     adaptive = os.path.join(anydpi, "ic_launcher.xml")

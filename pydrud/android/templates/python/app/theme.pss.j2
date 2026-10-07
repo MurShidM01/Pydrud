@@ -1,0 +1,51 @@
+/*
+ * Starter Pydrud Style Sheet (PSS).
+ *
+ * These classes are attached with class_ in the generated screen modules.
+ * Edit this file and save: pydrud dev reapplies the rules without reloading
+ * your Python code.
+ */
+
+.app-shell {
+    bg: #F8FAFC;
+    padding: { all: 24 };
+}
+
+.app-title {
+    color: #0F172A;
+    font: { size: 26, weight: 700 };
+}
+
+.app-tagline {
+    color: #64748B;
+    font: { size: 14 };
+}
+
+.counter-value {
+    color: #1E293B;
+    font: { size: 20, weight: 600 };
+    padding: { vertical: 8 };
+}
+
+.primary-action {
+    bg: {{ seed_color | default("#FF6366F1") }};
+    color: #FFFFFF;
+    border-radius: 12;
+    padding: { horizontal: 16, vertical: 12 };
+}
+
+.secondary-action {
+    bg: #E0E7FF;
+    color: #312E81;
+    border-radius: 12;
+    padding: { horizontal: 16, vertical: 12 };
+}
+
+.details-title {
+    color: #0F172A;
+    font: { size: 24, weight: 700 };
+}
+
+.details-copy {
+    color: #475569;
+}

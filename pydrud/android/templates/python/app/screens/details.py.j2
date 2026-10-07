@@ -9,9 +9,12 @@ from app.state import counter
 
 def details_screen(page):
     page.add(Column(spacing=12, children=[
-        Text("Details", key="pydash_details_title", size=24, weight=700),
-        Text(f"The shared counter is {counter.value}.", key="pydash_details_count"),
-        Button("Back", key="pydash_back", on_click=lambda _event: router.pop()),
+        Text("Details", key="pydash_details_title", class_="details-title",
+             size=24, weight=700),
+        Text(f"The shared counter is {counter.value}.",
+             key="pydash_details_count", class_="details-copy"),
+        Button("Back", key="pydash_back", class_="secondary-action",
+               on_click=lambda _event: router.pop()),
     ]))
 {% else %}
 """Details — the screen the playground pushes onto the navigation stack.

@@ -26,6 +26,12 @@ app.add_stylesheet_source(
 are combined in sorted path order; explicitly registered in-memory sources
 are applied as overlays after disk sources.
 
+Every project created with `pydrud create` ships `src/app/theme.pss`, wired
+to its starter screens through `class_`, so editing the stylesheet re-skins
+the app without touching Python. On-device standalone targets load that file
+explicitly (the APK has no project root to discover from); `pydrud analyze`
+validates stylesheets alongside Python source.
+
 ## Widget classes and selectors
 
 Use `class_=` on a widget to attach one or more Python-side class names. A

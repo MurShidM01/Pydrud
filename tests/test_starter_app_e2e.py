@@ -1,7 +1,7 @@
 """
 Full-app end-to-end test of the generated starter app.
 
-Scaffolds a real project with ``pydrud init``, imports the generated
+Scaffolds a real project with ``pydrud create``, imports the generated
 **Pydrud Native Playground**, runs it against :class:`FakeDevice` and
 drives it like a user would: tapping the native service demos (toast,
 snackbar, dialog, haptics, clipboard), typing into the components,

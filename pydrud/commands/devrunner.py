@@ -65,6 +65,10 @@ class DevRunner:
         self.activity_class = self.builder._get_activity_class() or "MainActivity"
         self.app_name = os.path.basename(self.root)
 
+    def _relative_project_path(self, path: str) -> str:
+        """Return a renderer protocol path with POSIX separators on every OS."""
+        return os.path.relpath(path, self.root).replace("\\", "/").replace(os.sep, "/")
+
     # ── Main Entry Point ──────────────────────────────────────────────────
 
     def run(self) -> int:
@@ -254,14 +258,14 @@ class DevRunner:
         for fpath in target_files:
             if not os.path.isfile(fpath):
                 if specific_files and fpath.lower().endswith(".pss"):
-                    rel = os.path.relpath(fpath, self.root).replace(os.sep, "/")
+                    rel = self._relative_project_path(fpath)
                     if not rel.startswith("../") and rel != "..":
                         deleted_stylesheets.append(rel)
                 continue
             try:
                 with open(fpath, "r", encoding="utf-8") as fp:
                     content = fp.read()
-                rel = os.path.relpath(fpath, self.root)
+                rel = self._relative_project_path(fpath)
                 files_to_sync.append({"path": rel, "content": content})
             except Exception as e:
                 sys.stdout.write(tui.warn_badge(f"Could not read {fpath}: {e}\n"))
@@ -323,7 +327,7 @@ class DevRunner:
                         try:
                             with open(fpath, "r", encoding="utf-8") as fp:
                                 content = fp.read()
-                            rel = os.path.relpath(fpath, self.root)
+                            rel = self._relative_project_path(fpath)
                             files_to_sync.append({"path": rel, "content": content})
                         except Exception:
                             pass

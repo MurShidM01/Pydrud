@@ -10,7 +10,11 @@ Pydash default (`pydrud dev`)
   local project Python ── authenticated LAN preview v1 ──► independent renderer
        source stays on host     renderer protocol v2: snapshots/patches/ACKs/events
 
-Chaquopy opt-in (generated Android APK)
+Android preview shell (`pydrud init android`, no Chaquopy)
+  local project Python ── authenticated LAN preview v1 ──► generated PreviewClient
+                                                            └─ same native Views
+
+Android standalone (`--standalone`, Chaquopy opt-in)
   embedded Python ── existing local NDJSON bridge v2 ──► generated BridgeService
                                                         └─ Android native Views
 ```
@@ -22,7 +26,9 @@ not change `RenderTransaction`, keyed patch semantics, the wire format of the
 Android bridge, or the Python app's desired/confirmed render identity. The
 Pydash client is separate from this repository; Pydrud does not build, bundle,
 or validate that client, and this work does not add a standalone Pydash export
-target.
+target. The generated Android preview shell is a separate, first-party v1
+client of the same protocol: after its handshake it reuses the identical
+render-transaction and event pipeline as the standalone target.
 
 ## Layers
 
@@ -34,8 +40,8 @@ target.
 | `pydrud/platforms/android/` | Android-only adapter data (`AndroidRendererProfile`), the embedded development/source-sync server, and logcat output adapter |
 | `pydrud/widgets/` | The widget vocabulary, styling helpers, theme, responsive widgets, and composites; `class_` is local stylesheet metadata, not wire data |
 | `pydrud/services/` | APIs for optional client/device services and the cross-platform HTTP client |
-| `pydrud/android/` | Build-time templates for the Chaquopy Android project and static Java-template checks; never imported by the PSS resolver |
-| `pydrud/commands/` | CLI, runtime-aware package management and analyzer, scaffold/build/sync commands, and host preview runner |
+| `pydrud/android/` | Build-time templates for the Android project (preview shell and standalone) and static Java-template checks; never imported by the PSS resolver |
+| `pydrud/commands/` | CLI, runtime-aware package management and analyzer, create/init-platform/sync commands, builder, and host preview runner |
 | `pydrud/testing.py` | `FakeRenderer` / `AppTester`: local socket renderer for protocol and app tests without an Android device |
 
 Application code should import from the top-level namespace (`from pydrud
@@ -56,6 +62,15 @@ policy, and syncs Python dependencies into Gradle. An already-generated
 Android project with no `runtime` key is recognized as legacy Chaquopy so an
 upgrade does not silently change its behavior; a successful `sync` persists
 that inferred selection.
+
+The Android target shape is orthogonal to the runtime and is recorded as
+`standalone:` in `pydrud.yaml`. `standalone: true` embeds CPython with
+Chaquopy (offline APK, NDK/CMake required); `standalone: false` builds the
+preview shell (JDK/SDK/Gradle only). `pydrud create` makes pure-Python
+projects; `pydrud init android` adds the platform (preview by default,
+`--standalone` for embedded Python). `sync` regenerates whichever shape the
+project has without flipping it: the YAML key wins, otherwise the existing
+Gradle files decide.
 
 Android assumptions belong in `pydrud/platforms/android/` or the generated
 Android templates, not in `pydrud/core/`. The Android profile supplies
