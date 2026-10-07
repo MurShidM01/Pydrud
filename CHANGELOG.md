@@ -338,10 +338,10 @@ tests so it cannot regress.
   reports both), the generated-template drift test checks only the shipped
   constants, and the pack test restores the registry afterwards.
 * **The neutrality test no longer corrupts the rest of the suite.**
-  `test_core_imports_are_android_free` deleted fifteen core modules from
-  `sys.modules` and re-imported them in the test process, leaving two copies
-  of `pydrud.core.responsive`, `pydrud.core.tasks`, `pydrud.widgets.styling`
-  and friends alive at once. Names bound at import time (`from pydrud import
+  `test_core_imports_are_android_free` deleted the core modules it checks
+  from `sys.modules` and re-imported them in the test process, leaving two
+  copies of `pydrud.core.responsive`, `pydrud.core.tasks`,
+  `pydrud.widgets.styling` and friends alive at once. Names bound at import time (`from pydrud import
   MediaQuery`, `Border`, `job`) kept the old copy while the framework's
   call-time imports resolved the new one, so five unrelated tests failed in a
   full run although each passed alone: `Container(border=…)` silently lost its
