@@ -180,6 +180,9 @@ class RenderMixin:
         for widget in widgets:
             if not self._replace_widget_reference(self._current_tree, widget.key, widget):
                 return self.update()
+        # Re-resolve PSS so a direct subtree update can reflect class changes
+        # while preserving the same stylesheet and inline precedence rules.
+        self._apply_stylesheets(self._current_tree)
         self._desired_tree = self._current_tree
         self._send_desired_tree()
         return None

@@ -340,16 +340,21 @@ def test_local_project_loader_imports_entrypoint_without_android(tmp_path):
     (source / "main.py").write_text(
         "from pydrud import Text\n"
         "def main(page):\n"
-        "    page.add(Text('host python', key='message'))\n",
+        "    page.add(Text('host python', key='message', class_=['hero']))\n",
         encoding="utf-8",
     )
+    (tmp_path / "src" / "theme.pss").write_text(
+        '.hero { font: {"color": "#123456"}; }', encoding="utf-8")
     src_path = str(tmp_path / "src")
     try:
         app = load_preview_app(
             str(tmp_path), config={"app_name": "Local Preview"})
         tree = app.build().to_dict()
         assert app.title == "Local Preview"
-        assert tree["children"][0]["children"][0]["props"]["value"] == "host python"
+        text = tree["children"][0]["children"][0]
+        assert text["props"]["value"] == "host python"
+        assert text["style"]["font"]["color"] == "#123456"
+        assert not any(key.startswith("class_") for key in text["style"])
     finally:
         for name in ("app.main", "app"):
             sys.modules.pop(name, None)

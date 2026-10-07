@@ -26,6 +26,7 @@ from pydrud.core.styles.resolver import (
     resolve_styles,
     RendererProfile,
 )
+from pydrud.core.styles.manager import StyleSheetManager
 
 __all__ = [
     "KEY_KIND",
@@ -45,4 +46,5 @@ __all__ = [
     "Diagnostic",
     "resolve_styles",
     "RendererProfile",
+    "StyleSheetManager",
 ]

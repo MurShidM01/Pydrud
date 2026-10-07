@@ -20,6 +20,11 @@ from pydrud.core.events import EventDispatcher
 from pydrud.core.bridge import BridgeProtocol
 from pydrud.core.protocol import MAX_FRAME_BYTES, RenderTransaction
 from pydrud.core.elements import ElementTree
+from pydrud.core.styles import (
+    RendererProfile,
+    StyleSheet,
+    StyleSheetManager,
+)
 from pydrud.widgets import Widget
 
 # ``App`` is composed from cohesive mixins so no single module owns the whole
@@ -75,6 +80,9 @@ class App(RenderMixin, BridgeMixin, LifecycleMixin, HotReloadMixin):
         port: int = 8595,
         assets_dir: str = "assets",
         hot_reload: bool = False,
+        stylesheet: str | os.PathLike[str] | StyleSheet | None = None,
+        stylesheets=None,
+        renderer_profile: Optional[RendererProfile] = None,
         **kwargs,
     ):
         App._active = self
@@ -126,6 +134,15 @@ class App(RenderMixin, BridgeMixin, LifecycleMixin, HotReloadMixin):
         self._watcher: Optional[Any] = None
         self._watch_dirs: list[str] = ["src"]
         self._project_root: str = self._find_root()
+        self._stylesheet_manager = StyleSheetManager(
+            self._project_root, stylesheets=stylesheets)
+        if stylesheet is not None:
+            self._stylesheet_manager.add(stylesheet)
+        #: Optional renderer facts are injected as data; the neutral core
+        #: never selects or imports an Android renderer implicitly.
+        self._renderer_profile = renderer_profile
+        self._stylesheet_diagnostics: list = []
+        self._stylesheet_warnings: list[str] = []
         self._hot_reload_requested = hot_reload
         # ── Lifecycle hooks ────────────────────────────────────────
         self._lifecycle_handlers: dict[str, list[Callable]] = {}
@@ -166,6 +183,37 @@ class App(RenderMixin, BridgeMixin, LifecycleMixin, HotReloadMixin):
     @property
     def connected(self) -> bool:
         return self._connected
+
+    @property
+    def stylesheet(self) -> StyleSheet:
+        """The current combined, last-known-good PSS stylesheet."""
+        return self._stylesheet_manager.stylesheet
+
+    @property
+    def stylesheet_diagnostics(self) -> tuple:
+        """Diagnostics from the most recent stylesheet load or reload."""
+        return tuple(self._stylesheet_diagnostics)
+
+    @property
+    def stylesheet_warnings(self) -> tuple[str, ...]:
+        """Renderer/profile warnings from the latest style resolution."""
+        return tuple(self._stylesheet_warnings)
+
+    def add_stylesheet(self, stylesheet) -> "App":
+        """Register a PSS file path or parsed ``StyleSheet`` (chainable).
+
+        Files under ``src/`` are discovered automatically; this method is
+        useful for styles kept elsewhere or supplied programmatically.
+        """
+        self._stylesheet_manager.add(stylesheet)
+        return self
+
+    def add_stylesheet_source(
+        self, source: str, *, filename: str = "<memory>"
+    ) -> "App":
+        """Parse and register in-memory PSS source, replacing the same name."""
+        self._stylesheet_manager.add_source(source, filename=filename)
+        return self
 
     def run(self, *, retry: bool = True, retry_delay: float = 0.5,
             max_retries: int = 30, use_platform_logging: bool = True):

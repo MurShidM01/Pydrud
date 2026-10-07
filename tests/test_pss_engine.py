@@ -119,6 +119,16 @@ class TestPSSParser(unittest.TestCase):
             ("textAlign", "center"), ("padding", {"all": 12}),
         ])
 
+    def test_parse_css_style_composite_bare_keys(self):
+        sheet = parse_pss(
+            "Button { font: { size: 18, weight: 600, family: sans }; "
+            "gradient: { colors: [red, #FFFFFF] }; }"
+        )
+        self.assertEqual(sheet.rules[0].body.declarations, [
+            ("font", {"size": 18, "weight": 600, "family": "sans"}),
+            ("gradient", {"colors": ["red", "#FFFFFF"]}),
+        ])
+
     def test_parse_list_selector(self):
         source = ".btn, .link { color: red; }"
         sheet = parse_pss(source)

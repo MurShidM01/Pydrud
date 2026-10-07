@@ -240,14 +240,14 @@ class DevRunner:
         if specific_files:
             target_files = [os.path.abspath(f) for f in specific_files]
         else:
-            # Gather all .py files in src/
+            # Gather Python modules and PSS stylesheets under src/.
             target_files = []
             if os.path.isdir(src_dir):
                 for root, _, files in os.walk(src_dir):
                     if any(ign in root for ign in ("__pycache__", ".git")):
                         continue
                     for f in files:
-                        if f.endswith(".py"):
+                        if f.endswith((".py", ".pss")):
                             target_files.append(os.path.join(root, f))
 
         for fpath in target_files:
@@ -309,7 +309,7 @@ class DevRunner:
                 if any(ign in root for ign in ("__pycache__", ".git")):
                     continue
                 for f in files:
-                    if f.endswith(".py"):
+                    if f.endswith((".py", ".pss")):
                         fpath = os.path.join(root, f)
                         try:
                             with open(fpath, "r", encoding="utf-8") as fp:

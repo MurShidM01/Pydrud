@@ -229,6 +229,27 @@ class TestKeyReaderAndDevRunner(unittest.TestCase):
             self.assertFalse(runner.interactive)
             self.assertEqual(runner.dev_port, 8596)
 
+    def test_hot_reload_payload_includes_pss_stylesheets(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            src_dir = os.path.join(tmpdir, "src", "app")
+            os.makedirs(src_dir)
+            with open(os.path.join(tmpdir, "pydrud.yaml"), "w") as fp:
+                fp.write("package: com.test.app\n")
+            stylesheet = os.path.join(src_dir, "theme.pss")
+            with open(stylesheet, "w", encoding="utf-8") as fp:
+                fp.write("Button { bg: #123456; }")
+
+            runner = DevRunner(tmpdir, interactive=False)
+            commands = []
+            runner._send_dev_command = lambda command: (
+                commands.append(command) or {"status": "ok"})
+            with mock.patch("sys.stdout"):
+                runner.trigger_hot_reload()
+
+            self.assertEqual(commands[0]["cmd"], "hot_reload")
+            self.assertEqual(commands[0]["files"][0]["path"], "src/app/theme.pss")
+            self.assertIn("#123456", commands[0]["files"][0]["content"])
+
     def test_logcat_is_scoped_to_the_app_process(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with open(os.path.join(tmpdir, "pydrud.yaml"), "w") as fp:

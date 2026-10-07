@@ -474,6 +474,10 @@ class TestJavaTemplates(unittest.TestCase):
         for cmd in ["full_render", "render", "toast", "snackbar", "set_title",
                     "finish_activity", "set_system_ui", "vibrate", "back_result"]:
             self.assertIn(f'case "{cmd}"', source)
+        self.assertIn('capabilities.put("native_view", true)', source)
+        self.assertIn('capabilities.put("services", services)', source)
+        self.assertIn('capabilities.put("widget_types", widgetTypes)', source)
+        self.assertIn('"Text", "Button", "TextField"', source)
 
     def test_activity_waits_for_python_before_default_back(self):
         source = self.render("android/MainActivity.java.j2")

@@ -63,6 +63,139 @@ class StyleSheet:
 _NUMBER = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$")
 
 
+def _parse_collection(source: str) -> Any:
+    """Parse PSS object/array values with JSON or CSS-style bare keys."""
+    class Reader:
+        def __init__(self, text: str) -> None:
+            self.text = text
+            self.pos = 0
+
+        def whitespace(self) -> None:
+            while self.pos < len(self.text) and self.text[self.pos].isspace():
+                self.pos += 1
+
+        def string(self) -> str:
+            quote = self.text[self.pos]
+            start = self.pos
+            self.pos += 1
+            escaped = False
+            while self.pos < len(self.text):
+                char = self.text[self.pos]
+                self.pos += 1
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == quote:
+                    raw = self.text[start:self.pos]
+                    try:
+                        value = ast.literal_eval(raw)
+                    except (SyntaxError, ValueError) as exc:
+                        raise ValueError("invalid quoted value") from exc
+                    if not isinstance(value, str):
+                        raise ValueError("expected a string")
+                    return value
+            raise ValueError("unterminated quoted value")
+
+        def value(self) -> Any:
+            self.whitespace()
+            if self.pos >= len(self.text):
+                raise ValueError("missing value")
+            char = self.text[self.pos]
+            if char == "{":
+                return self.object()
+            if char == "[":
+                return self.array()
+            if char in ("'", '"'):
+                return self.string()
+            return _parse_value(self.bare())
+
+        def bare(self) -> str:
+            start = self.pos
+            parens = 0
+            while self.pos < len(self.text):
+                char = self.text[self.pos]
+                if char == "(":
+                    parens += 1
+                elif char == ")" and parens:
+                    parens -= 1
+                elif parens == 0 and char in ",]}" :
+                    break
+                self.pos += 1
+            value = self.text[start:self.pos].strip()
+            if not value:
+                raise ValueError("missing value")
+            return value
+
+        def object(self) -> dict:
+            result = {}
+            self.pos += 1  # opening brace
+            self.whitespace()
+            if self.pos < len(self.text) and self.text[self.pos] == "}":
+                self.pos += 1
+                return result
+            while True:
+                self.whitespace()
+                if self.pos >= len(self.text):
+                    raise ValueError("unterminated object")
+                if self.text[self.pos] in ("'", '"'):
+                    key = self.string()
+                else:
+                    start = self.pos
+                    while self.pos < len(self.text) and self.text[self.pos] not in ":,}" \
+                            and not self.text[self.pos].isspace():
+                        self.pos += 1
+                    key = self.text[start:self.pos]
+                    if not key:
+                        raise ValueError("missing object key")
+                self.whitespace()
+                if self.pos >= len(self.text) or self.text[self.pos] != ":":
+                    raise ValueError("expected ':' after object key")
+                self.pos += 1
+                result[key] = self.value()
+                self.whitespace()
+                if self.pos < len(self.text) and self.text[self.pos] == ",":
+                    self.pos += 1
+                    self.whitespace()
+                    if self.pos < len(self.text) and self.text[self.pos] == "}":
+                        self.pos += 1
+                        return result
+                    continue
+                if self.pos < len(self.text) and self.text[self.pos] == "}":
+                    self.pos += 1
+                    return result
+                raise ValueError("expected ',' or '}' in object")
+
+        def array(self) -> list:
+            result = []
+            self.pos += 1  # opening bracket
+            self.whitespace()
+            if self.pos < len(self.text) and self.text[self.pos] == "]":
+                self.pos += 1
+                return result
+            while True:
+                result.append(self.value())
+                self.whitespace()
+                if self.pos < len(self.text) and self.text[self.pos] == ",":
+                    self.pos += 1
+                    self.whitespace()
+                    if self.pos < len(self.text) and self.text[self.pos] == "]":
+                        self.pos += 1
+                        return result
+                    continue
+                if self.pos < len(self.text) and self.text[self.pos] == "]":
+                    self.pos += 1
+                    return result
+                raise ValueError("expected ',' or ']' in array")
+
+    reader = Reader(source)
+    value = reader.value()
+    reader.whitespace()
+    if reader.pos != len(source):
+        raise ValueError("unexpected trailing text")
+    return value
+
+
 def _parse_value(source: str) -> Any:
     """Convert PSS scalar/JSON-style values to Python primitives.
 
@@ -108,6 +241,10 @@ def _parse_value(source: str) -> Any:
                 if isinstance(value, (dict, list, tuple)):
                     return value
             except (SyntaxError, ValueError):
+                pass
+            try:
+                return _parse_collection(raw)
+            except (ValueError, SyntaxError):
                 pass
 
     return raw

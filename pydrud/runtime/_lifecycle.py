@@ -12,8 +12,9 @@ import traceback
 from typing import TYPE_CHECKING, Callable, Optional
 
 from pydrud.core.results import ResultCancelled
-from pydrud.runtime._capabilities import replace_unsupported_widgets
+from pydrud.core.styles import RendererProfile, resolve_styles
 from pydrud.widgets import Widget, assign_stable_keys, validate_tree_keys
+from pydrud.runtime._capabilities import replace_unsupported_widgets
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from pydrud.runtime.app import App
@@ -186,12 +187,28 @@ class LifecycleMixin:
         assign_stable_keys(tree, prefix="_page")
         tree = replace_unsupported_widgets(tree, self._native_capabilities)
         validate_tree_keys(tree)
+        self._apply_stylesheets(tree)
         self._materialize_elements(tree)
         self._current_tree = tree
         self._desired_tree = tree
         self._event_dispatcher.unregister_all()
         self._event_dispatcher.register_tree(tree)
         return tree
+
+    def _apply_stylesheets(self, tree: Widget) -> None:
+        """Resolve project PSS rules before a tree is materialized or sent."""
+        manager = getattr(self, "_stylesheet_manager", None)
+        if manager is None:
+            return
+        stylesheet = manager.refresh()
+        self._stylesheet_diagnostics = manager.diagnostics
+        profile = getattr(self, "_renderer_profile", None) or RendererProfile()
+        resolved, warnings = resolve_styles(stylesheet, tree, profile=profile)
+        self._stylesheet_warnings = warnings
+        for widget, _depth in tree.walk():
+            # Keep computed PSS declarations apart from inline ``style`` so
+            # stylesheet edits can remove values and inline styles stay top.
+            widget._resolved_style = dict(resolved.get(widget.key, {}))
 
     def _materialize_elements(self, tree: Widget) -> None:
         """Refresh persistent logical element metadata without touching Views."""

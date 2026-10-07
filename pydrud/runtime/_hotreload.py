@@ -135,12 +135,17 @@ class HotReloadMixin:
         return self
 
     def apply_hot_reload(self, files: list[dict]) -> dict:
-        """Apply updated Python files, reload modules, preserve state, and re-render.
+        """Apply Python and PSS edits, preserve state, and re-render.
+
+        Python modules are re-executed; stylesheet files are parsed and
+        replaced transactionally without being treated as Python source.
 
         Args:
-            files: List of dicts with {"path": str, "content": str}.
+            files: List of dicts with ``{"path": str, "content": str}``.
         """
         import types
+        from pydrud.core.styles.parser import parse_pss
+
         t0 = time.perf_counter()
         reloaded_modules = []
 
@@ -149,18 +154,42 @@ class HotReloadMixin:
         if sync_dir and sync_dir not in sys.path:
             sys.path.insert(0, sync_dir)
 
-        # 2. Syntax validation pass
+        # 2. Validate every changed unit before mutating files or modules.
         compiled_files = []
-        for f in files:
-            rel_path = f.get("path", "")
-            content = f.get("content", "")
+        for file in files:
+            rel_path = file.get("path", "")
+            content = file.get("content", "")
             clean_path = rel_path.replace("\\", "/")
             if clean_path.startswith("src/"):
                 clean_path = clean_path[4:]
 
+            if clean_path.lower().endswith(".pss"):
+                sheet = parse_pss(content, filename=clean_path)
+                errors = [d for d in sheet.diagnostics if d.kind == "error"]
+                if errors:
+                    first = errors[0]
+                    message = (
+                        f"{first.filename}:{first.line}:{first.col}: {first.message}"
+                    )
+                    return {
+                        "status": "error",
+                        "error_type": "StylesheetError",
+                        "message": message,
+                        "filename": first.filename,
+                        "lineno": first.line,
+                        "offset": first.col,
+                        "diagnostics": [
+                            {"filename": d.filename, "line": d.line, "col": d.col,
+                             "message": d.message, "kind": d.kind}
+                            for d in errors
+                        ],
+                    }
+                compiled_files.append(("stylesheet", clean_path, content, sheet))
+                continue
+
             try:
                 code_obj = compile(content, clean_path, "exec")
-                compiled_files.append((clean_path, content, code_obj))
+                compiled_files.append(("python", clean_path, content, code_obj))
             except SyntaxError as err:
                 tb = traceback.format_exc()
                 if self._dev_server:
@@ -193,8 +222,11 @@ class HotReloadMixin:
         # 3. Snapshot state before modifying modules
         snapshot = self.capture_state() if self._preserve_state else None
 
-        # 4. Write files and execute into modules
-        for clean_path, content, code_obj in compiled_files:
+        # 4. Write sources and execute Python modules. PSS overlays are
+        # installed only after Python execution succeeds, so a failed mixed
+        # reload cannot partially switch the active stylesheet.
+        updated_stylesheets = []
+        for kind, clean_path, content, code_obj in compiled_files:
             if sync_dir:
                 full_dest = os.path.join(sync_dir, clean_path)
                 try:
@@ -203,6 +235,10 @@ class HotReloadMixin:
                         fp.write(content)
                 except Exception:
                     pass
+
+            if kind == "stylesheet":
+                updated_stylesheets.append(code_obj)
+                continue
 
             mod_name = _module_name_from_path(clean_path)
             if not mod_name:
@@ -230,6 +266,9 @@ class HotReloadMixin:
                     "filename": clean_path,
                     "traceback": tb,
                 }
+
+        for sheet in updated_stylesheets:
+            self._stylesheet_manager.add(sheet)
 
         # 5. Re-bind router / target if main module or screens were reloaded
         if "app.main" in sys.modules:
@@ -265,8 +304,34 @@ class HotReloadMixin:
         }
 
     def apply_hot_restart(self, files: list[dict] | None = None) -> dict:
-        """Reset all app state, reload all user modules from scratch, and re-render."""
+        """Reset all app state, reload user modules, and re-render."""
+        from pydrud.core.styles.parser import parse_pss
+
         t0 = time.perf_counter()
+        parsed_stylesheets = []
+        for file in files or []:
+            rel_path = file.get("path", "")
+            if not rel_path.lower().endswith(".pss"):
+                continue
+            clean_path = rel_path.replace("\\", "/")
+            if clean_path.startswith("src/"):
+                clean_path = clean_path[4:]
+            sheet = parse_pss(file.get("content", ""), filename=clean_path)
+            errors = [d for d in sheet.diagnostics if d.kind == "error"]
+            if errors:
+                first = errors[0]
+                return {
+                    "status": "error",
+                    "error_type": "StylesheetError",
+                    "message": (
+                        f"{first.filename}:{first.line}:{first.col}: "
+                        f"{first.message}"
+                    ),
+                    "filename": first.filename,
+                    "lineno": first.line,
+                    "offset": first.col,
+                }
+            parsed_stylesheets.append(sheet)
 
         # Sync files if provided
         if files:
@@ -287,6 +352,8 @@ class HotReloadMixin:
                             fp.write(content)
                     except Exception:
                         pass
+            for sheet in parsed_stylesheets:
+                self._stylesheet_manager.add(sheet)
 
         # Reset router
         if self._router is not None:
@@ -353,6 +420,26 @@ class HotReloadMixin:
         if (self._ui_thread_id is not None
                 and self._ui_thread_id != threading.get_ident()):
             self.run_on_ui(self._on_hot_reload, filepath)
+            return
+
+        # Stylesheet changes are parsed and reapplied without re-importing any
+        # Python modules. The manager keeps its last valid sheet if this edit
+        # contains a syntax error.
+        if filepath.lower().endswith(".pss"):
+            try:
+                self._stylesheet_manager.refresh()
+                self.update()
+                print(f"[Pydrud] PSS Reload: {os.path.basename(filepath)}")
+                for diagnostic in self._stylesheet_manager.diagnostics:
+                    if diagnostic.kind == "error":
+                        print(
+                            f"[Pydrud] {diagnostic.filename}:{diagnostic.line}:"
+                            f"{diagnostic.col}: {diagnostic.message}"
+                        )
+            except Exception as exc:
+                print(f"[Pydrud] PSS reload error for {filepath}: {exc}")
+                traceback.print_exc()
+                print("[Pydrud] Keeping the last good preview; waiting for the next edit.")
             return
 
         snapshot = self.capture_state() if self._preserve_state else None
