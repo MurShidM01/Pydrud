@@ -268,7 +268,12 @@ class TestHttpClient(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        # shutdown() only stops the serve_forever() loop; server_close() is
+        # what releases the listening socket (left open it surfaces as
+        # "ResourceWarning: unclosed <socket ...>" when the interpreter exits).
         cls.server.shutdown()
+        cls.server.server_close()
+        cls.thread.join(timeout=5)
 
     def test_get_and_post_do_not_block_the_ui(self):
         received = []
