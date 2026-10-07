@@ -337,6 +337,18 @@ tests so it cannot regress.
   icons registered at runtime via `Icons.load_pack` (`Icons.all()` still
   reports both), the generated-template drift test checks only the shipped
   constants, and the pack test restores the registry afterwards.
+* **The neutrality test no longer corrupts the rest of the suite.**
+  `test_core_imports_are_android_free` deleted fifteen core modules from
+  `sys.modules` and re-imported them in the test process, leaving two copies
+  of `pydrud.core.responsive`, `pydrud.core.tasks`, `pydrud.widgets.styling`
+  and friends alive at once. Names bound at import time (`from pydrud import
+  MediaQuery`, `Border`, `job`) kept the old copy while the framework's
+  call-time imports resolved the new one, so five unrelated tests failed in a
+  full run although each passed alone: `Container(border=…)` silently lost its
+  border, metrics events updated a second `MediaQuery`, and `@job` registered
+  into a second `GLOBAL_JOBS`. The import check now runs in a throw-away
+  interpreter, and a regression test pins that already-loaded modules are left
+  alone. Nothing in the framework changed — only the test.
 
 ### Fixed — runtime hardening batch
 * **Legacy Gingerbread-era icons removed.** The ~106-entry

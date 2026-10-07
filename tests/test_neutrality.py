@@ -9,9 +9,12 @@ crash on an iOS client.
 from __future__ import annotations
 
 import importlib
+import json
+import os
+import subprocess
 import sys
 
-import pytest
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 # Modules that are *allowed* to depend on Android — they live outside core.
@@ -65,6 +68,41 @@ def _android_dependent_modules(mod: object) -> list[str]:
     return leaks
 
 
+def _probe(module_names: list[str]) -> dict[str, list[str]]:
+    """Import each module and list the Android symbols reachable from it.
+
+    This is the child half of :func:`_leaks_in_fresh_interpreter`; it is what
+    runs when this file is executed as a script.
+    """
+    return {name: _android_dependent_modules(importlib.import_module(name))
+            for name in module_names}
+
+
+def _leaks_in_fresh_interpreter(
+        module_names: list[str]) -> dict[str, list[str]]:
+    """Run :func:`_probe` in a brand-new interpreter.
+
+    "Imported on its own, with no previous test state" has to be answered by
+    a process that has none. It must *not* be answered by deleting the modules
+    from ``sys.modules`` and importing them again here: that leaves two copies
+    of ``pydrud.core.responsive``, ``pydrud.core.tasks``,
+    ``pydrud.widgets.styling`` and friends in the test process. Everything
+    bound at import time (``from pydrud import MediaQuery``) then keeps the old
+    copy while everything resolved at call time gets the new one, and
+    unrelated tests start failing depending on whether this one ran first.
+    """
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        p for p in (ROOT, env.get("PYTHONPATH")) if p)
+    result = subprocess.run(
+        [sys.executable, os.path.abspath(__file__), *module_names],
+        cwd=ROOT, env=env, capture_output=True, text=True, timeout=120,
+    )
+    assert result.returncode == 0, (
+        f"the neutrality probe crashed:\n{result.stderr}")
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
 class TestCrossPlatformNeutrality:
     """Core and PSS must have no Android dependency."""
 
@@ -92,16 +130,47 @@ class TestCrossPlatformNeutrality:
 
     def test_core_imports_are_android_free(self) -> None:
         """Every listed core module can be imported without dragging in Android."""
+        # A fresh interpreter, so previous test state cannot leak in and the
+        # modules this process has already loaded are never touched.
+        report = _leaks_in_fresh_interpreter(self._CORE_MODULES)
         for mod_name in self._CORE_MODULES:
-            # Force a fresh import so previous test state doesn't leak.
-            if mod_name in sys.modules:
-                del sys.modules[mod_name]
-            mod = importlib.import_module(mod_name)
-            leaks = _android_dependent_modules(mod)
+            leaks = report[mod_name]
             assert not leaks, (
                 f"Module {mod_name!r} pulls in Android-dependent symbols: "
                 + "; ".join(leaks)
             )
+
+    def test_neutrality_probe_leaves_loaded_modules_alone(self) -> None:
+        """Regression: the probe once re-imported core modules in-process.
+
+        Re-importing split ``pydrud.core.responsive`` (``MediaQuery``),
+        ``pydrud.core.tasks`` (``GLOBAL_JOBS``) and ``pydrud.widgets.styling``
+        (``Border``) in two, which broke the five tests that happened to run
+        after it (``test_container_border_property``, the adaptive scaffold,
+        both ``AppMetricsEvents`` tests and ``test_standalone_job_decorator``).
+        """
+        before = {name: importlib.import_module(name)
+                  for name in self._CORE_MODULES}
+
+        self.test_core_imports_are_android_free()
+
+        for name, module in before.items():
+            assert sys.modules[name] is module, (
+                f"{name} was replaced in sys.modules; every later "
+                f"call-time import of it now resolves to a second copy")
+            parent, _, child = name.rpartition(".")
+            if parent:
+                assert getattr(sys.modules[parent], child, module) is module, (
+                    f"{parent}.{child} no longer points at the loaded module")
+
+        import pydrud
+        from pydrud.core.responsive import MediaQuery
+        from pydrud.core.tasks import GLOBAL_JOBS
+        from pydrud.widgets.styling import Border
+
+        assert pydrud.MediaQuery is MediaQuery
+        assert pydrud.Border is Border
+        assert pydrud.core.tasks.GLOBAL_JOBS is GLOBAL_JOBS
 
     def test_pss_schema_is_android_free(self) -> None:
         """The PSS schema (style vocabulary) has no Android deps."""
@@ -143,3 +212,7 @@ class TestCrossPlatformNeutrality:
         assert len(patches) == 1
         assert patches[0].op == "update"
         assert patches[0].style == {"bg": "#FF111111"}
+
+
+if __name__ == "__main__":  # the child process of _leaks_in_fresh_interpreter
+    print(json.dumps(_probe(sys.argv[1:])))
