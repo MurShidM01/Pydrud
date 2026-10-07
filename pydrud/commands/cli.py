@@ -71,7 +71,7 @@ class _PydrudGroup(click.Group):
 })
 @click.version_option(version=__version__, prog_name="pydrud")
 def main():
-    """Pydrud — build native Android apps with Python.
+    """Pydrud — build cross-platform Python interfaces and Android apps.
 
     \b
     Quick start:
@@ -97,9 +97,10 @@ def _show_error(message: str, hint: str = "") -> None:
 
 @main.command()
 @click.argument("name", default="my_app")
-@click.option("--org", default="com.example", help="Android package / organisation prefix.")
-@click.option("--min-sdk", default=24, help="Minimum Android API level.")
-@click.option("--target-sdk", default=36, help="Target Android API level.", show_default=True)
+@click.option("--org", default="com.example", help="Package / organisation prefix.")
+@click.option("--min-sdk", default=24, help="Minimum Android API level (Chaquopy only).")
+@click.option("--target-sdk", default=36,
+              help="Target Android API level (Chaquopy only).", show_default=True)
 @click.option("--accent", default=None, metavar="COLOR",
               help="Brand colour the whole UI is generated from, "
                    "e.g. --accent '#FF0EA5E9'.")
@@ -246,7 +247,8 @@ def dev(project_dir, host, port, connect_host, no_qr):
 @click.option("--release", is_flag=True, default=False, help="Build in release mode.")
 @click.option("--no-interactive", is_flag=True, default=False, help="Disable interactive terminal shortcuts.")
 def watch(device, release, no_interactive):
-    """Start interactive Hot Reload development runner."""
+    """Start the Chaquopy Android Hot Reload runner."""
+    _require_chaquopy("watch")
     from pydrud.commands.builder import Builder
 
     root = _find_project_root()
@@ -310,7 +312,11 @@ def doctor():
 def analyze(path, json_output):
     """Statically analyze Pydrud Python code for common issues."""
     from pydrud.commands.analyzer import run_analysis, format_report
-    issues = run_analysis(path)
+    from pydrud.runtime.runtime import resolve_runtime
+
+    root = _find_project_root()
+    runtime = resolve_runtime(root).runtime.value if root else "pydash"
+    issues = run_analysis(path, runtime=runtime)
     click.echo(format_report(issues, json_output=json_output))
 
 
@@ -330,8 +336,9 @@ def pip():
         pydrud pip remove requests
         pydrud pip sync
 
-    Chaquopy projects: packages are bundled into the APK at build time.
-    Pydash projects: packages run on the host side only.
+    Chaquopy projects: verified packages are bundled into the APK at build time.
+    Pydash projects: any valid host dependency can be recorded; install it in
+    the Python environment used by ``pydrud dev``.
     """
 
 
@@ -345,16 +352,25 @@ def _project_or_exit() -> str:
 
 
 def _require_chaquopy(command: str) -> None:
-    """Exit with a helpful message when *command* is unavailable in pydash mode."""
+    """Exit with a helpful message when *command* needs the Android target."""
     from pydrud.runtime.runtime import resolve_runtime
     descriptor = resolve_runtime(_project_or_exit())
     if descriptor.runtime is not Runtime.CHAQUOPY:
+        if command in {"run", "build", "clean"}:
+            message = (
+                f"'pydrud {command}' builds an Android app binary, but this "
+                "project runs in pydash mode (no binary is produced)."
+            )
+        else:
+            message = (
+                f"'pydrud {command}' requires the Android Chaquopy target; "
+                "this project runs in pydash mode and has no Android project."
+            )
         _show_error(
-            f"'pydrud {command}' builds an Android app binary, but this "
-            f"project runs in pydash mode (no binary is produced).",
+            message,
             hint=(
-                "Use 'pydrud dev' for live preview in the Pydash client, or "
-                "set runtime: chaquopy in pydrud.toml for a standalone APK."
+                "Use 'pydrud dev' for live preview, or create an Android APK "
+                "project with 'pydrud init <name> --runtime chaquopy'."
             ),
         )
         sys.exit(1)
@@ -371,7 +387,8 @@ def _resolve_pip_backend(project_dir: str):
 @pip.command("add")
 @click.argument("packages", nargs=-1, required=True)
 @click.option("--force", is_flag=True, default=False,
-              help="Install a package that is not in the verified registry.")
+              help="Allow an unverified package for Chaquopy builds; "
+                   "Pydash accepts host dependencies without registry checks.")
 @click.option("--no-sync", is_flag=True, default=False,
               help="Only record it in pydrud.toml; do not touch Gradle.")
 def pip_add(packages, force, no_sync):
@@ -380,7 +397,7 @@ def pip_add(packages, force, no_sync):
     backend, runtime = _resolve_pip_backend(root)
     subtitle = ("Recording dependencies for the Android build"
                 if runtime == "chaquopy" else
-                "Recording host-side dependencies (not bundled into an APK)")
+                "Recording host dependencies (not installed automatically)")
     _show_header("pip add", "Add Python packages", subtitle,
                  details=(("Project", os.path.basename(root)),
                           ("Runtime", runtime)))
@@ -394,7 +411,9 @@ def pip_add(packages, force, no_sync):
         added.append(entry)
         cat = entry.get("support_category", "native_equivalent")
         warning = ""
-        if cat == "device_native":
+        if runtime == "pydash":
+            warning = " · recorded only; install in the host Python environment"
+        elif cat == "device_native":
             warning = " · native wheel, increases APK size"
         elif cat == "host_only":
             warning = " · host-only package"
@@ -425,8 +444,12 @@ def pip_remove(packages):
     """Remove packages from the project."""
     root = _project_or_exit()
     backend, runtime = _resolve_pip_backend(root)
-    _show_header("pip remove", "Remove Python packages",
-                 "Updating pydrud.toml and the generated build block",
+    subtitle = (
+        "Updating pydrud.toml and the generated Chaquopy build block"
+        if runtime == "chaquopy" else
+        "Removing a host-side declaration; the Python environment is unchanged"
+    )
+    _show_header("pip remove", "Remove Python packages", subtitle,
                  details=(("Project", os.path.basename(root)),
                           ("Runtime", runtime)))
     removed = 0
@@ -503,8 +526,11 @@ def pip_search(query):
     """Search the verified registry."""
     from pydrud.commands.packages import search
 
-    _show_header("pip search", f"Package search · {query}",
-                 "Searching Pydrud's verified package registry")
+    _show_header(
+        "pip search", f"Package search · {query}",
+        "Searching Chaquopy's verified catalogue; Pydash also accepts "
+        "other host-side PyPI dependencies",
+    )
     results = search(query)
     if not results:
         click.echo(tui.warn_badge(
@@ -591,6 +617,7 @@ def icons(source, background):
     follows the app theme (see the generated themes.xml), not a surface
     for the launcher icon.
     """
+    _require_chaquopy("icons")
     from pydrud.commands.release import generate_icons
 
     root = _project_or_exit()
@@ -615,6 +642,7 @@ def permissions():
 @click.argument("names", nargs=-1, required=True)
 def permissions_add(names):
     """Add permissions, e.g. ``pydrud permissions add camera location``."""
+    _require_chaquopy("permissions add")
     from pydrud.commands.release import update_permissions
 
     root = _project_or_exit()
@@ -635,6 +663,7 @@ def permissions_add(names):
 @click.argument("names", nargs=-1, required=True)
 def permissions_remove(names):
     """Remove permissions from the manifest."""
+    _require_chaquopy("permissions remove")
     from pydrud.commands.release import update_permissions
 
     root = _project_or_exit()
@@ -693,6 +722,7 @@ def capabilities():
 @click.argument("names", nargs=-1, required=True)
 def capabilities_add(names):
     """Enable capabilities, e.g. ``pydrud capabilities add haptics``."""
+    _require_chaquopy("capabilities add")
     from pydrud.commands.release import update_capabilities
 
     root = _project_or_exit()
@@ -720,6 +750,7 @@ def capabilities_add(names):
 @click.argument("names", nargs=-1, required=True)
 def capabilities_remove(names):
     """Disable generated capabilities."""
+    _require_chaquopy("capabilities remove")
     from pydrud.commands.release import update_capabilities
 
     root = _project_or_exit()

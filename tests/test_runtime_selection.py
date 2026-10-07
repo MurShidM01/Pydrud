@@ -6,8 +6,13 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+from click.testing import CliRunner
+
+from pydrud.commands.cli import main as cli
+from pydrud.commands.packages import PydashBackend, get_backend
 from pydrud.commands.project import create_project, sync_project
 from pydrud.runtime.runtime import Runtime, RuntimeDescriptor, resolve_runtime
+
 
 def test_unconfigured_runtime_defaults_to_pydash_but_preserves_legacy_android(tmp_path):
     assert Runtime.resolve(None) is Runtime.PYDASH
@@ -24,6 +29,7 @@ def test_unconfigured_runtime_defaults_to_pydash_but_preserves_legacy_android(tm
     gradle.write_text("// generated before runtime selection\n", encoding="utf-8")
     assert resolve_runtime(str(legacy)).runtime is Runtime.CHAQUOPY
 
+
 def test_default_scaffold_is_pydash_and_never_probes_android_toolchain(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     with (
@@ -39,6 +45,7 @@ def test_default_scaffold_is_pydash_and_never_probes_android_toolchain(tmp_path,
     project = tmp_path / "cross_platform_app"
     assert not (project / "android").exists()
     assert not (project / "setup.py").exists()
+    assert get_backend("pydash").__class__ is PydashBackend
     assert resolve_runtime(str(project)).runtime is Runtime.PYDASH
 
     toml = (project / "pydrud.toml").read_text(encoding="utf-8")
@@ -62,6 +69,36 @@ def test_default_scaffold_is_pydash_and_never_probes_android_toolchain(tmp_path,
     assert "MIN_SDK" not in portable_config
     assert not (project / "src" / "app" / "jobs.py").exists()
 
+
+def test_pydash_cli_guards_and_sync_do_not_touch_android(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    create_project("preview_app")
+    project = tmp_path / "preview_app"
+    monkeypatch.chdir(project)
+
+    runner = CliRunner()
+    for command in (
+        ["build"],
+        ["run"],
+        ["watch"],
+        ["icons"],
+        ["permissions", "add", "camera"],
+        ["capabilities", "add", "haptics"],
+    ):
+        result = runner.invoke(cli, command, catch_exceptions=False)
+        assert result.exit_code == 1, (command, result.output)
+        assert "Android" in result.output
+        assert "chaquopy" in result.output
+
+    (project / "pydrud.toml").unlink()
+    sync_result = runner.invoke(cli, ["sync"], catch_exceptions=False)
+    assert sync_result.exit_code == 0, sync_result.output
+    assert "no Android project" in sync_result.output
+    assert 'runtime = "pydash"' in (project / "pydrud.toml").read_text()
+    assert not (project / "android").exists()
+    assert sync_project(str(project))
+
+
 def test_legacy_android_project_sync_persists_inferred_runtime(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     create_project("legacy_app", runtime="chaquopy")
@@ -77,6 +114,7 @@ def test_legacy_android_project_sync_persists_inferred_runtime(tmp_path, monkeyp
     assert resolve_runtime(str(project)).runtime is Runtime.CHAQUOPY
     assert sync_project(str(project), update_runtime=False)
     assert 'runtime = "chaquopy"' in toml_path.read_text(encoding="utf-8")
+
 
 def test_generated_test_suites_run_for_both_runtimes(tmp_path, monkeypatch):
     repo_root = Path(__file__).resolve().parents[1]

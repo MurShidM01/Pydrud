@@ -66,10 +66,27 @@ class TestHostOnlyImports(unittest.TestCase):
             ("import pydrud.preview\n", "preview"),
         ):
             with self.subTest(source=source.strip()):
-                found = [i for i in _analyze_file(source, "x.py")
+                found = [i for i in _analyze_file(
+                    source, "x.py", runtime="chaquopy")
                          if i["severity"] == "error"]
                 self.assertTrue(
                     any(f"pydrud.{part}" in i["message"] for i in found), found)
+
+    def test_pydash_skips_apk_bundler_checks_but_rejects_android_adapters(self):
+        host_only = "from pydrud.commands.packages import Requirements\n"
+        self.assertEqual(
+            _analyze_file(host_only, "x.py", runtime="pydash"), [])
+
+        for source in (
+            "from pydrud.android import templates\n",
+            "from pydrud.platforms import android\n",
+            "import pydrud.platforms.android.logging\n",
+        ):
+            with self.subTest(source=source.strip()):
+                issues = _analyze_file(source, "x.py", runtime="pydash")
+                self.assertEqual(len(issues), 1)
+                self.assertIn("Android-specific", issues[0]["message"])
+                self.assertNotIn("APK", issues[0]["message"])
 
     def test_runtime_imports_are_clean(self):
         source = ("from pydrud import App, Text, Colors\n"
