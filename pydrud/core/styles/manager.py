@@ -95,6 +95,15 @@ class StyleSheetManager:
         self._stylesheet = self._combine()
         return sheet
 
+    def remove_source(self, filename: str | PathLike[str]) -> bool:
+        """Remove a registered in-memory source and return whether it existed."""
+        name = os.fspath(filename)
+        if name not in self._memory:
+            return False
+        self._memory.pop(name)
+        self._stylesheet = self._combine()
+        return True
+
     def refresh(self) -> StyleSheet:
         """Rescan sources and atomically replace valid changed files."""
         paths = self._discover_paths()

@@ -67,12 +67,19 @@ class _ReloadHandler(FileSystemEventHandler if _HAS_WATCHDOG else object):
             self._fire(event.src_path)
 
     def on_moved(self, event):
-        """Most editors save atomically: write a temp file, then rename it.
+        """Reload atomic saves and reconcile renamed stylesheet paths.
 
-        Without this hook, saving from vim/PyCharm never reloaded.
+        Editors commonly rename a temporary file over its destination. When
+        a ``.pss`` file itself moves, fire for its old path too so the manager
+        removes rules from the source name as well as loading the destination.
         """
-        if not event.is_directory:
-            self._fire(getattr(event, "dest_path", "") or event.src_path)
+        if event.is_directory:
+            return
+        source = event.src_path
+        destination = getattr(event, "dest_path", "") or source
+        if str(source).lower().endswith(".pss"):
+            self._fire(source)
+        self._fire(destination)
 
 
 class FileWatcher:

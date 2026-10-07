@@ -202,10 +202,11 @@ class DevServer:
 
         elif cmd == "hot_reload":
             files = msg.get("files") or []
-            return self.app.apply_hot_reload(files)
+            deleted = msg.get("deleted") or []
+            return self.app.apply_hot_reload(files, deleted=deleted)
 
         elif cmd == "hot_restart":
-            files = msg.get("files") or []
+            files = msg.get("files")
             return self.app.apply_hot_restart(files)
 
         elif cmd == "dump_tree":

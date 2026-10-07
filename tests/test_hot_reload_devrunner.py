@@ -250,6 +250,42 @@ class TestKeyReaderAndDevRunner(unittest.TestCase):
             self.assertEqual(commands[0]["files"][0]["path"], "src/app/theme.pss")
             self.assertIn("#123456", commands[0]["files"][0]["content"])
 
+    def test_hot_reload_payload_includes_deleted_pss_paths(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            source = os.path.join(tmpdir, "src", "app")
+            os.makedirs(source)
+            with open(os.path.join(tmpdir, "pydrud.yaml"), "w") as fp:
+                fp.write("package: com.test.app\\n")
+            deleted = os.path.join(source, "theme.pss")
+
+            runner = DevRunner(tmpdir, interactive=False)
+            commands = []
+            runner._send_dev_command = lambda command: (
+                commands.append(command) or {"status": "ok"})
+            with mock.patch("sys.stdout"):
+                runner.trigger_hot_reload([deleted])
+
+            self.assertEqual(commands, [{
+                "cmd": "hot_reload",
+                "files": [],
+                "deleted": ["src/app/theme.pss"],
+            }])
+
+    def test_android_devserver_forwards_deleted_stylesheet_paths(self):
+        app = mock.Mock()
+        app.apply_hot_reload.return_value = {"status": "ok"}
+        server = DevServer(app)
+
+        result = server._handle_message({
+            "cmd": "hot_reload",
+            "files": [],
+            "deleted": ["src/app/theme.pss"],
+        })
+
+        self.assertEqual(result, {"status": "ok"})
+        app.apply_hot_reload.assert_called_once_with(
+            [], deleted=["src/app/theme.pss"])
+
     def test_logcat_is_scoped_to_the_app_process(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with open(os.path.join(tmpdir, "pydrud.yaml"), "w") as fp:

@@ -47,6 +47,17 @@ class TestReloadHandler(unittest.TestCase):
         self.handler.on_moved(_Event("/p/.app.py.swp", "/p/app.py"))
         self.assertEqual(self.seen, [_abs("/p/app.py")])
 
+    def test_moved_stylesheet_reloads_old_and_new_paths(self):
+        self.handler.on_moved(_Event("/p/theme.pss", "/p/styles/theme.pss"))
+        self.assertEqual(self.seen, [
+            _abs("/p/theme.pss"),
+            _abs("/p/styles/theme.pss"),
+        ])
+
+    def test_moved_stylesheet_out_of_tree_removes_old_source(self):
+        self.handler.on_moved(_Event("/p/theme.pss", "/tmp/theme.backup"))
+        self.assertEqual(self.seen, [_abs("/p/theme.pss")])
+
     def test_non_python_and_directories_are_ignored(self):
         self.handler.on_modified(_Event("/p/notes.txt"))
         self.handler.on_modified(_Event("/p/pkg", is_dir=True))

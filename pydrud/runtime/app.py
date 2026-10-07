@@ -143,6 +143,9 @@ class App(RenderMixin, BridgeMixin, LifecycleMixin, HotReloadMixin):
         self._renderer_profile = renderer_profile
         self._stylesheet_diagnostics: list = []
         self._stylesheet_warnings: list[str] = []
+        # Files received from the Android dev server form a replaceable source
+        # set, so a full hot restart can remove stylesheets deleted on host.
+        self._hot_reload_stylesheet_sources: set[str] = set()
         self._hot_reload_requested = hot_reload
         # ── Lifecycle hooks ────────────────────────────────────────
         self._lifecycle_handlers: dict[str, list[Callable]] = {}

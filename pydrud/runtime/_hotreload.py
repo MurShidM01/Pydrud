@@ -25,6 +25,17 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from pydrud.runtime.app import App
 
 
+def _unlink_synced_file(sync_dir: str, relative_path: str) -> None:
+    """Remove a synchronized source only when it stays inside *sync_dir*."""
+    root = os.path.abspath(sync_dir)
+    candidate = os.path.abspath(os.path.join(root, relative_path))
+    try:
+        if os.path.commonpath((root, candidate)) == root:
+            os.remove(candidate)
+    except (OSError, ValueError):
+        pass
+
+
 class HotReloadMixin:
     """File watching, module reloading and State/Store preservation."""
 
@@ -134,14 +145,21 @@ class HotReloadMixin:
         self._preserve_state = bool(enabled)
         return self
 
-    def apply_hot_reload(self, files: list[dict]) -> dict:
-        """Apply Python and PSS edits, preserve state, and re-render.
+    def apply_hot_reload(
+        self,
+        files: list[dict],
+        *,
+        deleted: list[str] | None = None,
+    ) -> dict:
+        """Apply Python/PSS edits and PSS deletions, preserve state, and render.
 
         Python modules are re-executed; stylesheet files are parsed and
         replaced transactionally without being treated as Python source.
+        Deleted stylesheet paths are removed from the synchronized overlay.
 
         Args:
             files: List of dicts with ``{"path": str, "content": str}``.
+            deleted: Host-relative paths of deleted PSS files.
         """
         import types
         from pydrud.core.styles.parser import parse_pss
@@ -156,6 +174,18 @@ class HotReloadMixin:
 
         # 2. Validate every changed unit before mutating files or modules.
         compiled_files = []
+        deleted_stylesheets: set[str] = set()
+        for raw_path in deleted or []:
+            clean_path = os.path.normpath(
+                str(raw_path).replace("\\", "/")).replace(os.sep, "/")
+            if clean_path.startswith("src/"):
+                clean_path = clean_path[4:]
+            if (clean_path not in ("", ".", "..")
+                    and not clean_path.startswith("../")
+                    and not os.path.isabs(clean_path)
+                    and clean_path.lower().endswith(".pss")):
+                deleted_stylesheets.add(clean_path)
+
         for file in files:
             rel_path = file.get("path", "")
             content = file.get("content", "")
@@ -219,6 +249,13 @@ class HotReloadMixin:
                     "traceback": tb,
                 }
 
+        updated_stylesheet_paths = {
+            clean_path for kind, clean_path, _content, _compiled in compiled_files
+            if kind == "stylesheet"
+        }
+        # An update in the same batch takes precedence over a stale delete event.
+        deleted_stylesheets.difference_update(updated_stylesheet_paths)
+
         # 3. Snapshot state before modifying modules
         snapshot = self.capture_state() if self._preserve_state else None
 
@@ -267,8 +304,17 @@ class HotReloadMixin:
                     "traceback": tb,
                 }
 
+        remote_sources = set(getattr(
+            self, "_hot_reload_stylesheet_sources", set()))
         for sheet in updated_stylesheets:
             self._stylesheet_manager.add(sheet)
+            remote_sources.add(sheet.filename)
+        for clean_path in deleted_stylesheets:
+            self._stylesheet_manager.remove_source(clean_path)
+            remote_sources.discard(clean_path)
+            if sync_dir:
+                _unlink_synced_file(sync_dir, clean_path)
+        self._hot_reload_stylesheet_sources = remote_sources
 
         # 5. Re-bind router / target if main module or screens were reloaded
         if "app.main" in sys.modules:
@@ -333,8 +379,9 @@ class HotReloadMixin:
                 }
             parsed_stylesheets.append(sheet)
 
-        # Sync files if provided
-        if files:
+        # ``files`` is a full source snapshot from DevRunner. Reconcile the
+        # remote stylesheet overlay, including files absent from this batch.
+        if files is not None:
             sync_dir = self._get_sync_dir()
             if sync_dir and sync_dir not in sys.path:
                 sys.path.insert(0, sync_dir)
@@ -352,8 +399,17 @@ class HotReloadMixin:
                             fp.write(content)
                     except Exception:
                         pass
+
+            current_sources = {sheet.filename for sheet in parsed_stylesheets}
+            previous_sources = set(getattr(
+                self, "_hot_reload_stylesheet_sources", set()))
+            for stale in previous_sources - current_sources:
+                self._stylesheet_manager.remove_source(stale)
+                if sync_dir:
+                    _unlink_synced_file(sync_dir, stale)
             for sheet in parsed_stylesheets:
                 self._stylesheet_manager.add(sheet)
+            self._hot_reload_stylesheet_sources = current_sources
 
         # Reset router
         if self._router is not None:

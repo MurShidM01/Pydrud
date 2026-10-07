@@ -126,6 +126,46 @@ def test_pss_file_hot_reload_reapplies_styles_without_reloading_target(
     assert app._desired_tree.find_by_key("save")._effective_style()["bg"] == "blue"
 
 
+def test_devserver_hot_reload_deletes_remote_stylesheet_source(tmp_path: Path):
+    app = _app_with_button()
+    sync_dir = tmp_path / "sync"
+    app._get_sync_dir = lambda: str(sync_dir)
+
+    created = app.apply_hot_reload([{
+        "path": "src/app/theme.pss",
+        "content": "Button { bg: red; }",
+    }])
+    assert created["status"] == "ok"
+    assert _find_node(app._desired_tree.to_dict(), "save")["style"]["bg"] == "red"
+    synchronized = sync_dir / "app" / "theme.pss"
+    assert synchronized.exists()
+
+    deleted = app.apply_hot_reload([], deleted=["src/app/theme.pss"])
+
+    assert deleted["status"] == "ok"
+    assert "bg" not in _find_node(app._desired_tree.to_dict(), "save")["style"]
+    assert not synchronized.exists()
+
+
+def test_hot_restart_reconciles_deleted_remote_stylesheets(tmp_path: Path):
+    app = _app_with_button()
+    sync_dir = tmp_path / "sync"
+    app._get_sync_dir = lambda: str(sync_dir)
+
+    app.apply_hot_restart([{
+        "path": "src/app/theme.pss",
+        "content": "Button { bg: purple; }",
+    }])
+    assert app._desired_tree.find_by_key("save")._effective_style()["bg"] == "purple"
+    synchronized = sync_dir / "app" / "theme.pss"
+    assert synchronized.exists()
+
+    app.apply_hot_restart([])
+
+    assert "bg" not in app._desired_tree.find_by_key("save")._effective_style()
+    assert not synchronized.exists()
+
+
 def test_invalid_pss_hot_reload_keeps_last_good_styles_and_reports_diagnostic(
     tmp_path: Path,
 ):
