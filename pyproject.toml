@@ -5,14 +5,17 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pydrud"
 version = "2.0.3"
-description = "A lightweight Python framework for building native Android apps — Flutter-inspired, radically simpler."
+description = "A Flutter-inspired Python UI framework with a toolchain-free Pydash host preview and an optional Chaquopy Android APK target."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [
     {name = "Pydrud Contributors"}
 ]
-keywords = ["android", "framework", "ui", "mobile", "python", "native", "app-development"]
+keywords = [
+    "cross-platform", "pydash", "chaquopy", "android", "framework", "ui",
+    "mobile", "python", "app-development",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",

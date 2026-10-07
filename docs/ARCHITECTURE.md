@@ -1,90 +1,131 @@
 # Architecture
 
-Pydrud rendering is two peers talking over one socket: a **Python actor** that
-owns the widget tree and a renderer that owns native views. Neither side
-guesses what the other is doing — every change is a transaction.
+Pydrud's core model is a platform-neutral Python widget tree connected to a
+renderer. It owns Python app state, events, style resolution, tree diffs, and
+render transaction bookkeeping. The two supported runtime modes choose
+separate connection/setup paths around that core:
 
-The normal APK and host-preview topologies share that rendering contract but
-have deliberately separate connection setup:
+```text
+Pydash default (`pydrud dev`)
+  local project Python ── authenticated LAN preview v1 ──► independent renderer
+       source stays on host     renderer protocol v2: snapshots/patches/ACKs/events
 
-```
-normal `pydrud run` / generated APK
-  embedded App ──outbound NDJSON──► generated BridgeService (Java)
-
-host `pydrud dev` / no APK build
-  project source ─► desktop App ◄── authenticated accepted socket ─► Pydash
-                       │ tree, state, events, diff, revisions │
-                       ◄──────────── events, ACK/NACK ────────┘
+Chaquopy opt-in (generated Android APK)
+  embedded Python ── existing local NDJSON bridge v2 ──► generated BridgeService
+                                                        └─ Android native Views
 ```
 
-`pydrud.core.devserver.DevServer` remains the APK/ADB source-sync endpoint and
-is not the Pydash server. Host preview uses `PreviewServer`, which owns only
-listener/session/handshake concerns and hands an authenticated transport to
-`App.serve_transport()`. The stable contract is documented in
-[Preview Protocol v1](PREVIEW_PROTOCOL.md).
+Pydash preview has a single-run token-authenticated LAN handshake, described
+in [Preview Protocol v1](PREVIEW_PROTOCOL.md). After pairing, the peers use
+the existing renderer-v2 transaction and event contract. The handshake does
+not change `RenderTransaction`, keyed patch semantics, the wire format of the
+Android bridge, or the Python app's desired/confirmed render identity. The
+Pydash client is separate from this repository; Pydrud does not build, bundle,
+or validate that client, and this work does not add a standalone Pydash export
+target.
 
 ## Layers
 
 | Package | Owns |
 | --- | --- |
-| `pydrud/runtime/` | `App` (the single-threaded UI actor, event loop, render transactions, hot reload) and `navigation` (`Router`, `Route`, the back stack) |
-| `pydrud/core/` | the machinery `App` is built from: renderer `protocol`/`bridge`, authenticated `preview`/`preview_server`, `diff`, `elements`, `events`, `state`, `store`, `results`, `tasks`, `subscriptions`, `responsive`, `controllers`, `watcher` |
-| `pydrud/widgets/` | the widget vocabulary — `base`, `layout`, `basic`, `material`, `forms`, `advanced`, `canvas`, `animation`, `theme`, `styling`, `tokens`, `scaffold`, `app_bar`, `gestures`, `responsive` |
-| `pydrud/services/` | device capabilities called from Python — `native` (camera, BLE, NFC, sensors, …) and `http` |
-| `pydrud/data/` | `database` (SQLite) and `cache` |
-| `pydrud/android/` | `templates/` (the generated Java/Gradle/Python project) and `javacheck` (static Java validation, no JDK needed) |
-| `pydrud/commands/` | the `pydrud` CLI — host `preview`, APK `project`/`builder`, `release`, `analyzer`, `doctor`, `docs`, `inspector`, `packages` |
-| `pydrud/testing.py` | `FakeDevice` and `AppTester`: run a whole app with no emulator |
-| `pydrud/compatibility.py` | the frozen toolchain matrix (AGP, Gradle, Chaquopy, SDK, NDK, JDK) and the protocol version |
+| `pydrud/runtime/` | `App`, `Page`, the Python UI actor, app lifecycle, host/embedded event handling, render transactions, and hot reload integration |
+| `pydrud/core/` | Platform-neutral machinery: renderer protocol/bridge, preview handshake data and server, keyed `diff`, widget `elements`, events, results, responsive metrics, tasks, watcher, and PSS style engine |
+| `pydrud/core/styles/` | Shared style-key schema, PSS lexer/parser, selector model, style resolution, renderer-profile data contract, and stylesheet discovery/reload manager |
+| `pydrud/platforms/android/` | Android-only adapter data (`AndroidRendererProfile`), the embedded development/source-sync server, and logcat output adapter |
+| `pydrud/widgets/` | The widget vocabulary, styling helpers, theme, responsive widgets, and composites; `class_` is local stylesheet metadata, not wire data |
+| `pydrud/services/` | APIs for optional client/device services and the cross-platform HTTP client |
+| `pydrud/android/` | Build-time templates for the Chaquopy Android project and static Java-template checks; never imported by the PSS resolver |
+| `pydrud/commands/` | CLI, runtime-aware package management and analyzer, scaffold/build/sync commands, and host preview runner |
+| `pydrud/testing.py` | `FakeRenderer` / `AppTester`: local socket renderer for protocol and app tests without an Android device |
 
-Application code should import from the top-level namespace
-(`from pydrud import App, Router, Column`); the layout above is for people
-working *on* Pydrud.
+Application code should import from the top-level namespace (`from pydrud
+import App, Router, Column`). The layout above is for people working on
+Pydrud.
 
-### Generated app import boundary
+## Runtime selection and packaging
+
+A new or otherwise unconfigured project selects `pydash`. That path runs the
+installed Pydrud package on the host and does not inspect an Android SDK, build
+an APK, or vendor the Pydash client. Pydash package declarations are recorded
+in `pydrud.toml`; installing those dependencies into the Python environment
+used by `pydrud dev` remains the developer's responsibility.
+
+`chaquopy` is the explicit Android-only APK target. Its build path vendors the
+runtime packages needed inside the generated app, applies the Android package
+policy, and syncs Python dependencies into Gradle. An already-generated
+Android project with no `runtime` key is recognized as legacy Chaquopy so an
+upgrade does not silently change its behavior; a successful `sync` persists
+that inferred selection.
+
+Android assumptions belong in `pydrud/platforms/android/` or the generated
+Android templates, not in `pydrud/core/`. The Android profile supplies
+renderer-specific style facts as data; the neutral parser/resolver never
+imports the Android adapter implicitly.
+
+## Rendering contract
+
+1. Python builds a desired widget tree and resolves PSS before serialization.
+2. The diff is computed against the last tree acknowledged by the renderer,
+   not simply the last tree sent.
+3. One `RenderTransaction` is in flight at a time. A transaction contains a
+   full snapshot or keyed patches, a strictly increasing revision, and its
+   confirmed base revision.
+4. The renderer applies the transaction atomically and ACKs that exact
+   revision. Only then does Python advance the confirmed snapshot.
+5. A NACK or reconnect causes a full snapshot resynchronization; intervening
+   UI updates coalesce against the latest desired tree.
+
+These semantics are shared by the host preview and the generated Android
+renderer. Pydash's preview-protocol handshake sits outside the renderer-v2
+transaction envelope.
+
+## Python-side stylesheets
+
+PSS is a platform-neutral stylesheet language, not a CSS renderer. `src/**/*.pss`
+files are discovered and merged in stable order. Its selectors support widget
+types, Python-side classes, explicit keys, compounds, selector lists,
+descendants, and direct children. Rules cascade by specificity and source
+order; inline widget styles override PSS.
+
+The `class_` argument is retained only on the Python widget object so the PSS
+resolver can match classes. It is omitted from serialized nodes and styles and
+is not listed in `NATIVE_IGNORED_PROPS`. The parser, shared style vocabulary,
+selector matching, and resolver have no Android dependency. Renderer-specific
+warnings can be supplied through the optional `RendererProfile` data type.
+
+The watcher reloads `.py` and `.pss` files. A PSS-only edit rebuilds style
+resolution without re-executing Python modules; deleting a sheet removes its
+rules. Invalid edits report diagnostics and retain that file's last-known-good
+rules. See [PSS Stylesheets](PSS_STYLESHEETS.md) for syntax and behavior.
+
+## Generated app import boundary
 
 Generated applications keep route state in `app/runtime.py` and route
 registration in `app/main.py`. Screen modules may import the already-created
-`app.runtime.router` (and small runtime helpers), but `app/runtime.py` must
-never import `app.screens` or any module which imports a screen. This is a
-hard one-way dependency boundary: adding a screen import to `runtime.py`
-reintroduces a circular import before `router` exists. Register routes in
-`main.py` after importing both the runtime and screen builders.
+`app.runtime.router` and small runtime helpers, but `app/runtime.py` must
+never import `app.screens` or a module that imports a screen. Register routes
+in `main.py` after importing both the runtime and screen builders.
 
-## The rendering contract
+## Threading and optional services
 
-1. Python builds a desired tree and diffs it against the last tree the
-   device **acknowledged** (not the last one sent).
-2. The diff goes out as a `render_transaction` with a revision number —
-   a patch batch, or a snapshot when patches exceed `MAX_PATCHES`.
-3. The device applies it atomically and replies `render_ack` with that
-   exact revision; only then does Python advance its confirmed snapshot.
-   A `render_nack` makes Python resend a full snapshot.
+One Python thread handles UI events and `run_on_ui` callbacks. Work from other
+threads must be marshalled through `App.run_on_ui`. Handler exceptions are
+isolated and routed to `App.on_error` so one bad callback cannot kill the
+loop.
 
-Because the confirmed snapshot only moves on an ack, a dropped or
-reordered message can never leave the two trees silently out of step.
+Device and client services are optional capabilities of the connected
+renderer. A service request is sent only when the renderer advertises that
+service or the concrete command. If unavailable, Pydrud completes the
+corresponding `Result` with an actionable failure instead of sending a request
+the client cannot handle. Android manifest permissions and Chaquopy-generated
+service implementations remain Android-target concerns.
 
-## Threading
+## Testing and verification boundaries
 
-One Python thread handles everything UI: the event loop drains a single
-queue of device events and `run_on_ui` callbacks. Work from other threads
-must go through `App.run_on_ui` — the same rule as `runOnUiThread`.
-Handler exceptions are isolated and routed to `App.on_error` so one bad
-callback cannot kill the loop.
-
-## Native services
-
-Each Java service class takes `(activity, bridge)` and exposes
-`boolean handle(String cmd, JSONObject msg)`, returning `true` when it
-owns the command. `BridgeService.handleMessage` tries them in order:
-explicit cases → `platform` → `capture` → `connectivity` → `services` →
-`replyUnsupported`. Every path answers exactly once, so a Python `Result`
-can never hang.
-
-## Testing
-
-`tests/` runs the real app against `FakeDevice` over a real socket — the
-protocol, the diff, the ack handshake and the screens are all exercised
-without an emulator. `tools/check_java.py` parses every Java template and
-resolves every symbol, which catches the class of error a Gradle build
-would otherwise find for you.
+The tests exercise Pydrud against `FakeRenderer` over a local socket, including
+snapshots, keyed patches, ACK/NACK behavior, app events, runtime selection,
+package/analyzer policy, PSS parsing/resolution, and generated-project
+scaffolds. Generated Java templates are parsed and symbol-checked without
+requiring Gradle or a device. Passing these tests does not establish that an
+Android APK was built or installed, nor does it verify a separate Pydash
+client implementation.

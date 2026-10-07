@@ -6,8 +6,8 @@ Renderer protocol: Pydrud bridge protocol version `2`
 
 This document defines the Android-agnostic connection between `pydrud dev`
 and an independent live-preview renderer such as Pydash. It does not define a
-Pydash product, Android lifecycle, packaging, or arbitrary native development
-features.
+Pydash product, Android lifecycle, packaging, or arbitrary platform-specific
+development features.
 
 ## Responsibilities
 
@@ -18,7 +18,7 @@ The developer machine is authoritative. It:
 - watches source files and performs hot reload;
 - computes snapshots and keyed tree patches;
 - tracks desired, in-flight and renderer-confirmed revisions; and
-- accepts UI events and optional native-service results.
+- accepts UI events and optional client-service results.
 
 The preview client is a lightweight renderer. It:
 
@@ -96,6 +96,9 @@ The client's first frame must arrive within 10 seconds and must be a
     "ack_nack": true,
     "resync": true,
     "native_animations": false,
+    "services": ["storage", "share"],
+    "widget_types": ["Stack", "Column", "Text", "Button"],
+    "native_view": false,
     "commands": []
   },
   "last_revision": 0,
@@ -104,6 +107,7 @@ The client's first frame must arrive within 10 seconds and must be a
     "height": 915,
     "density": 2.75,
     "text_scale": 1.0,
+    "platform_version": "35",
     "orientation": "portrait",
     "padding_top": 24,
     "padding_right": 0,
@@ -114,12 +118,12 @@ The client's first frame must arrive within 10 seconds and must be a
 ```
 
 The four Boolean renderer capabilities shown as `true` are required. Other
-capabilities are optional and additive. `commands` may name optional native
-commands implemented by a client; the host must not infer unsupported native
-services merely from the client name or platform.
+capabilities are optional and additive. `commands` may name optional commands
+implemented by a renderer; the host must not infer unsupported services merely
+from the client name or platform.
 
 `last_revision` is `0` for a new client. A reconnecting client reports its
-last successfully applied native revision. Metrics are density-independent
+last successfully applied renderer revision. Metrics are density-independent
 window details used before the first tree is built. Unknown metric and
 capability fields must be ignored for forward compatibility.
 
@@ -179,7 +183,7 @@ The host sends, in order:
 The initial transaction is always a full snapshot, including after reconnect.
 Its `base_revision` is the client's validated `last_revision`; its `revision`
 is strictly greater. This avoids assuming that a host-side cached tree exactly
-matches a newly attached native renderer.
+matches a newly attached renderer.
 
 Example:
 
@@ -231,7 +235,7 @@ state and trigger the next patch.
 ## NACK and resynchronization
 
 If a transaction cannot be applied atomically—most commonly because
-`base_revision` differs from native state—the client sends:
+`base_revision` differs from its applied state—the client sends:
 
 ```json
 {
@@ -252,7 +256,7 @@ the new confirmed tree. Clients must not ACK a partially applied transaction.
 
 ## Disconnect and reconnect
 
-TCP disconnect cancels pending native request/result calls and discards
+TCP disconnect cancels pending service request/result calls and discards
 in-flight transaction bookkeeping, but it does not stop the development
 server or discard the authoritative Python app. File watching continues while
 no client is attached.
@@ -260,7 +264,7 @@ no client is attached.
 A reconnect repeats the complete authenticated handshake with the same
 single-run session/token and reports its own `last_revision`. The host always
 sends theme plus a full snapshot before resuming patches. A client that lost
-all native state reconnects with revision `0`.
+all render state reconnects with revision `0`.
 
 Restarting `pydrud dev` creates a different session/token. A client must scan
 or otherwise consume the new URI; old credentials are invalid.
@@ -283,3 +287,38 @@ is not sent project source or a partially constructed tree.
 - New optional capability names may be added without a version increment.
 - Changing required sequencing, authentication semantics, framing, or existing
   field meaning requires a new preview protocol version.
+
+### Optional renderer capabilities
+
+Capability data is additive and platform-neutral. A client can advertise a
+`services` array or object for optional request/response services (for example
+`camera`, `haptics`, `storage`, `location`, or `notifications`), a
+`widget_types` array or object for its supported widget vocabulary, and a
+Boolean `native_view` for the `NativeView` escape hatch. The existing optional
+`commands` list may instead name concrete commands. Unknown capability keys
+are ignored; none of these fields changes protocol version 1 or renderer
+protocol version 2.
+
+The host checks service availability before sending a request. An unavailable
+service returns a completed, actionable `Result` failure without putting a
+request on the wire. If `widget_types` is explicitly provided and a widget is
+not listed, the host substitutes a visible, non-interactive `Text` placeholder
+with the same stable key and logs one warning per unsupported widget type.
+`Text` is the fallback primitive. `NativeView` additionally requires the
+explicit `native_view: true` capability. For compatibility with clients that
+predate widget catalogs, omitting `widget_types` leaves ordinary widget types
+unfiltered; omission of an optional service does not imply support.
+
+Example reduced renderer declaration:
+
+```json
+{
+  "transactional_render": true,
+  "revisioned_render": true,
+  "ack_nack": true,
+  "resync": true,
+  "services": ["storage", "share"],
+  "widget_types": ["Stack", "Column", "Text", "Button"],
+  "native_view": false
+}
+```
