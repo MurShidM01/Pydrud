@@ -1,15 +1,11 @@
-# Pydrud project configuration
-# This is the source of truth for the generated Android project. Edit it,
-# then run `pydrud sync`; do not hand-edit generated Android build files.
+# Pydrud project configuration.
 app_name: "{{ project_name }}"
 package: "{{ package }}"
 version_code: {{ version_code | default(1) }}
 version_name: "{{ version_name | default("1.0.0") }}"
+runtime: "{{ runtime | default("pydash") }}"
 
-# Runtime: "pydash" (default — live preview, no build toolchain needed) or
-#          "chaquopy" (standalone APK, Android-only).
-runtime: "{{ runtime | default("chaquopy") }}"
-
+{% if runtime == "chaquopy" %}
 # Android SDK and native targets
 min_sdk: {{ min_sdk }}
 target_sdk: {{ target_sdk }}
@@ -35,13 +31,19 @@ capabilities:
 firebase: {{ "true" if firebase | default(false) else "false" }}
 shrink: {{ shrink | default("false") }}
 
-# Generated runtime and Android build toolchain
+# Android build toolchain
 python_version: "{{ python_version }}"
-framework_version: "{{ pydrud_runtime_version | default("2.0.2") }}"
-protocol_version: {{ protocol_version | default(2) }}
 chaquopy_version: "{{ chaquopy_version | default("17.0.0") }}"
 agp_version: "{{ agp_version | default("8.13.2") }}"
 gradle_version: "{{ gradle_version | default("8.14.4") }}"
+{% else %}
+# The Pydash preview uses the host Python process and the authenticated LAN
+# renderer. No Android SDK, NDK, Gradle, ABI, manifest or permission values are
+# used by this runtime.
+assets_dir: "{{ assets_dir | default("assets") }}"
+{% endif %}
 
-# Managed by `pydrud sync`; it records which release generated Android.
+# Framework and renderer protocol metadata
+framework_version: "{{ pydrud_runtime_version | default("2.0.2") }}"
+protocol_version: {{ protocol_version | default(2) }}
 pydrud_version: "{{ pydrud_version }}"

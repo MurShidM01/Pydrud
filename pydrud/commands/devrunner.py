@@ -235,23 +235,28 @@ class DevRunner:
     def trigger_hot_reload(self, specific_files: Optional[list[str]] = None) -> None:
         """Perform fast Hot Reload without rebuilding the APK."""
         files_to_sync = []
+        deleted_stylesheets = []
         src_dir = os.path.join(self.root, "src")
 
         if specific_files:
             target_files = [os.path.abspath(f) for f in specific_files]
         else:
-            # Gather all .py files in src/
+            # Gather Python modules and PSS stylesheets under src/.
             target_files = []
             if os.path.isdir(src_dir):
                 for root, _, files in os.walk(src_dir):
                     if any(ign in root for ign in ("__pycache__", ".git")):
                         continue
                     for f in files:
-                        if f.endswith(".py"):
+                        if f.endswith((".py", ".pss")):
                             target_files.append(os.path.join(root, f))
 
         for fpath in target_files:
             if not os.path.isfile(fpath):
+                if specific_files and fpath.lower().endswith(".pss"):
+                    rel = os.path.relpath(fpath, self.root).replace(os.sep, "/")
+                    if not rel.startswith("../") and rel != "..":
+                        deleted_stylesheets.append(rel)
                 continue
             try:
                 with open(fpath, "r", encoding="utf-8") as fp:
@@ -261,11 +266,14 @@ class DevRunner:
             except Exception as e:
                 sys.stdout.write(tui.warn_badge(f"Could not read {fpath}: {e}\n"))
 
-        if not files_to_sync:
+        if not files_to_sync and not deleted_stylesheets:
             sys.stdout.write(tui.warn_badge("No source files found to reload.\n"))
             return
 
-        response = self._send_dev_command({"cmd": "hot_reload", "files": files_to_sync})
+        command = {"cmd": "hot_reload", "files": files_to_sync}
+        if deleted_stylesheets:
+            command["deleted"] = sorted(set(deleted_stylesheets))
+        response = self._send_dev_command(command)
         if response is None:
             sys.stdout.write(tui.warn_badge("DevServer not reachable -- app might be busy or restarting.\n"))
             return
@@ -274,8 +282,9 @@ class DevRunner:
             duration = response.get("duration_ms", 0.0)
             reloaded = response.get("reloaded", [])
             states = response.get("states_preserved", 0)
-            names = [f["path"] for f in files_to_sync]
-            sys.stdout.write(tui.hot_reload_success(duration, names if len(names) <= 3 else reloaded, states))
+            names = [f["path"] for f in files_to_sync] + deleted_stylesheets
+            sys.stdout.write(tui.hot_reload_success(
+                duration, names if len(names) <= 3 else reloaded, states))
             sys.stdout.flush()
         else:
             err_type = response.get("error_type", "Error")
@@ -309,7 +318,7 @@ class DevRunner:
                 if any(ign in root for ign in ("__pycache__", ".git")):
                     continue
                 for f in files:
-                    if f.endswith(".py"):
+                    if f.endswith((".py", ".pss")):
                         fpath = os.path.join(root, f)
                         try:
                             with open(fpath, "r", encoding="utf-8") as fp:

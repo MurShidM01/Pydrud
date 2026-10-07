@@ -1,3 +1,29 @@
+{% if runtime == "pydash" %}
+"""{{ project_name }} — entry point for host-side Pydash preview.
+
+Run ``pydrud dev`` to execute this module locally and connect a Pydash client.
+The client receives renderer snapshots and patches; Python source stays here.
+"""
+
+from pydrud import Theme
+
+from app.config import ACCENT
+from app.runtime import refresh, router
+from app.screens import details_screen, playground_screen
+
+Theme.seed(ACCENT)
+router.define("playground", playground_screen)
+router.define("details", details_screen)
+router.initial("playground")
+
+
+def main(page):
+    """Build the current screen for the connected renderer."""
+    router.build_root()(page)
+
+
+__all__ = ["main", "refresh", "router"]
+{% else %}
 """
 {{ project_name }} — entry point.
 
@@ -50,3 +76,4 @@ def start_app():
 
 __all__ = ["JOBS", "bind", "current", "job", "main", "refresh", "router",
            "run_background_job", "start_app"]
+{% endif %}

@@ -1,9 +1,9 @@
 """
-Request/response plumbing for native calls.
+Request/response plumbing for optional client services.
 
-Most of the bridge is fire-and-forget: Python pushes render commands, Android
-pushes events.  Native *services* (dialogs, pickers, permissions, storage,
-location, …) need the opposite: Python asks a question and Android answers
+Most of the bridge is fire-and-forget: Python pushes render commands, the client
+pushes events. Optional services (dialogs, pickers, permissions, storage,
+location, …) need the opposite: Python asks a question and the client answers
 later, possibly seconds later and possibly never (the user may background the
 app while a date picker is open).
 
@@ -104,7 +104,7 @@ class Result:
         return True
 
     def cancel(self, reason: str = "cancelled") -> bool:
-        """Mark as cancelled; a later answer from Android will be ignored."""
+        """Mark as cancelled; a later answer from the client will be ignored."""
         with self._lock:
             if self._done:
                 return False

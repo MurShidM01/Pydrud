@@ -75,8 +75,36 @@ _WIDGET_CLASSES = {
 }
 
 
-def run_analysis(path: str = "src") -> list[dict]:
+def _analysis_runtime(path: str, runtime: str | None) -> str:
+    """Resolve the target used by runtime-sensitive analyzer checks."""
+    from pydrud.runtime.runtime import Runtime, resolve_runtime
+
+    if isinstance(runtime, Runtime):
+        return runtime.value
+    if runtime is not None:
+        return Runtime.resolve(runtime).value
+
+    candidate = os.path.abspath(path)
+    if not os.path.isdir(candidate):
+        candidate = os.path.dirname(candidate)
+    while True:
+        if (os.path.isfile(os.path.join(candidate, "pydrud.toml"))
+                or os.path.isfile(os.path.join(candidate, "pydrud.yaml"))
+                or os.path.isfile(os.path.join(candidate, "pydrud.yml"))):
+            return resolve_runtime(candidate).runtime.value
+        parent = os.path.dirname(candidate)
+        if parent == candidate:
+            break
+        candidate = parent
+    return Runtime.PYDASH.value
+
+
+def run_analysis(path: str = "src", *, runtime: str | None = None) -> list[dict]:
     """Run static analysis on all Python files under *path*.
+
+    When omitted, *runtime* is inferred from the nearest Pydrud project
+    configuration; an unconfigured project defaults to Pydash. This matters
+    for checks whose validity depends on whether source is bundled into an APK.
 
     Returns a list of issue dicts with keys:
     - file (str): relative file path
@@ -84,6 +112,7 @@ def run_analysis(path: str = "src") -> list[dict]:
     - severity (str): "warning" or "error"
     - message (str): description of the issue
     """
+    runtime = _analysis_runtime(path, runtime)
     issues: list[dict] = []
     src_dir = os.path.abspath(path)
     if not os.path.isdir(src_dir):
@@ -107,7 +136,7 @@ def run_analysis(path: str = "src") -> list[dict]:
                 try:
                     with open(fpath, encoding="utf-8") as f:
                         source = f.read()
-                    issues.extend(_analyze_file(source, rel_path))
+                    issues.extend(_analyze_file(source, rel_path, runtime=runtime))
                 except Exception as exc:
                     issues.append({
                         "file": rel_path,
@@ -119,8 +148,9 @@ def run_analysis(path: str = "src") -> list[dict]:
     return issues
 
 
-def _analyze_file(source: str, filepath: str) -> list[dict]:
-    """Analyze a single Python file and return issues."""
+def _analyze_file(source: str, filepath: str, *,
+                  runtime: str = "pydash") -> list[dict]:
+    """Analyze a single Python file in the context of its selected runtime."""
     issues: list[dict] = []
     try:
         tree = ast.parse(source, filename=filepath)
@@ -144,7 +174,7 @@ def _analyze_file(source: str, filepath: str) -> list[dict]:
     issues.extend(_check_constant_references(tree, filepath))
     issues.extend(_check_contrast(tree, filepath))
     issues.extend(_check_touch_targets(tree, filepath))
-    issues.extend(_check_host_only_imports(tree, filepath))
+    issues.extend(_check_host_only_imports(tree, filepath, runtime=runtime))
 
     return _dedupe(issues)
 
@@ -737,38 +767,58 @@ def _host_only_module(module: str) -> str | None:
     return part if part in _HOST_ONLY_MODULES else None
 
 
-def _check_host_only_imports(tree: ast.AST, filepath: str) -> list[dict]:
-    """Flag imports of Pydrud's build-time-only modules (DX-003).
+def _check_host_only_imports(tree: ast.AST, filepath: str, *,
+                             runtime: str = "chaquopy") -> list[dict]:
+    """Report imports unavailable in the selected runtime (DX-003).
 
-    ``pydrud.commands``, ``pydrud.android`` and friends are the CLI and its
-    Android toolchain. They resolve in a checkout — where the editable
-    install can still find them — so the mistake is invisible locally, but
-    the bundler strips them from the APK, where the import raises at
-    start-up. The analyzer is the cheapest place to catch it.
+    Chaquopy strips CLI, Android build tooling and preview-only modules from
+    its bundled runtime. Pydash runs against the installed host package, so
+    those host modules are not falsely reported as APK omissions; explicit
+    Android implementation imports are still rejected for the cross-platform
+    host preview.
     """
     issues: list[dict] = []
     for node in ast.walk(tree):
-        modules: list = []
+        modules: list[str] = []
         if isinstance(node, ast.ImportFrom):
             if node.module:
                 modules.append(node.module)
+                if node.module in {"pydrud", "pydrud.platforms"}:
+                    modules.extend(
+                        f"{node.module}.{alias.name}" for alias in node.names)
         elif isinstance(node, ast.Import):
             modules.extend(alias.name for alias in node.names)
         else:
             continue
+
         for module in modules:
-            part = _host_only_module(module)
-            if part is None:
-                continue
+            if runtime == "pydash":
+                if not (module == "pydrud.android"
+                        or module.startswith("pydrud.android.")
+                        or module == "pydrud.platforms.android"
+                        or module.startswith("pydrud.platforms.android.")):
+                    continue
+                message = (
+                    f"'{module}' is Android-specific; Pydash runs the app "
+                    "from the host and does not expose Android implementation "
+                    "APIs. Use the platform-neutral Pydrud API and renderer-"
+                    "advertised capabilities instead."
+                )
+            else:
+                part = _host_only_module(module)
+                if part is None:
+                    continue
+                message = (
+                    f"'{module}' is build-time only — the bundler strips "
+                    f"pydrud.{part} from the Chaquopy APK, so this import "
+                    "works in a checkout but fails on device (DX-003). "
+                    "Import only the runtime API from `pydrud`."
+                )
             issues.append({
                 "file": filepath,
                 "line": node.lineno,
                 "severity": _SEVERITY_ERROR,
-                "message": f"'{module}' is build-time only — the bundler "
-                           f"strips pydrud.{part} from the APK, so this "
-                           "import works in a checkout but fails on device "
-                           "(DX-003). Import only the runtime API from "
-                           "`pydrud`.",
+                "message": message,
             })
     return issues
 

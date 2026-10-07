@@ -10,7 +10,7 @@ import sys
 
 from pydrud.compatibility import COMPATIBILITY, HOST_COMPATIBILITY
 from pydrud.commands.project_config import load_project_config
-from pydrud.runtime.runtime import Runtime, resolve_runtime
+from pydrud.runtime.runtime import Runtime, persist_runtime, resolve_runtime
 from pydrud.utils import tui
 from pydrud.utils.colors import fail, info
 from pydrud.commands.project.bundle import _bundle_pydrud_source, _copy_icon_resources
@@ -287,17 +287,19 @@ def sync_project(project_dir: str, *, update_runtime: bool = True) -> bool:
     manifest. The generated Java package is migrated when identity changes.
     User code under ``src/app/`` is never touched.
 
-    When the project runs in pydash mode this command refuses to touch the
-    Android layer — pydash projects do not have one. Pass
-    ``runtime: chaquopy`` in ``pydrud.toml`` to use the full build path.
+    Pydash projects have no Android layer, so this command is an informational
+    no-op for them. ``sync`` refreshes an already-generated Chaquopy project;
+    to create that Android-only target, scaffold a project with
+    ``pydrud init <name> --runtime chaquopy``.
     """
     # Resolve runtime first so we can short-circuit for pydash projects.
     descriptor = resolve_runtime(project_dir)
     if descriptor.runtime is Runtime.PYDASH:
+        persist_runtime(project_dir, Runtime.PYDASH)
         print(tui.warn_badge(
             "This project runs in pydash mode — no Android project exists. "
-            "Run 'pydrud dev' to start a live preview, or switch to "
-            "'runtime: chaquopy' in pydrud.toml for a standalone APK."
+            "Run 'pydrud dev' to start a live preview, or create a separate "
+            "Android project with 'pydrud init <name> --runtime chaquopy'."
         ))
         return True
 
@@ -339,6 +341,7 @@ def sync_project(project_dir: str, *, update_runtime: bool = True) -> bool:
     if update_runtime:
         _bundle_pydrud_source(project_dir)
 
+    persist_runtime(project_dir, descriptor.runtime)
     _stamp_version(project_dir)
     print(tui.render_summary(
         "Project synchronized",

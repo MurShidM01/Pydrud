@@ -1,39 +1,21 @@
-"""
-PSS (Pydrud Style Sheet) AST and parser.
+"""PSS (Pydrud Style Sheet) syntax tree and parser.
 
-AST nodes
----------
-* ``StyleSheet`` — top-level container of rules
-* ``Rule``       — a selector + declaration block
-* ``Selector``   — one or more compound selectors joined by combinators
-* ``CompoundSelector`` — type, class, and/or id components
-* ``DeclarationBlock`` — ordered list of (key, value) pairs
-* ``Diagnostic`` — error/warning with file, line, column
-
-Parser rules
-------------
-* Type selector: ``Button { color: red; }``
-* Class selector: ``.primary { bg: #FF0000; }``
-* Id selector: ``#header { padding: 10; }``
-* Compound selector: ``.primary.Button { bg: red; }``
-* Descendant combinator (space): ``.sidebar Button { bg: blue; }``
-* Direct-child combinator (``>``): ``.card > Button { bg: green; }``
-* List combinator (comma): ``.btn, .link { bg: red; }``
-* Kebab-case keys normalised via :func:`pydrud.core.styles.normalize_key`
-
-Diagnostics
------------
-Errors carry ``(filename, line, col, message)`` so callers can surface
-clear messages. The parser performs basic error recovery: on a syntax
-error it skips tokens until the next ``}`` (or EOF) and continues.
+PSS supports type, class, and id selectors; compounds; descendant and direct
+child combinators; comma-separated selector lists; and typed, schema-aware
+style declarations. Parsing is non-fatal: malformed input is returned as
+source-located diagnostics so an editor can keep the last known-good sheet.
 """
 
 from __future__ import annotations
 
+import ast
+import json
+import re
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
-from pydrud.core.styles.lexer import Token, TokenKind
+from pydrud.core.styles.lexer import LexerError, Token, TokenKind, lex
+from pydrud.core.styles.schema import normalize_key
 
 
 @dataclass(frozen=True)
@@ -54,14 +36,15 @@ class CompoundSelector:
 
 @dataclass
 class Selector:
-    """One or more compound selectors separated by combinators."""
+    """A chain of compound selectors joined by CSS-like combinators."""
+
     compounds: tuple[CompoundSelector, ...] = ()
-    combinators: tuple[str, ...] = ()  # same length as compounds minus 1
+    combinators: tuple[str, ...] = ()  # one fewer than compounds
 
 
 @dataclass
 class DeclarationBlock:
-    declarations: list[tuple[str, str]] = field(default_factory=list)
+    declarations: list[tuple[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -77,7 +60,199 @@ class StyleSheet:
     filename: str = ""
 
 
+_NUMBER = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$")
+
+
+def _parse_collection(source: str) -> Any:
+    """Parse PSS object/array values with JSON or CSS-style bare keys."""
+    class Reader:
+        def __init__(self, text: str) -> None:
+            self.text = text
+            self.pos = 0
+
+        def whitespace(self) -> None:
+            while self.pos < len(self.text) and self.text[self.pos].isspace():
+                self.pos += 1
+
+        def string(self) -> str:
+            quote = self.text[self.pos]
+            start = self.pos
+            self.pos += 1
+            escaped = False
+            while self.pos < len(self.text):
+                char = self.text[self.pos]
+                self.pos += 1
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == quote:
+                    raw = self.text[start:self.pos]
+                    try:
+                        value = ast.literal_eval(raw)
+                    except (SyntaxError, ValueError) as exc:
+                        raise ValueError("invalid quoted value") from exc
+                    if not isinstance(value, str):
+                        raise ValueError("expected a string")
+                    return value
+            raise ValueError("unterminated quoted value")
+
+        def value(self) -> Any:
+            self.whitespace()
+            if self.pos >= len(self.text):
+                raise ValueError("missing value")
+            char = self.text[self.pos]
+            if char == "{":
+                return self.object()
+            if char == "[":
+                return self.array()
+            if char in ("'", '"'):
+                return self.string()
+            return _parse_value(self.bare())
+
+        def bare(self) -> str:
+            start = self.pos
+            parens = 0
+            while self.pos < len(self.text):
+                char = self.text[self.pos]
+                if char == "(":
+                    parens += 1
+                elif char == ")" and parens:
+                    parens -= 1
+                elif parens == 0 and char in ",]}" :
+                    break
+                self.pos += 1
+            value = self.text[start:self.pos].strip()
+            if not value:
+                raise ValueError("missing value")
+            return value
+
+        def object(self) -> dict:
+            result = {}
+            self.pos += 1  # opening brace
+            self.whitespace()
+            if self.pos < len(self.text) and self.text[self.pos] == "}":
+                self.pos += 1
+                return result
+            while True:
+                self.whitespace()
+                if self.pos >= len(self.text):
+                    raise ValueError("unterminated object")
+                if self.text[self.pos] in ("'", '"'):
+                    key = self.string()
+                else:
+                    start = self.pos
+                    while self.pos < len(self.text) and self.text[self.pos] not in ":,}" \
+                            and not self.text[self.pos].isspace():
+                        self.pos += 1
+                    key = self.text[start:self.pos]
+                    if not key:
+                        raise ValueError("missing object key")
+                self.whitespace()
+                if self.pos >= len(self.text) or self.text[self.pos] != ":":
+                    raise ValueError("expected ':' after object key")
+                self.pos += 1
+                result[key] = self.value()
+                self.whitespace()
+                if self.pos < len(self.text) and self.text[self.pos] == ",":
+                    self.pos += 1
+                    self.whitespace()
+                    if self.pos < len(self.text) and self.text[self.pos] == "}":
+                        self.pos += 1
+                        return result
+                    continue
+                if self.pos < len(self.text) and self.text[self.pos] == "}":
+                    self.pos += 1
+                    return result
+                raise ValueError("expected ',' or '}' in object")
+
+        def array(self) -> list:
+            result = []
+            self.pos += 1  # opening bracket
+            self.whitespace()
+            if self.pos < len(self.text) and self.text[self.pos] == "]":
+                self.pos += 1
+                return result
+            while True:
+                result.append(self.value())
+                self.whitespace()
+                if self.pos < len(self.text) and self.text[self.pos] == ",":
+                    self.pos += 1
+                    self.whitespace()
+                    if self.pos < len(self.text) and self.text[self.pos] == "]":
+                        self.pos += 1
+                        return result
+                    continue
+                if self.pos < len(self.text) and self.text[self.pos] == "]":
+                    self.pos += 1
+                    return result
+                raise ValueError("expected ',' or ']' in array")
+
+    reader = Reader(source)
+    value = reader.value()
+    reader.whitespace()
+    if reader.pos != len(source):
+        raise ValueError("unexpected trailing text")
+    return value
+
+
+def _parse_value(source: str) -> Any:
+    """Convert PSS scalar/JSON-style values to Python primitives.
+
+    Bare names, CSS units, colour literals and renderer-specific function
+    expressions remain strings. JSON arrays/objects are accepted for style
+    properties whose schema kind is ``composite``.
+    """
+    raw = source.strip()
+    if not raw:
+        return ""
+    lower = raw.lower()
+    if lower == "true":
+        return True
+    if lower == "false":
+        return False
+    if lower == "null":
+        return None
+    if _NUMBER.fullmatch(raw):
+        try:
+            number = float(raw) if any(c in raw for c in ".eE") else int(raw)
+            if isinstance(number, float) and number.is_integer() and not any(
+                    c in raw for c in ".eE"):
+                return int(number)
+            return number
+        except (ValueError, OverflowError):  # pragma: no cover - guarded by regex
+            return raw
+
+    if raw[:1] in ("'", '"') and raw[-1:] == raw[:1]:
+        try:
+            value = ast.literal_eval(raw)
+            if isinstance(value, str):
+                return value
+        except (SyntaxError, ValueError):
+            return raw[1:-1]
+        return raw[1:-1]
+
+    if raw[:1] in ("{", "["):
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            try:
+                value = ast.literal_eval(raw)
+                if isinstance(value, (dict, list, tuple)):
+                    return value
+            except (SyntaxError, ValueError):
+                pass
+            try:
+                return _parse_collection(raw)
+            except (ValueError, SyntaxError):
+                pass
+
+    return raw
+
+
 class Parser:
+    """Recursive-descent parser with rule-level error recovery."""
+
     def __init__(self, tokens: list[Token], filename: str = "") -> None:
         self.tokens = tokens
         self.pos = 0
@@ -85,167 +260,248 @@ class Parser:
         self.diagnostics: list[Diagnostic] = []
 
     def current(self) -> Token:
-        return self.tokens[self.pos]
+        return self.tokens[min(self.pos, len(self.tokens) - 1)]
 
     def peek(self, offset: int = 0) -> Token:
-        idx = self.pos + offset
-        if 0 <= idx < len(self.tokens):
-            return self.tokens[idx]
-        return self.tokens[-1]  # EOF
+        return self.tokens[min(self.pos + offset, len(self.tokens) - 1)]
 
     def advance(self) -> Token:
-        tok = self.tokens[self.pos]
-        self.pos += 1
-        return tok
+        token = self.current()
+        if token.kind != TokenKind.EOF:
+            self.pos += 1
+        return token
 
-    def expect(self, kind: TokenKind, value: str | None = None) -> Token:
-        tok = self.current()
-        if tok.kind != kind or (value is not None and tok.value != value):
-            self.error(
-                f"Expected {kind.name} {value!r}"
-                if value else f"Expected {kind.name}",
-            )
-        return self.advance()
-
-    def error(self, message: str) -> None:
-        tok = self.current()
+    def error(self, message: str, token: Token | None = None,
+              *, kind: str = "error") -> None:
+        token = token or self.current()
         self.diagnostics.append(Diagnostic(
-            filename=self.filename, line=tok.line, col=tok.col, message=message,
+            filename=self.filename,
+            line=token.line,
+            col=token.col,
+            message=message,
+            kind=kind,
         ))
 
     def parse(self) -> StyleSheet:
         rules: list[Rule] = []
         while self.current().kind != TokenKind.EOF:
+            before = self.pos
             try:
-                rule = self.parse_rule()
-                if rule is not None:
-                    rules.append(rule)
-            except Exception:
+                rules.extend(self.parse_rule())
+            except Exception as exc:  # keep the editor/runtime resilient
+                self.error(f"Could not parse rule: {exc}")
                 self.skip_to_next_rule()
-        return StyleSheet(rules=rules, diagnostics=self.diagnostics, filename=self.filename)
+            if self.pos == before:
+                self.advance()
+        return StyleSheet(
+            rules=rules,
+            diagnostics=self.diagnostics,
+            filename=self.filename,
+        )
 
-    def parse_rule(self) -> Optional[Rule]:
-        selector = self.parse_selector()
-        if selector is None:
-            return None
-        self.expect(TokenKind.LBRACE)
+    def parse_rule(self) -> list[Rule]:
+        selectors = self.parse_selector_list()
+        if self.current().kind != TokenKind.LBRACE:
+            self.error("Expected '{' after selector")
+            self.skip_to_next_rule()
+            return []
+        self.advance()
         body = self.parse_declarations()
-        self.expect(TokenKind.RBRACE)
-        return Rule(selector=selector, body=body)
+        if self.current().kind == TokenKind.RBRACE:
+            self.advance()
+        else:
+            self.error("Expected '}' to close declaration block")
+        return [Rule(selector=selector, body=body) for selector in selectors]
 
-    def parse_selector(self) -> Optional[Selector]:
+    def parse_selector_list(self) -> list[Selector]:
+        selectors: list[Selector] = []
         compounds: list[CompoundSelector] = []
         combinators: list[str] = []
 
-        while True:
-            comp = self.parse_compound_selector()
-            if comp is None:
-                break
-            compounds.append(comp)
-            tok = self.current()
-            if tok.kind == TokenKind.COMBINATOR:
-                combinators.append(tok.value)
-                self.advance()
-            elif tok.kind in (TokenKind.LBRACE, TokenKind.EOF, TokenKind.RBRACE):
-                break
-            else:
-                # unexpected token — skip to recover
-                self.error(f"Unexpected token {tok.value!r}")
+        while self.current().kind not in (TokenKind.LBRACE, TokenKind.EOF,
+                                          TokenKind.RBRACE):
+            compound = self.parse_compound_selector()
+            if compound is not None:
+                compounds.append(compound)
+                token = self.current()
+                if token.kind == TokenKind.COMBINATOR and token.value in (" ", ">"):
+                    combinators.append(token.value)
+                    self.advance()
+                    if self.current().kind in (
+                            TokenKind.LBRACE, TokenKind.EOF, TokenKind.RBRACE):
+                        self.error("Expected selector after combinator", token)
+                        break
+                    continue
+                if token.kind == TokenKind.COMBINATOR and token.value == ",":
+                    self._append_selector(selectors, compounds, combinators, token)
+                    compounds, combinators = [], []
+                    self.advance()
+                    if self.current().kind in (
+                            TokenKind.LBRACE, TokenKind.EOF, TokenKind.RBRACE):
+                        self.error("Expected selector after ','", token)
+                        break
+                    continue
+                if token.kind == TokenKind.LBRACE:
+                    break
+                if token.kind == TokenKind.EOF:
+                    break
+                self.error(f"Unexpected token {token.value!r} in selector", token)
+                self._recover_selector()
                 break
 
+            token = self.current()
+            self.error(f"Expected selector, got {token.kind.name}", token)
+            self._recover_selector()
+            break
+
+        if compounds:
+            self._append_selector(selectors, compounds, combinators, self.current())
+        return selectors
+
+    def _append_selector(
+        self,
+        selectors: list[Selector],
+        compounds: list[CompoundSelector],
+        combinators: list[str],
+        token: Token,
+    ) -> None:
         if not compounds:
-            return None
-        return Selector(
-            compounds=tuple(compounds),
-            combinators=tuple(combinators),
-        )
+            self.error("Empty selector", token)
+            return
+        if len(combinators) != len(compounds) - 1:
+            self.error("Selector combinator is missing a compound selector", token)
+            return
+        selectors.append(Selector(tuple(compounds), tuple(combinators)))
 
     def parse_compound_selector(self) -> Optional[CompoundSelector]:
         widget_type: Optional[str] = None
         classes: list[str] = []
-        id_val: Optional[str] = None
+        id_value: Optional[str] = None
+        consumed = False
 
         while True:
-            tok = self.current()
-            if tok.kind == TokenKind.TYPE_SEL:
-                widget_type = tok.value
+            token = self.current()
+            if token.kind == TokenKind.TYPE_SEL:
+                consumed = True
+                if widget_type is not None:
+                    self.error("A compound selector cannot contain two type selectors", token)
+                widget_type = token.value
                 self.advance()
-            elif tok.kind == TokenKind.CLASS_SEL:
-                # If we've already seen a type or id in this compound, and
-                # the class starts with uppercase, treat it as part of a
-                # compound selector (e.g. ".btn.Button"). Otherwise keep it
-                # as a pure class selector.
-                if (widget_type is not None or id_val is not None) and \
-                        tok.value and tok.value[0].isupper():
-                    widget_type = tok.value
-                    self.advance()
+            elif token.kind == TokenKind.CLASS_SEL:
+                consumed = True
+                # Preserve the established .name.Widget shorthand: a final
+                # uppercase class in a multi-part compound is its widget type.
+                if (widget_type is not None or id_value is not None) and token.value[:1].isupper():
+                    widget_type = token.value
                 else:
-                    classes.append(tok.value)
-                    self.advance()
-            elif tok.kind == TokenKind.ID_SEL:
-                id_val = tok.value
+                    classes.append(token.value)
+                self.advance()
+            elif token.kind == TokenKind.ID_SEL:
+                consumed = True
+                if id_value is not None:
+                    self.error("A compound selector cannot contain two id selectors", token)
+                id_value = token.value
                 self.advance()
             else:
                 break
 
-        # Post-process: when a compound starts with classes only and the last
-        # class looks like a widget type (uppercase start), promote it.
-        # This handles patterns like ".btn.Button" where both tokens are
-        # CLASS_SEL but the intent is "class btn on a Button widget".
-        if not widget_type and classes and len(classes) > 1 \
-                and classes[-1][0].isupper():
-            widget_type = classes.pop()
-
-        if widget_type is None and not classes and id_val is None:
+        if not consumed:
             return None
-        return CompoundSelector(
-            widget_type=widget_type,
-            classes=tuple(classes),
-            id=id_val,
-        )
+        if widget_type is None and len(classes) > 1 and classes[-1][:1].isupper():
+            widget_type = classes.pop()
+        # Keep source order but discard duplicated class names.
+        unique_classes = tuple(dict.fromkeys(classes))
+        return CompoundSelector(widget_type, unique_classes, id_value)
 
     def parse_declarations(self) -> DeclarationBlock:
-        decls: list[tuple[str, str]] = []
+        declarations: list[tuple[str, Any]] = []
         while self.current().kind not in (TokenKind.RBRACE, TokenKind.EOF):
-            prop_tok = self.current()
-            if prop_tok.kind != TokenKind.PROP:
-                self.error(f"Expected property name, got {prop_tok.kind.name}")
+            token = self.current()
+            if token.kind == TokenKind.SEMI:
                 self.advance()
+                continue
+            if token.kind != TokenKind.PROP:
+                self.error(f"Expected property name, got {token.kind.name}", token)
+                self._recover_declaration()
+                continue
+
+            property_token = self.advance()
+            if self.current().kind != TokenKind.COLON:
+                self.error("Expected ':' after property name", self.current())
+                self._recover_declaration()
                 continue
             self.advance()
-            tok = self.current()
-            if tok.kind == TokenKind.COLON:
-                self.advance()
-            else:
-                self.error("Expected ':' after property name")
-                # Skip to semicolon or brace to recover
-                while self.current().kind not in (TokenKind.SEMI, TokenKind.RBRACE, TokenKind.EOF):
-                    self.advance()
-                if self.current().kind == TokenKind.SEMI:
-                    self.advance()
+            if self.current().kind != TokenKind.VALUE:
+                self.error("Expected declaration value", self.current())
+                self._recover_declaration()
                 continue
-            # value runs until semicolon or brace
-            parts: list[str] = []
-            while self.current().kind not in (TokenKind.SEMI, TokenKind.RBRACE, TokenKind.EOF):
-                t = self.advance()
-                parts.append(t.value)
+            value_token = self.advance()
+
+            canonical = normalize_key(property_token.value)
+            property_name = canonical or property_token.value
+            if canonical is None:
+                self.error(
+                    f"Unknown style property {property_token.value!r}",
+                    property_token,
+                    kind="warning",
+                )
+            declarations.append((property_name, _parse_value(value_token.value)))
+
             if self.current().kind == TokenKind.SEMI:
                 self.advance()
-            decls.append((prop_tok.value, " ".join(parts)))
-        return DeclarationBlock(declarations=decls)
+            elif self.current().kind not in (TokenKind.RBRACE, TokenKind.EOF):
+                self.error("Expected ';' between declarations", self.current())
+                self._recover_declaration()
+
+        return DeclarationBlock(declarations)
+
+    def _recover_selector(self) -> None:
+        while self.current().kind not in (
+                TokenKind.COMBINATOR, TokenKind.LBRACE, TokenKind.RBRACE,
+                TokenKind.EOF):
+            self.advance()
+        if self.current().kind == TokenKind.COMBINATOR:
+            self.advance()
+
+    def _recover_declaration(self) -> None:
+        while self.current().kind not in (
+                TokenKind.SEMI, TokenKind.RBRACE, TokenKind.EOF):
+            self.advance()
+        if self.current().kind == TokenKind.SEMI:
+            self.advance()
 
     def skip_to_next_rule(self) -> None:
-        """Skip tokens until we hit the next rule start or EOF."""
-        while self.current().kind != TokenKind.EOF:
-            if self.current().kind == TokenKind.RBRACE:
-                self.advance()
-                return
+        """Skip a malformed rule body without consuming the next valid rule."""
+        while self.current().kind not in (TokenKind.LBRACE, TokenKind.RBRACE,
+                                          TokenKind.EOF):
+            self.advance()
+        if self.current().kind == TokenKind.LBRACE:
+            self.advance()
+            depth = 1
+            while self.current().kind != TokenKind.EOF and depth:
+                token = self.advance()
+                if token.kind == TokenKind.LBRACE:
+                    depth += 1
+                elif token.kind == TokenKind.RBRACE:
+                    depth -= 1
+        elif self.current().kind == TokenKind.RBRACE:
             self.advance()
 
 
 def parse_pss(source: str, filename: str = "") -> StyleSheet:
-    """Parse a .pss stylesheet source string into a :class:`StyleSheet`."""
-    from pydrud.core.styles.lexer import lex
-    tokens = lex(source, filename)
+    """Parse *source* to a :class:`StyleSheet`, returning diagnostics on errors."""
+    try:
+        tokens = lex(source, filename)
+    except (LexerError, TypeError) as exc:
+        return StyleSheet(
+            rules=[],
+            diagnostics=[Diagnostic(
+                filename=filename,
+                line=getattr(exc, "line", 1),
+                col=getattr(exc, "col", 1),
+                message=str(exc),
+            )],
+            filename=filename,
+        )
     parser = Parser(tokens, filename)
     return parser.parse()

@@ -1,20 +1,25 @@
 # Pydrud project configuration.
-#
-# Packages below are installed into the APK by Chaquopy at build time —
-# manage them with 'pydrud pip add <name>' / 'pydrud pip remove <name>'.
-# Only packages verified to work on Android are accepted; run
-# 'pydrud pip list --all' to see them.
+{% if runtime == "chaquopy" %}
+# Python packages below are installed into the Android APK by Chaquopy at build
+# time. Manage them with 'pydrud pip add <name>' / 'pydrud pip remove <name>'.
+# Only packages verified to work on Android are accepted.
+{% else %}
+# Python packages are used by the host-side live preview. Install dependencies
+# in the environment used to run 'pydrud dev'.
+{% endif %}
 
-runtime = "{{ runtime | default("chaquopy") }}"
+runtime = "{{ runtime | default("pydash") }}"
 
 [app]
 name = "{{ project_name }}"
 package = "{{ package }}"
+{% if runtime == "chaquopy" %}
 scheme = "{{ scheme }}"
+{% endif %}
 
 [theme]
 # The brand colour the design system is generated from. Change it and run
-# `pydrud sync` to regenerate the native theme resources, or call
+# `pydrud sync` to regenerate native theme resources, or call
 # Theme.seed(...) in your app to re-theme at runtime.
 seed = "{{ seed_color | default("#FF6366F1") }}"
 

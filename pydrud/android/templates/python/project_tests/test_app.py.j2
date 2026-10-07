@@ -1,7 +1,7 @@
 """Tests for {{ project_name }}.
 
-``AppTester`` boots the app against a fake device, so these run anywhere —
-no emulator, no Gradle. Run them with ``pydrud test`` or ``pytest``.
+``AppTester`` boots the app against a protocol reference renderer, so these
+run without an emulator or platform build toolchain.
 """
 
 import os
@@ -12,12 +12,38 @@ sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
 from pydrud.testing import AppTester  # noqa: E402
-
 from app.main import main  # noqa: E402
+from app.runtime import router  # noqa: E402
+{% if runtime == "pydash" %}
+from app.state import counter  # noqa: E402
 
 
 class TestApp(unittest.TestCase):
     def setUp(self):
+        counter.value = 0
+        router.reset()
+        self.app = AppTester(main, title="{{ project_name }}").start()
+
+    def tearDown(self):
+        self.app.stop()
+
+    def test_preview_starter_renders(self):
+        self.assertTrue(self.app.shows("{{ project_name }}"))
+        self.assertTrue(self.app.shows("A cross-platform UI preview built with Python"))
+
+    def test_counter_increments(self):
+        self.assertEqual(self.app.prop("pydash_count", "value"), "Count: 0")
+        self.app.tap("pydash_increment")
+        self.assertEqual(self.app.prop("pydash_count", "value"), "Count: 1")
+
+    def test_details_navigation(self):
+        self.app.tap("pydash_details")
+        self.assertTrue(self.app.shows("Details"))
+{% else %}
+
+class TestApp(unittest.TestCase):
+    def setUp(self):
+        router.reset()
         self.app = AppTester(main, title="{{ project_name }}").start()
 
     def tearDown(self):
@@ -33,6 +59,7 @@ class TestApp(unittest.TestCase):
     def test_typing_a_name_updates_the_greeting(self):
         self.app.type_in("name_input", "Ada")
         self.assertEqual(self.app.prop("greeting", "value"), "Hello, Ada!")
+{% endif %}
 
 
 if __name__ == "__main__":

@@ -29,7 +29,7 @@ class TestStarterAppEndToEnd(unittest.TestCase):
         cls.tmp = tempfile.mkdtemp(prefix="pydrud-e2e-")
         cls.cwd = os.getcwd()
         os.chdir(cls.tmp)
-        create_project("tour_app", org="com.example")
+        create_project("tour_app", org="com.example", runtime="chaquopy")
         cls.src = os.path.join(cls.tmp, "tour_app", "src")
         sys.path.insert(0, cls.src)
 

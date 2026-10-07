@@ -6,9 +6,9 @@ Supports two runtimes:
 * ``chaquopy`` — packages are bundled into the APK via Chaquopy's
   Gradle ``pip { install(...) }`` block at build time. Only verified
   packages can be added without ``--force``.
-* ``pydash`` — packages run on the host side only; they cannot be
-  bundled into an APK. The CLI validates against the registry and
-  prints guidance instead of touching Gradle files.
+* ``pydash`` — packages run in the host Python environment. Dependencies
+  are recorded in ``pydrud.toml`` but are not installed automatically, and
+  Android registry restrictions or Gradle files do not apply.
 
     pydrud pip add yt-dlp requests
     pydrud pip list
@@ -359,8 +359,9 @@ class Requirements:
         if not os.path.exists(self.path):
             header = (
                 "# Pydrud project configuration.\n"
-                "# Packages below are installed into the APK by Chaquopy at\n"
-                "# build time — manage them with 'pydrud pip add/remove'.\n\n")
+                "# Packages are declared for the selected runtime.\n"
+                "# Chaquopy installs them in APK builds; Pydash uses the host\n"
+                "# Python environment.\n\n")
             self._write(header + section)
             return
 
@@ -484,6 +485,21 @@ class ChaquopyBackend(PackageBackend):
 
     def add(self, project_dir: str, requirement: str, *, force: bool = False) -> PackageResult:
         reqs = Requirements(project_dir)
+        if not force:
+            try:
+                name, _ = split_requirement(requirement)
+                entry = info(name)
+            except PackageError as exc:
+                return PackageResult(success=False, message=str(exc))
+            if entry.get("support_category") == "host_only":
+                return PackageResult(
+                    success=False,
+                    message=(
+                        f"{name} is host-only and cannot be installed into a "
+                        "Chaquopy APK. Use a Pydash project for host-side "
+                        "dependencies."
+                    ),
+                )
         try:
             entry = reqs.add(requirement, force=force)
         except PackageError as exc:
@@ -515,54 +531,85 @@ class ChaquopyBackend(PackageBackend):
             return PackageResult(success=False, message=str(exc))
 
 
+def _host_package_entry(name: str) -> dict:
+    """Package metadata for a host-side Pydash dependency.
+
+    Pydash metadata deliberately does not inherit Android registry limits.
+    The optional Android category remains visible as a separate annotation
+    for users who maintain another Chaquopy project.
+    """
+    key = normalise(name)
+    if key in REGISTRY:
+        entry = _parse_registry_entry(REGISTRY[key])
+        entry["name"] = key
+        entry["android_support_category"] = entry["support_category"]
+        entry["support_category"] = "host"
+        return entry
+    if key in BLOCKED:
+        reason, import_names = BLOCKED[key]
+        return {
+            "name": key,
+            "version": "",
+            "category": "host",
+            "support_category": "host",
+            "android_support_category": "blocked",
+            "import_names": import_names,
+            "description": (
+                "Host-side dependency; Android restriction does not apply: "
+                f"{reason}"
+            ),
+        }
+    return {
+        "name": key,
+        "version": "",
+        "category": "host",
+        "support_category": "host",
+        "android_support_category": "unverified",
+        "import_names": (),
+        "description": "Unverified host-side PyPI dependency",
+    }
+
+
 class PydashBackend(PackageBackend):
     """Handles package management for pydash projects.
 
-    Validates against the registry and records packages in
-    ``pydrud.toml`` but never touches Gradle files (there is none).
+    Records host-side package requirements in ``pydrud.toml`` without
+    applying the Chaquopy registry or Android compatibility restrictions.
+    It never installs packages or touches Gradle; users install dependencies
+    in the Python environment that runs ``pydrud dev``.
     """
 
     def supports(self, runtime: str) -> bool:
         return runtime == "pydash"
 
     def add(self, project_dir: str, requirement: str, *, force: bool = False) -> PackageResult:
-        name, spec = split_requirement(requirement)
-        reqs = Requirements(project_dir)
-
-        if name in BLOCKED:
-            reason, _ = BLOCKED[name]
-            return PackageResult(
-                success=False,
-                message=f"{name} cannot be used: {reason}",
-            )
-
+        # ``force`` is kept for backend API parity; host dependencies are not
+        # gated on Chaquopy verification, so it has no effect here.
+        _ = force
         try:
-            entry = info(name)
+            name, spec = split_requirement(requirement)
         except PackageError as exc:
-            if force:
-                entry = {"name": name, "version": "", "category": "unverified",
-                         "support_category": "host_only",
-                         "import_names": (),
-                         "description": "forced; not verified on host"}
-            else:
-                return PackageResult(success=False, message=str(exc))
+            return PackageResult(success=False, message=str(exc))
+        if not _NAME_RE.match(name):
+            return PackageResult(
+                success=False, message=f"Invalid package name {name!r}")
 
-        if not force and not spec and entry.get("version"):
-            spec = f"=={entry['version']}"
-
-        # Record in toml
+        # The registry describes Chaquopy compatibility, not what may run on
+        # the host. Pydash projects can declare any syntactically valid PyPI
+        # dependency, including packages that are desktop/server-only or not
+        # listed in the Android compatibility catalogue.
+        entry = _host_package_entry(name)
+        reqs = Requirements(project_dir)
         packages = reqs.load()
         packages[name] = spec
         reqs.save(packages)
 
-        cat = entry.get("support_category", "native_equivalent")
-        if cat == "host_only":
-            hint = " (host-only package — cannot be bundled into an APK)"
-        else:
-            hint = ""
         return PackageResult(
             success=True,
-            message=f"Added {name}{spec}{hint}",
+            message=(
+                f"Recorded {name}{spec} for the host Python environment; "
+                "install it there before running 'pydrud dev'."
+            ),
             details={**entry, "spec": spec},
         )
 
@@ -574,17 +621,19 @@ class PydashBackend(PackageBackend):
         return PackageResult(success=True, message=f"Removed {name}")
 
     def list_packages(self, project_dir: str) -> list[dict]:
-        return installed_summary(project_dir)
+        return installed_summary(project_dir, runtime="pydash")
 
     def search(self, query: str) -> list[dict]:
-        return search(query)
+        return [_host_package_entry(entry["name"]) for entry in search(query)]
 
     def sync_gradle(self, project_dir: str) -> PackageResult:
         return PackageResult(
             success=False,
             message=(
-                "No Gradle file to sync — pydash projects have no APK build. "
-                "Switch to runtime: chaquopy in pydrud.toml to use Gradle."
+                "Pydash has no Gradle or APK dependency sync. Install declared "
+                "packages in the host Python environment used by 'pydrud dev'. "
+                "Create an Android target with 'pydrud init <name> "
+                "--runtime chaquopy' to use Gradle."
             ),
         )
 
@@ -655,16 +704,20 @@ def sync_gradle(project_dir: str = ".",
     return gradle_path
 
 
-def installed_summary(project_dir: str = ".") -> list[dict]:
-    """Rows for ``pydrud pip list``: what this project depends on."""
+def installed_summary(project_dir: str = ".", *,
+                      runtime: str = "chaquopy") -> list[dict]:
+    """Rows for ``pydrud pip list`` with support interpreted per runtime."""
     rows = []
     for name, spec in sorted(Requirements(project_dir).load().items()):
-        try:
-            entry = info(name)
-        except PackageError:
-            entry = {"name": name, "category": "unverified",
-                     "support_category": "host_only", "import_names": (),
-                     "description": "not in the verified registry"}
+        if runtime == "pydash":
+            entry = _host_package_entry(name)
+        else:
+            try:
+                entry = info(name)
+            except PackageError:
+                entry = {"name": name, "category": "unverified",
+                         "support_category": "host_only", "import_names": (),
+                         "description": "not in the verified registry"}
         entry["spec"] = spec or "latest"
         rows.append(entry)
     return rows

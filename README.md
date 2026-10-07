@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://img.shields.io/pypi/v/pydrud?color=6366F1&style=flat-square" alt="PyPI" />
   <img src="https://img.shields.io/pypi/pyversions/pydrud?style=flat-square" alt="Python" />
-  <img src="https://img.shields.io/badge/android-native-brightgreen?style=flat-square" alt="Android Native" />
+  <img src="https://img.shields.io/badge/runtimes-Pydash%20%7C%20Chaquopy-6366F1?style=flat-square" alt="Pydash and Chaquopy runtimes" />
   <img src="https://img.shields.io/github/license/MurShidM01/Pydrud?style=flat-square" alt="License" />
   <img src="https://img.shields.io/pypi/dm/pydrud?style=flat-square" alt="Downloads" />
 </p>
@@ -9,13 +9,13 @@
 <h1 align="center">Pydrud</h1>
 
 <p align="center">
-  <strong>Build native Android apps with Python.<br>
-  No XML layouts. No Kotlin UI code. Just Python.</strong>
+  <strong>Build Python UIs with Pydrud.<br>
+  Use Pydash for toolchain-free cross-platform preview, or opt into Chaquopy for Android APKs.</strong>
 </p>
 
 <p align="center">
-  A Flutter-inspired framework that converts declarative Python widget trees<br>
-  into <strong>real native Android Views</strong> at runtime via Chaquopy + a lightweight TCP bridge.
+  A Flutter-inspired framework with a platform-neutral widget and renderer protocol.<br>
+  The default Pydash workflow runs Python on the host; the optional Chaquopy target renders real Android Views.
 </p>
 
 ---
@@ -24,38 +24,59 @@
 
 | # | Section | # | Section |
 |---|---------|---|---------|
-| 1 | [Quick Start](#quick-start) | 7 | [Responsive](#responsive-v15) |
-| 2 | [What You Get](#what-you-get) | 8 | [Bottom Navigation & Tabs](#bottom-navigation-and-tabs-v15) |
-| 3 | [What's New in v2.0.3](#whats-new-in-v203) | 9 | [System UI](#set_system_ui-v101) |
-| 4 | [Examples](#examples) | 10 | [Architecture](#architecture) |
-| 5 | [Installation](#installation) | 11 | [Android Project Configuration](#android-project-configuration) |
-| 6 | [Widget Reference](#widget-reference) | 12 | [CLI Reference](#cli-reference) |
-|   |                                 | 13 | [Requirements](#requirements) |
-|   |                                 | 14 | [Development & Testing](#development) |
-|   |                                 | 15 | [Roadmap](#roadmap) · [Contributing](#contributing) · [License](#license) |
+| 1 | [Quick Start](#quick-start) | 8 | [Responsive](#responsive-v15) |
+| 2 | [Runtime Modes](#runtime-modes) | 9 | [Bottom Navigation & Tabs](#bottom-navigation-and-tabs-v15) |
+| 3 | [What You Get](#what-you-get) | 10 | [System UI](#set_system_ui-v101) |
+| 4 | [What's New in v2.0.3](#whats-new-in-v203) | 11 | [Architecture](#architecture) |
+| 5 | [Examples](#examples) | 12 | [Android Project Configuration](#android-project-configuration) |
+| 6 | [Installation](#installation) | 13 | [CLI Reference](#cli-reference) |
+| 7 | [Widget Reference](#widget-reference) | 14 | [PSS Stylesheets](#pss-stylesheets) |
+|   |                                 | 15 | [Requirements](#requirements) · [Development](#development) |
+|   |                                 | 16 | [Roadmap](#roadmap) · [Contributing](#contributing) · [License](#license) |
 
 ---
 
 ## Quick Start
 
+The default project is Pydash: Python runs on your development machine and
+connects to a compatible preview renderer over the authenticated LAN protocol.
+It does not require an Android SDK or produce an APK.
+
 ```bash
 pip install pydrud                    # Install the framework
-pydrud init my_app --org com.example  # Scaffold a new project
+pydrud init my_app --org com.example  # Defaults to the pydash runtime
 cd my_app
-pydrud run                            # Build, install, launch
+pydrud dev                            # Start the host app and print a QR/URI
 ```
 
-**First APK in ~2 minutes.** Connect your Android device via USB (or ADB over TCP).
-
-For host-driven live UI preview with the separate Pydash companion protocol:
+For an Android-only standalone APK, explicitly opt into Chaquopy:
 
 ```bash
-pydrud dev                            # Run Python locally, show LAN QR, wait for Pydash
+pydrud init my_android_app --org com.example --runtime chaquopy
+cd my_android_app
+pydrud run                            # Build, install and launch on Android
 ```
 
-`pydrud dev` does not build or install an APK. Pydash is an independent future
-client and is not shipped by this repository; Pydrud now provides the stable,
-authenticated development-server side of that connection.
+## Runtime Modes
+
+| Runtime | What runs where | Build requirements | How to select |
+|---------|-----------------|--------------------|---------------|
+| **Pydash (default)** | Python and app state stay on the host; a separately provided renderer receives widget snapshots/patches and returns events. No APK is produced. | Host Python. No Android SDK, NDK, Gradle, or ADB for `pydrud dev`. | `pydrud init <name>` or `--runtime pydash` |
+| **Chaquopy (opt-in)** | CPython is bundled in a generated Android project and widgets are rendered as native Android Views. | Android SDK/NDK, JDK/Gradle; a connected device or emulator for install/run. | `pydrud init <name> --runtime chaquopy` |
+
+The Pydash companion client is a separate project and is not built, bundled, or
+validated by this repository. Pydrud supplies its authenticated host-side
+preview endpoint only; this change does not add a client or a standalone
+Pydash export target. The two runtimes share the transport-neutral widget,
+diff, and protocol-v2 render transaction contracts.
+
+New projects without a runtime setting default to Pydash. For compatibility,
+a pre-existing generated Android project with no `runtime` key is detected as
+Chaquopy and keeps that behavior; `pydrud sync` writes the inferred choice
+back to `pydrud.toml`. A runtime switch is not an in-place project conversion:
+create a separate Chaquopy project with `pydrud init <name> --runtime
+chaquopy` when you want an APK.
+
 
 ---
 
@@ -86,8 +107,9 @@ an internet service: traffic is not encrypted, so do not port-forward it or
 share the connection URI. See [Preview Protocol v1](docs/PREVIEW_PROTOCOL.md)
 for handshake, capabilities, framing, ACK/NACK and reconnect semantics.
 
-Existing `pydrud run`, APK generation and the embedded Android bridge remain
-separate and unchanged.
+`pydrud run`, APK generation and the embedded Android bridge are separate
+Chaquopy-only workflows; `pydrud dev` does not route through ADB or that APK
+bridge.
 
 
 ## What You Get
@@ -96,20 +118,21 @@ separate and unchanged.
 |---------|-------------|
 | Declarative UI | 130+ widgets and presets: layout, Material 3 components, form fields, chips, charts, media, gestures, animations and Flutter-style compositions |
 | Reactive State | `State<T>` auto-triggers UI re-renders on value change |
-| Full Styling | Colors, padding, margin, borders, fonts, elevation, alignment |
-| Native Rendering | Every widget becomes a real Android View — not a WebView or canvas |
-| CLI Toolchain | `init` / `dev` / `run` / `sync` / `build` / `watch` / `analyze` / `doctor` / `clean` / `pip` / `icons` / `keygen` / `permissions` / `capabilities` / `docs` / `inspect` |
-| No XML, no Java | Even `themes.xml` is generated from the Python palette — `pydrud init --accent "#FF0EA5E9"` |
+| Full Styling | Inline styles plus platform-neutral `.pss` stylesheets; colors, spacing, borders, fonts, elevation and alignment |
+| Runtime choices | Pydash is the toolchain-free host-preview default; Chaquopy is the opt-in Android APK target |
+| Rendering | A transport-neutral widget tree and protocol v2 render transactions; Chaquopy renders native Android Views |
+| CLI Toolchain | Runtime-aware `init` / `dev` / `sync` / `analyze` / `doctor` / `pip`; Android-only `run` / `build` / `watch` / `clean` / `devices` / `icons` / `keygen` / `permissions` / `capabilities`; shared `docs` / `inspect` |
+| No XML, no Java | The Python UI API is shared; Android resources and Java are generated only for Chaquopy projects |
 | Data Layer | SQLite `Database`, `Model` ORM with migrations, and a TTL `Cache` |
-| PyPI on Android | 119 verified packages installable with `pydrud pip add` |
-| Background & Hardware | WorkManager jobs, foreground services, push, camera preview/capture, sensors, biometrics, audio |
-| Design system | `Theme` + `Tokens` — colours, radii, sizes, depth, motion and type live in Python and drive the native renderer |
-| Responsive | Live device metrics (rotation, split screen, insets, font scale) drive breakpoints, percent units and adaptive widgets |
+| Runtime-aware packages | Chaquopy keeps its verified Android package registry; Pydash records host dependencies without installing them |
+| Android platform services | Chaquopy provides WorkManager, foreground services, push, camera, sensors, biometrics and audio; Pydash service calls depend on the connected client's advertised capabilities |
+| Design system | `Theme` + `Tokens` — colours, radii, sizes, depth, motion and type live in Python; each renderer applies the shared style vocabulary |
+| Responsive | Live renderer window metrics (size, insets, text scale and orientation) drive breakpoints, percent units and adaptive widgets |
 | Customisable navigation | Bottom navigation and tabs Pydrud draws itself — indicator, labels, colours, motion, shape, badges |
-| Native Services | Dialogs, storage, permissions, files, share, notifications, GPS, haptics, device info |
+| Optional Services | Dialogs, storage, permissions, files, share, notifications, location, haptics and device info when the connected renderer advertises them |
 | Async by Default | Thread pool + timers + a non-blocking HTTP client, so the UI never freezes |
 | Testable | `pydrud.testing.AppTester` runs your whole app in CI without a device or emulator |
-| TCP Bridge | Clean NDJSON protocol over port 8595 |
+| Transport | Pydash uses the token-authenticated LAN preview handshake; Chaquopy keeps the existing local NDJSON bridge and renderer protocol v2 |
 
 ---
 
@@ -165,7 +188,7 @@ pip install -e .
 ```bash
 export http_proxy=http://proxy:port
 export https_proxy=https://proxy:port
-pydrud build    # proxy forwarded to Gradle automatically
+pydrud build    # Chaquopy only; proxy forwarded to Gradle automatically
 ```
 
 ---
@@ -265,9 +288,11 @@ fill, exactly like Flutter — put it between weighted children only when you
 
 ### Escape hatch — `NativeView`
 
-Any native control an app needs but Pydrud does not ship — a third-party
-chart, a game surface, an OEM widget — mounts by class name. No fork, no
-regenerated Java:
+`NativeView` is an Android-only escape hatch for the Chaquopy target. Any
+native control an app needs but Pydrud does not ship — a third-party chart, a
+game surface, an OEM widget — mounts by class name. No fork, no regenerated
+Java. A Pydash renderer may reject it or show a fallback unless it explicitly
+advertises `native_view` support:
 
 ```python
 from pydrud import NativeView
@@ -504,7 +529,12 @@ Validators: `required`, `min_length`, `max_length`, `email`, `phone`, `url`,
 
 ### Native services and runtime permissions (v2.0.2)
 
-Pydrud separates **manifest declaration**, **user consent**, and **native use**:
+The generated Chaquopy Android target implements the native-service examples
+below. In Pydash preview, service requests are sent only when the connected
+renderer explicitly advertises the required capability; otherwise Pydrud
+returns a completed `Result` failure and does not put the request on the wire.
+
+On Android, Pydrud separates **manifest declaration**, **user consent**, and **native use**:
 
 1. Enable the smallest capability bundle your feature needs.
 2. Run `pydrud sync` so Android receives the matching manifest entries.
@@ -877,18 +907,53 @@ Style().bg("#FFFFFF").padding(EdgeInsets.all(16)).border_radius(8).elevation(4).
 | `visible` | bool | `true` / `false` |
 | `tooltip` | string | `"Save changes"` |
 
+### PSS Stylesheets
+
+Pydrud Style Sheets (PSS) let you keep presentation rules out of Python while
+using the same platform-neutral style vocabulary. Files named `*.pss` under
+`src/` are discovered automatically; stylesheet edits rebuild styles without
+re-executing Python modules.
+
+```python
+Button("Save", key="save", class_="primary")
+```
+
+```pss
+Button { padding: { all: 12 }; }
+.primary { color: white; bg: #4F46E5; }
+#save { font: { size: 16, weight: 600 }; }
+```
+
+PSS supports widget-type, `.class`, explicit-key `#id`, compound, comma-list,
+descendant and direct-child selectors. Class names are supplied with the
+Python-only `class_=` argument (a string or a sequence); generated keys do not
+match `#id` selectors. Matching declarations cascade by CSS-like specificity
+and source order, and a widget's inline `style=` values override stylesheet
+values. The `class_` metadata and legacy `class_*` markers are never serialized
+to the renderer or added to native-ignored-property metadata.
+
+Property names are normalized to Pydrud's shared schema (`text-align` becomes
+`textAlign`); use Pydrud keys such as `bg`, not browser CSS properties such as
+`background-color`. Scalar values, CSS-style bare names, and nested object/list
+values are supported. Malformed edits report source-located diagnostics and
+keep that file's last known-good rules active. Creating, editing, moving, or
+deleting a `.pss` file triggers a style rebuild without re-executing Python
+modules.
+See [PSS Stylesheets](docs/PSS_STYLESHEETS.md) for the selector, cascade,
+value, diagnostics, and reload contract.
+
 ---
 
 ## Responsive (v1.5)
 
-Pydrud reads the **real window metrics** from the device and re-reads them
-every time they change — rotation, split screen, a foldable opening, the
-user changing their font size, the keyboard appearing, new display
-cutouts. Each change refreshes `MediaQuery`, runs your listeners and
-re-renders the tree, so the layout always matches the screen in front of
-the user.
+Pydrud reads the **window metrics** advertised by the connected renderer and
+re-reads them whenever they change — rotation, resize, split screen, font
+scale, keyboard and insets. Each change refreshes `MediaQuery`, runs your
+listeners and re-renders the tree. Android supplies its live device metrics;
+a Pydash preview renderer supplies its own metrics through the same neutral
+runtime API.
 
-### MediaQuery — every metric the device reports
+### MediaQuery — every window metric the renderer reports
 
 ```python
 from pydrud import MediaQuery
@@ -1133,79 +1198,47 @@ page.set_system_ui(status_bar_color="#FF6366F1", icon_brightness="light")
 
 ## Architecture
 
+Pydash preview and the Chaquopy APK use different connection setup, but share
+the transport-neutral widget tree, keyed diff engine, desired/confirmed render
+identity, and protocol-v2 transactions:
+
+```text
+Pydash default (`pydrud dev`)
+  host Python App  <-- token-authenticated preview handshake --> renderer
+        source, state, event handlers stay on the host
+        render_transaction / ACK-NACK use renderer protocol v2
+
+Chaquopy opt-in (`pydrud run` / APK)
+  embedded Python App ──existing local NDJSON bridge──► generated Android BridgeService
+                                                         └─ native Android Views
 ```
-+------------------------------------------+
-|  Python Layer                             |
-|  +--------+  +----------------------+     |
-|  |Widgets |  | EventDispatcher      |     |
-|  |  Tree  +--+  (user callbacks)    |     |
-|  +----+---+  +----------+-----------+     |
-|       |                  |                |
-|  +----+------------------+-----------+    |
-|  |  TreeDiff -> Patches -> Bridge      |  |
-|  +----------------+-------------------+    |
-+-------------------+-----------------------+
-                    | TCP / NDJSON :8595
-+-------------------+-----------------------+
-|  Android Layer    |                       |
-|  +----------------+-------------------+   |
-|  |  BridgeService  (TCP server)       |   |
-|  +----------------+-------------------+   |
-|  +----------------+-------------------+   |
-|  |  WidgetRegistry -> ViewFactory     |   |
-|  |  (modular ViewCreator lambdas)     |   |
-|  +----------------+-------------------+   |
-|  +----------------+-------------------+   |
-|  |  EventDispatcher -> Python         |   |
-|  +-----------------------------------+   |
-+------------------------------------------+
-```
+
+The Pydash handshake is a separate preview-protocol layer; after pairing it
+carries the existing `render_transaction` v2 contract. The Android bridge's
+existing commands and transaction behavior remain the Android path. Neither
+transport changes the meaning of `TreeDiff`, keyed patches, or render
+revisions. See [Preview Protocol v1](docs/PREVIEW_PROTOCOL.md) for the
+host-preview handshake and reconnect behavior.
 
 ### Data Flow
 
-1. **`App(target=main)`** -- calls your builder -> produces a Widget tree
-2. **`page.update()`** -- rebuilds the tree -> TreeDiff computes patches -> sends only changed widgets
-3. **`BridgeService`** -- receives patches -> `ViewFactory` creates/updates native Views
-4. **User taps a Button** -- Java sends `{"type":"click","key":"..."}` over the socket
-5. **Python EventDispatcher** -- routes the event to your callback
-6. **Callback mutates `State`** -- triggers `page.update()` -> goto step 2
+1. **`App(target=main)`** calls the builder and creates a widget tree; PSS rules
+   are resolved on the Python side before serialization.
+2. **`page.update()`** builds the desired tree and computes keyed patches from
+   the last renderer-confirmed tree, not merely the last tree sent.
+3. Python sends one **`RenderTransaction`**: a full snapshot or a keyed patch
+   batch with a strictly increasing revision and confirmed base revision.
+4. The renderer applies the transaction atomically and ACKs that revision.
+   Only then does Python advance its confirmed snapshot; a NACK triggers a
+   full resynchronizing snapshot.
+5. User events travel back through the same renderer bridge to Python
+   callbacks; state changes request the next render transaction.
 
-### Bridge Protocol
-
-**Android -> Python events:**
-```
-{"type": "click",   "key": "btn_abc", "data": {}}
-{"type": "change",  "key": "tf_xyz",  "data": {"value": "hello"}}
-{"type": "submit",  "key": "tf_xyz",  "data": {"value": "hello"}}
-{"type": "ready",   "key": "",        "data": {"width": 360, "height": 640, "density": 2.0}}
-{"type": "back",    "key": "",        "data": {}}            # Hardware back button
-{"type": "long_press", "key": "card_1", "data": {}}
-{"type": "lifecycle",  "key": "",       "data": {"state": "resume"}}
-```
-
-**Python -> Android commands:**
-```
-{"cmd": "full_render",      "tree": {...}}                    # Initial render
-{"cmd": "render",           "patches": [...]}                 # Incremental update
-{"cmd": "toast",            "message": "Saved"}
-{"cmd": "set_title",        "title": "My App"}
-{"cmd": "set_system_ui",    "status_bar_color": "#...", "icon_brightness": "light"}
-{"cmd": "snackbar",         "message": "Deleted", "action": "UNDO"}
-{"cmd": "vibrate",          "duration": 40}
-{"cmd": "back_result",      "handled": true}                   # Answer to a back event
-{"cmd": "finish_activity"}                                     # Exit app
-```
-
-Patches carry `op`, `key`, `parent_key` and — for `create` / `move` / `replace` —
-the target child `index`, so the renderer inserts views in the right place:
-
-```
-{"op": "update",  "key": "counter", "props": {"value": "3"}}
-{"op": "create",  "key": "row-eggs", "parent_key": "list", "index": 2, "tree": {...}}
-{"op": "move",    "key": "row-milk", "parent_key": "list", "index": 0}
-{"op": "delete",  "key": "row-bread", "parent_key": "list"}
-```
-
+Renderer capabilities are explicit, optional data. In Pydash mode, a service
+request is not sent unless the connected client advertises it; unsupported
+widgets are replaced by a visible `Text` fallback when the client explicitly
+provides a widget catalogue. These checks do not change the core protocol or
+assume a particular client platform.
 
 ### Source layout
 
@@ -1216,15 +1249,16 @@ the repository exceeds 1,000 lines.
 |---------|----------|
 | `pydrud/widgets/` | The widget library: `basic`, `layout`, `forms`, `advanced`, `canvas`, `gestures`, `animation`, `conditional`, `responsive`, `presets` — plus `material/` (Material 3 components split into focused modules) and `theme/` (colour maths, `Theme`, `Typography`, `Icons`, `Tokens`) |
 | `pydrud/runtime/` | `App`, `Page` and the bridge event loop, split into focused mixins (`app`, `page`, `navigation`, `_render`, `_bridge`, `_lifecycle`, `_modules`, `_hotreload`) |
-| `pydrud/core/` | The engine: `diff` (TreeDiff), `state`/`store`/`controllers` (reactive state), `bridge`/`protocol` (NDJSON codec), `events`, `responsive`, `tasks`, `watcher` |
+| `pydrud/core/` | Platform-neutral engine: `diff`/`RenderTransaction`, `state`/`store`/`controllers`, `bridge`/`protocol`, `preview`, `responsive`, `watcher`, and `styles/` (PSS schema, lexer, parser, selectors and resolver) |
+| `pydrud/platforms/android/` | Android-only renderer profile, on-device development server and logcat adapter; not imported by the neutral PSS or protocol core |
 | `pydrud/services/` | `http` (async client) and `native/` — `Dialogs`, `Storage`/`FilePicker`, `Clipboard`, `Share`, `Permissions`, `Notifications`, `Location`, `DeviceInfo`, `Haptics`, `Push`, `Shortcuts`, `Secure`, `Background`, `Camera`, `Sensors`, `Bluetooth`, `Nfc`, `Biometrics`, `Audio` |
 | `pydrud/commands/` | The CLI: `project/` (scaffold, sync, bundle, templates, config), `builder`, `analyzer`, `devrunner`, `doctor`, `docs`, `release`, `inspector` |
-| `pydrud/android/templates/` | Jinja2 templates rendered into the generated Android project (`*.java.j2`, Gradle, manifest, resources) |
+| `pydrud/android/templates/` | Jinja2 build-time templates for the optional Chaquopy Android project (`*.java.j2`, Gradle, manifest, resources) |
 
-### Native renderer
+### Native renderer (Chaquopy)
 
-The generated Java renderer follows the same discipline — a thin orchestrator
-plus cohesive collaborator classes:
+The optional generated Java renderer follows the same discipline — a thin
+orchestrator plus cohesive collaborator classes:
 
 | Generated class | Responsibility |
 |-----------------|----------------|
@@ -1245,16 +1279,21 @@ plus cohesive collaborator classes:
 
 ## Android project configuration
 
-`pydrud.yaml` is the system-level source of truth for generated Android
-files. Change it and run `pydrud sync`; the command updates the Java package,
-activity, manifest, Gradle build files, wrapper, native theme and generated
-Python metadata together. In particular, changing `app_name` or `package`
-now migrates the generated Java sources instead of continuing to use the old
+This section applies only to projects created with `--runtime chaquopy`.
+Pydash projects do not have an Android project or use the Android fields in
+`pydrud.yaml`.
+
+For Chaquopy projects, `pydrud.yaml` is the system-level source of truth for
+generated Android files. Change it and run `pydrud sync`; the command updates
+the Java package, activity, manifest, Gradle build files, wrapper, native
+theme and generated Python metadata together. Changing `app_name` or
+`package` migrates the generated Java sources rather than retaining the old
 identity discovered under `android/`.
 
 ```yaml
 app_name: "Taskflow"
 package: "com.example.taskflow"
+runtime: "chaquopy"
 version_code: 2
 version_name: "1.1.0"
 min_sdk: 24
@@ -1273,7 +1312,7 @@ capabilities:
 firebase: false
 shrink: false
 python_version: "3.11"
-framework_version: "2.0.2"
+framework_version: "2.0.3"
 protocol_version: 2
 chaquopy_version: "17.0.0"
 agp_version: "8.13.2"
@@ -1293,11 +1332,11 @@ answers with that same suggestion — the camera permission is always a
 deliberate declaration.) Runtime dangerous
 permissions still require `page.permissions.request(...)` and user consent.
 
-`pydrud.toml` continues to own `[python.packages]` and `[theme]`. Its legacy
-`[app]` identity fields are kept in sync with YAML for compatibility; when
-both files contain an app name or package, YAML wins. App source under
-`src/app/`, local SDK paths, signing keys and custom Java files are not
-removed by sync.
+`pydrud.toml` stores the top-level `runtime` choice plus `[python.packages]`
+and `[theme]`. Its legacy `[app]` identity fields are kept in sync with YAML
+for compatibility; when both files contain an app name or package, YAML wins.
+App source under `src/app/`, local SDK paths, signing keys and custom Java
+files are not removed by Chaquopy `sync`.
 
 ---
 
@@ -1313,80 +1352,78 @@ as `pydrud analyze --json` remains plain JSON.
 
 | Command | Description |
 |---------|-------------|
-| `pydrud init <name>` | Create a new project |
-| `pydrud init <name> --org com.example` | With custom package |
-| `pydrud build` | Build debug APK |
-| `pydrud build --release` | Build release APK |
-| `pydrud dev [project_dir]` | Run Python locally, expose authenticated LAN preview, print QR and wait for Pydash |
+| `pydrud init <name>` | Create a Pydash project by default; no Android toolchain or APK |
+| `pydrud init <name> --runtime chaquopy` | Opt into the standalone Android APK project |
+| `pydrud init <name> --org com.example` | Set the project/package prefix |
+| `pydrud dev [project_dir]` | Run host Python, start authenticated LAN preview, print QR/URI; no ADB |
 | `pydrud dev --host <ip> --port <port>` | Configure preview listener (`--connect-host` overrides the QR address) |
-| `pydrud run` | Build + install + launch with Flutter-style Hot Reload & live logs |
-| `pydrud run --device <id>` | Target specific device |
-| `pydrud run --no-interactive` | Run without interactive keyboard mode (for CI/scripts) |
-| `pydrud watch` | Start interactive Hot Reload development runner |
-| `pydrud devices` | List connected devices (`adb devices -l`) |
-| `pydrud analyze` | Static analysis (missing keys, invalid styles) |
+| `pydrud build` / `pydrud build --release` | Build a debug/release APK (Chaquopy only) |
+| `pydrud run` | Build + install + launch on Android (Chaquopy only) |
+| `pydrud watch` | Chaquopy-only Android Hot Reload runner; use `pydrud dev` for Pydash |
+| `pydrud devices` | List connected Android devices (`adb devices -l`) |
+| `pydrud analyze` | Runtime-aware static analysis (keys, styles, platform/import compatibility) |
 | `pydrud analyze --path src` | Custom source directory |
 | `pydrud analyze --json` | Machine-readable JSON output |
-| `pydrud clean` | Clean build artifacts |
-| `pydrud sync` | Apply `pydrud.yaml` and refresh the generated native layer |
-| `pydrud doctor` | Check environment requirements |
-| `pydrud pip add <pkg>...` | Add verified PyPI packages (auto-syncs Gradle) |
-| `pydrud pip remove <pkg>...` | Remove packages |
-| `pydrud pip list [--all] [--category ai]` | Installed, or the whole catalogue |
-| `pydrud pip search <term>` | Search the supported-package registry |
-| `pydrud pip sync` | Re-apply `pydrud.toml` packages to `build.gradle.kts` |
-| `pydrud permissions add\|remove <name>...` | Update YAML and the Android manifest by friendly name |
-| `pydrud capabilities add\|remove <name>...` | Enable generated feature bundles such as haptics or notifications |
-| `pydrud icons [--source logo.png]` | Launcher, round and adaptive icons (splash stays theme-driven) |
-| `pydrud keygen` | Create the Play Store upload keystore |
+| `pydrud clean` | Clean Chaquopy/Android build artifacts |
+| `pydrud sync` | Refresh the generated Android layer (Chaquopy only; Pydash is a no-op) |
+| `pydrud doctor` | Check host requirements and, when relevant, Android toolchain requirements |
+| `pydrud pip add <pkg>...` | Pydash records host dependencies; Chaquopy validates packages and syncs Gradle |
+| `pydrud pip remove <pkg>...` | Remove declarations; Chaquopy also updates Gradle |
+| `pydrud pip list [--all] [--category ai]` | List project declarations or the Android package catalogue |
+| `pydrud pip search <term>` | Search the Android catalogue; Pydash also accepts unlisted host packages |
+| `pydrud pip sync` | Apply package declarations to Gradle (Chaquopy only) |
+| `pydrud permissions add\|remove <name>...` | Update YAML and the Android manifest (Chaquopy only) |
+| `pydrud capabilities add\|remove <name>...` | Enable Android feature bundles (Chaquopy only) |
+| `pydrud icons [--source logo.png]` | Generate Android launcher icons (Chaquopy only) |
+| `pydrud keygen` | Create the Play Store upload keystore (Chaquopy only) |
 | `pydrud docs [--serve]` | Offline HTML API reference |
-| `pydrud inspect [--tree] [--watch]` | Widget inspector for a running app |
+| `pydrud inspect [--tree] [--watch]` | Build a local static tree or inspect Android bridge traffic; `--watch` follows the Chaquopy bridge |
 
 ### Environment
 
 ```bash
 pydrud doctor
 
-# Expected output:
-# Python >= 3.10       -- 3.12.3
-# Java 17+             -- OpenJDK 17
-# Android SDK          -- /path/to/sdk (API 35)
-# Android NDK          -- 27.x
-# CMake                -- cmake version 3.x
-# Gradle               -- gradlew wrapper found
-# ADB                  -- Android Debug Bridge 2.x
-# (inside a project, Chaquopy and YAML ↔ manifest permissions are checked too)
+# Pydash host workflow: Python and framework checks only
+# Chaquopy project: JDK, Android SDK/NDK, Gradle and ADB are checked as applicable
+# ADB is only needed for Android install/run, never for `pydrud dev`
 ```
 
 ---
 
 ## Requirements
 
-### Development machine
+### Pydash host workflow (default)
 
-| Tool | Version | Notes |
-|------|---------|-------|
-| Python | >= 3.10, <= 3.12 | 3.11 recommended for Chaquopy `.pyc` pre-compilation; 3.12 works but first start is slower |
-| Java (JDK) | 17+ | OpenJDK 17 LTS recommended |
-| Android SDK | API 33+ | Set `ANDROID_HOME` or `ANDROID_SDK_ROOT` |
-| Android NDK | r29+ | Required for Chaquopy native libraries |
-| Gradle | 8.x | Bundled via wrapper in generated projects |
+Python 3.10 or newer and the Pydrud package are sufficient to run host-side
+`pydrud dev`. The host preview server does not require Java, the Android SDK,
+NDK, Gradle, or ADB. The independent Pydash companion renderer is not shipped
+or built by this repository.
 
-### Android device
+### Chaquopy Android APK workflow (opt-in)
 
-| Requirement | Notes |
-|-------------|-------|
-| API 24+ (Android 7.0+) | Minimum supported |
-| ARM64 / x86_64 | Both supported |
-| USB Debugging enabled | Or ADB over TCP |
+| Tool | Current project default | Notes |
+|------|-------------------------|-------|
+| Python | 3.11 | Used by the Chaquopy build/runtime configuration |
+| Java (JDK) | 17+ | `pydrud doctor` checks the Android build environment |
+| Android SDK | API 36 compile/target | Configurable in `pydrud.yaml`; set `ANDROID_HOME` or `ANDROID_SDK_ROOT` |
+| Android NDK | `28.2.13676358` | Generated project default |
+| Android Gradle Plugin | `8.13.2` | Generated project default |
+| Gradle | `8.14.4` | Wrapper is generated with the project |
+| Chaquopy | `17.0.0` | Android-only embedded Python runtime |
+
+A generated Android project currently targets Android API 24+ and defaults to
+`arm64-v8a`, `armeabi-v7a`, and `x86_64`. ADB or a connected device/emulator is
+needed for `pydrud run`, but not for host-side `pydrud dev` or the unit tests.
 
 ### Setting up Android SDK
+
+These steps are needed only for Chaquopy projects:
 
 <details>
 <summary><b>Windows</b></summary>
 
 ```powershell
-# Set environment variables
 [System.Environment]::SetEnvironmentVariable('ANDROID_HOME', 'C:\Android\Sdk', 'User')
 [System.Environment]::SetEnvironmentVariable('ANDROID_SDK_ROOT', 'C:\Android\Sdk', 'User')
 ```
@@ -1423,18 +1460,16 @@ pip install -e ".[dev]"
 python -m pytest tests/ -v
 ```
 
-Current test count: **1,237 tests** (plus 2,806 sub-tests), covering:
+The suite covers:
 
-* unit tests — widgets, state, styling, responsive scaling, diffing, routing,
-  the 1.2 component library, gestures, animations, forms and validators;
-* runtime tests — `Store`/`Computed`/`ReactiveList`, `Result` futures, the task
-  runner, timers, `@debounce` / `@throttle`, and the HTTP client against a real
-  local server;
-* template tests — every generated Java file is rendered and parsed with
-  `javalang`, and the generated project is compiled with `compileall`;
-* **end-to-end tests** — `pydrud.testing` implements the Android side of
-  the bridge (including patch application), so a complete app is launched,
-  tapped, typed into and navigated exactly as it would be on a phone.
+* unit/runtime tests for widgets, state, protocol-v2 rendering, keyed diffs,
+  responsive behavior, the analyzer, package backends and PSS parsing/resolution;
+* project-generation tests for both the default Pydash scaffold and the
+  Chaquopy Android scaffold, including packaging and import-boundary checks;
+* generated Java template parsing/symbol checks and Python compile checks;
+* **end-to-end runtime tests** using `pydrud.testing` and a local protocol
+  renderer, with no device or emulator required. These tests do not constitute
+  an Android Gradle/APK build or validation of the separate Pydash client.
 
 ```bash
 python -m pytest tests/ -v            # everything
@@ -1449,17 +1484,18 @@ Pydrud/
 +-- pydrud/
 |   +-- widgets/            # 130+ widgets (basic, layout, forms, material/, theme/, ...)
 |   +-- runtime/            # App, Page, bridge event loop, hot reload
-|   +-- core/               # diff engine, reactive state, bridge protocol, tasks
+|   +-- core/               # keyed diff, RenderTransaction, PSS engine, state, preview protocol
+|   +-- platforms/android/  # Android-only renderer profile, diagnostics and logcat adapters
 |   +-- services/           # async HTTP client + native/ platform services
 |   +-- commands/           # CLI (project/ scaffold+sync, builder, analyzer, ...)
 |   +-- components/         # higher-level compositions
 |   +-- data/               # bundled registries (PyPI catalogue, icon paths)
 |   +-- navigation.py       # Router, NavigationStack
 |   +-- testing.py          # AppTester - run the whole app in CI
-|   +-- android/templates/  # Jinja2 -> Android project (*.java.j2, Gradle, manifest)
+|   +-- android/templates/  # Jinja2 build-time templates for optional Chaquopy APK projects
 +-- examples/               # todo_app.py, weather_app.py
 +-- docs/                   # ARCHITECTURE.md, PREVIEW_PROTOCOL.md
-+-- tests/                  # 1,237 tests / 2,806 subtests
++-- tests/                  # runtime, parser, analyzer, scaffold and protocol tests
 +-- pyproject.toml
 ```
 
@@ -1470,12 +1506,13 @@ Pydrud/
 
 | Version | Focus |
 |---------|-------|
+| **Unreleased** | Pydash default/Chaquopy opt-in, runtime-aware packaging and analyzer, platform-neutral PSS parsing/resolution and hot reload |
 | **v1.0.0** | Core widgets, state, diffing, CLI, APK generation, responsive scaling |
 | **v1.0.1** | Router, Scaffold, AppBar, FAB, MediaQuery, Hot Reload, incremental patches, WidgetRegistry, analyze CLI |
 | **v1.1.0** | Stable keys + keyed diffing, 10 new widgets, Colors/Icons/Theme, working back button, FAB overlays, toast/snackbar/vibrate, lifecycle hooks, self-bootstrapping Gradle, FakeDevice test harness |
 | **v1.2.0** | 21 Material 3 components, gestures, implicit animations + Hero, forms & validation, native services (dialogs/storage/permissions/files/notifications/location/haptics), HTTP client, task runner & timers, Store/Computed/ReactiveList, Material You theming, `pydrud.testing.AppTester` |
 | **v1.3.0** | SQLite + ORM + cache, pattern routes/deep links/nested navigators, 119 PyPI packages via `pydrud pip`, WorkManager jobs & foreground services, FCM push, camera/sensors/biometrics/BLE/NFC/audio, secure storage, Canvas & explicit animations, stateful hot reload, inspector, docs generator, signing & icon tooling |
-| **v1.4** | Desktop preview target, richer Material 3 motion, Compose interop |
+| **v1.4** | Independent Pydash renderer/client and any standalone export targets remain separate future work; richer Material 3 motion and Compose interop |
 | **v2.0** | iOS backend (SwiftUI), Web (WASM), macOS desktop |
 
 ---
@@ -1499,6 +1536,6 @@ MIT (c) Pydrud Contributors. See [LICENSE](LICENSE) for details.
 ---
 
 <p align="center">
-  <strong>Pydrud</strong> -- <em>Pythonic. Native. Simple.</em><br>
-  Built for Python developers who love native mobile.
+  <strong>Pydrud</strong> -- <em>Pythonic. Portable. Simple.</em><br>
+  Host-driven preview by default; native Android APKs are an explicit Chaquopy option.
 </p>

@@ -53,6 +53,8 @@ def _render_app_package(project_dir: str, ctx: dict) -> None:
     for folder in ("", "components", "screens"):
         _ensure_dir(os.path.join(project_dir, "src", "app", folder))
     for template, relative in _APP_MODULES:
+        if ctx.get("runtime") == "pydash" and relative == "jobs.py":
+            continue  # WorkManager adapter is only part of the Android target.
         _write_template(template,
                         os.path.join(project_dir, "src", "app", *relative.split("/")),
                         ctx)

@@ -1,7 +1,7 @@
 """
 Virtual-tree diff engine.
 
-Produces a list of ``Patch`` operations that the Android renderer applies
+Produces a list of ``Patch`` operations that the connected renderer applies
 to update the native view tree efficiently.
 
 The children diff is *keyed*: widgets are matched by key rather than by
@@ -89,7 +89,7 @@ class TreeDiff:
 
     @staticmethod
     def patches_to_json(patches: list[Patch]) -> str:
-        """Serialise patches to JSON for the Android bridge."""
+        """Serialise patches to JSON for the renderer bridge."""
         return json.dumps([p.to_dict() for p in patches], default=str)
 
 

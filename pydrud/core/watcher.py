@@ -1,6 +1,6 @@
 """
-File watcher for Hot Reload — monitors Python source files and triggers
-rebuilds when they change.
+File watcher for Hot Reload — monitors Python source and PSS stylesheet files
+and triggers reloads when they change.
 
 Uses ``watchdog`` if available (recommended), with a fallback to polling
 ``os.stat`` for environments without ``watchdog`` installed.
@@ -29,7 +29,7 @@ _IGNORED_DIRS = {"__pycache__", ".git", ".venv", "venv", "build", "dist", ".idea
 
 
 class _ReloadHandler(FileSystemEventHandler if _HAS_WATCHDOG else object):
-    """Watchdog event handler that triggers on .py file changes."""
+    """Watchdog event handler for supported source and stylesheet changes."""
 
     def __init__(self, callback: Callable[[str], None], debounce: float = 0.4):
         super().__init__()
@@ -57,21 +57,33 @@ class _ReloadHandler(FileSystemEventHandler if _HAS_WATCHDOG else object):
             self._fire(event.src_path)
 
     def on_created(self, event):
-        """A brand-new module must trigger a reload too."""
+        """A brand-new source or stylesheet must trigger a reload too."""
+        if not event.is_directory:
+            self._fire(event.src_path)
+
+    def on_deleted(self, event):
+        """Deleting a stylesheet removes its rules on the next rebuild."""
         if not event.is_directory:
             self._fire(event.src_path)
 
     def on_moved(self, event):
-        """Most editors save atomically: write a temp file, then rename it.
+        """Reload atomic saves and reconcile renamed stylesheet paths.
 
-        Without this hook, saving from vim/PyCharm never reloaded.
+        Editors commonly rename a temporary file over its destination. When
+        a ``.pss`` file itself moves, fire for its old path too so the manager
+        removes rules from the source name as well as loading the destination.
         """
-        if not event.is_directory:
-            self._fire(getattr(event, "dest_path", "") or event.src_path)
+        if event.is_directory:
+            return
+        source = event.src_path
+        destination = getattr(event, "dest_path", "") or source
+        if str(source).lower().endswith(".pss"):
+            self._fire(source)
+        self._fire(destination)
 
 
 class FileWatcher:
-    """Watches directories for Python file changes and triggers a callback.
+    """Watch directories for Python and PSS file changes and call back.
 
     Args:
         paths: List of directory paths to watch.
@@ -134,8 +146,11 @@ class FileWatcher:
             for path in self.paths:
                 if os.path.isdir(path):
                     self._walk_and_check(path)
-                elif os.path.isfile(path) and path.endswith(_EXTENSIONS):
-                    self._check_file(path)
+                elif path.endswith(_EXTENSIONS):
+                    if os.path.isfile(path):
+                        self._check_file(path)
+                    elif self._scanned:
+                        self._check_deleted(path)
             self._scanned = True
             time.sleep(self.poll_interval)
 
@@ -157,8 +172,25 @@ class FileWatcher:
                         print(f"[Pydrud] Watcher callback error: {exc}")
         self._mtimes[fpath] = mtime
 
+    def _check_deleted(self, fpath: str) -> None:
+        """Fire once when a watched file is deleted after being observed."""
+        fpath = os.path.abspath(fpath)
+        if fpath not in self._mtimes:
+            return
+        self._mtimes.pop(fpath, None)
+        now = time.time()
+        if now - self._last_fired.get(fpath, 0) <= self.debounce:
+            return
+        self._last_fired[fpath] = now
+        try:
+            self.callback(fpath)
+        except Exception as exc:
+            print(f"[Pydrud] Watcher callback error: {exc}")
+
     def _walk_and_check(self, directory: str) -> None:
-        """Walk a directory and check for modified .py files."""
+        """Find created, edited, and deleted Python/PSS files."""
+        directory = os.path.abspath(directory)
+        seen: set[str] = set()
         try:
             for root, dirs, files in os.walk(directory):
                 dirs[:] = [d for d in dirs if d not in _IGNORED_DIRS]
@@ -166,13 +198,14 @@ class FileWatcher:
                     if not fname.endswith(_EXTENSIONS):
                         continue
                     fpath = os.path.abspath(os.path.join(root, fname))
+                    seen.add(fpath)
                     try:
                         mtime = os.stat(fpath).st_mtime
                     except OSError:
                         continue
                     last = self._mtimes.get(fpath, 0)
-                    # After the first scan, an unseen file is a *new* module
-                    # and must trigger a reload just like an edited one.
+                    # After the first scan, an unseen file is a *new* source
+                    # and must trigger a reload like an edited file.
                     if (mtime > last) if self._scanned else (last > 0 and mtime > last):
                         now = time.time()
                         if now - self._last_fired.get(fpath, 0) > self.debounce:
@@ -183,7 +216,16 @@ class FileWatcher:
                                 print(f"[Pydrud] Watcher callback error: {exc}")
                     self._mtimes[fpath] = mtime
         except OSError:
-            pass
+            return
+
+        if self._scanned:
+            for known in list(self._mtimes):
+                try:
+                    inside = os.path.commonpath((known, directory)) == directory
+                except ValueError:  # pragma: no cover - different Windows drives
+                    inside = False
+                if inside and known not in seen and not os.path.exists(known):
+                    self._check_deleted(known)
 
     def stop(self) -> None:
         """Stop watching."""

@@ -29,10 +29,11 @@ cd /tmp && pydrud init smoke --org com.example && cd smoke && pytest -q
 ## Where things go
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). In short: runtime code in
-`pydrud/runtime/`, machinery in `pydrud/core/`, widgets in
-`pydrud/widgets/`, device APIs in `pydrud/services/`, CLI in
-`pydrud/commands/`, everything that ends up in a generated app in
-`pydrud/android/templates/`.
+`pydrud/runtime/`, platform-neutral machinery (including PSS and protocol) in
+`pydrud/core/`, platform adapters in `pydrud/platforms/`, widgets in
+`pydrud/widgets/`, service APIs in `pydrud/services/`, CLI in
+`pydrud/commands/`, and generated Android templates in
+`pydrud/android/templates/` (Chaquopy only).
 
 ## House rules
 
@@ -48,12 +49,14 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). In short: runtime code in
 * **Templates are code.** Changes under `pydrud/android/templates/android/`
   must pass `tools/check_java.py`; changes under `.../python/` must leave
   `pydrud init` + `pytest` green.
-* **Nothing build-time ships in the APK.** `pydrud init` vendors the runtime
-  into `src/pydrud/`; the CLI, its terminal UI and the templates
-  (`BUNDLE_EXCLUDES` in `pydrud/commands/project.py`) stay out, and the
-  bundle has to import and render with only `src/` on `sys.path`. If a
-  runtime module needs a helper from `pydrud/utils/`, move the helper —
-  do not re-bundle the CLI.
+* **Pydash and Chaquopy packaging are different.** Only the opt-in
+  Chaquopy scaffold vendors the runtime into `src/pydrud/`; the default
+  Pydash scaffold runs the installed package on the host. For the APK, CLI
+  code, terminal UI and templates (`BUNDLE_EXCLUDES` re-exported by
+  `pydrud.commands.project`) stay out, and the bundle must import and render
+  with only generated `src/` on `sys.path`. Android adapters needed in the
+  APK belong under `pydrud/platforms/android/`; do not re-bundle the CLI to
+  reach a helper.
 * **Line endings are LF.** `.gitattributes` enforces it; on Windows,
   `git config core.autocrlf` should not override it, or every source file
   gains a byte per line and the APK size budget drifts.

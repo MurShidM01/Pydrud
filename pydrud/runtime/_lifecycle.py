@@ -7,12 +7,14 @@ Everything a native event can call back into lives here; split out of
 
 from __future__ import annotations
 
+import sys
 import traceback
 from typing import TYPE_CHECKING, Callable, Optional
 
-from pydrud.core.logcat import log_exception
 from pydrud.core.results import ResultCancelled
+from pydrud.core.styles import RendererProfile, resolve_styles
 from pydrud.widgets import Widget, assign_stable_keys, validate_tree_keys
+from pydrud.runtime._capabilities import replace_unsupported_widgets
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from pydrud.runtime.app import App
@@ -164,9 +166,12 @@ class LifecycleMixin:
                 return
             except Exception:
                 pass
-        # A single, documented logcat tag (`Pydrud`) so a device traceback
-        # is findable with `adb logcat -s Pydrud` (DX-004).
-        log_exception(exc, tb_str)
+        # App.run installs the Android stdout/stderr adapter on-device. Host
+        # preview reports the same traceback through ordinary stderr without
+        # importing any platform logging implementation.
+        print(f"Error: {exc}", file=sys.stderr)
+        if tb_str.strip() and tb_str.strip() != "NoneType: None":
+            print(tb_str.rstrip(), file=sys.stderr)
 
     # ── tree building ─────────────────────────────────────────────────────
 
@@ -180,13 +185,30 @@ class LifecycleMixin:
                 self._report_error(exc)
         tree = self._page.build()
         assign_stable_keys(tree, prefix="_page")
+        tree = replace_unsupported_widgets(tree, self._native_capabilities)
         validate_tree_keys(tree)
+        self._apply_stylesheets(tree)
         self._materialize_elements(tree)
         self._current_tree = tree
         self._desired_tree = tree
         self._event_dispatcher.unregister_all()
         self._event_dispatcher.register_tree(tree)
         return tree
+
+    def _apply_stylesheets(self, tree: Widget) -> None:
+        """Resolve project PSS rules before a tree is materialized or sent."""
+        manager = getattr(self, "_stylesheet_manager", None)
+        if manager is None:
+            return
+        stylesheet = manager.refresh()
+        self._stylesheet_diagnostics = manager.diagnostics
+        profile = getattr(self, "_renderer_profile", None) or RendererProfile()
+        resolved, warnings = resolve_styles(stylesheet, tree, profile=profile)
+        self._stylesheet_warnings = warnings
+        for widget, _depth in tree.walk():
+            # Keep computed PSS declarations apart from inline ``style`` so
+            # stylesheet edits can remove values and inline styles stay top.
+            widget._resolved_style = dict(resolved.get(widget.key, {}))
 
     def _materialize_elements(self, tree: Widget) -> None:
         """Refresh persistent logical element metadata without touching Views."""

@@ -1,3 +1,34 @@
+{% if runtime == "pydash" %}
+"""A small cross-platform starter screen for Pydash preview."""
+
+from pydrud import Button, Column, Container, Text, Theme
+
+from app.config import APP_NAME, APP_TAGLINE
+from app.runtime import router
+from app.state import counter
+
+
+def playground_screen(page):
+    """Build a small portable counter screen."""
+    def increment(_event):
+        counter.value += 1
+        page.update()
+
+    page.bgcolor = Theme.background
+    page.add(Container(
+        key="pydash_home",
+        padding=24,
+        child=Column(spacing=12, children=[
+            Text(APP_NAME, key="pydash_title", size=26, weight=700),
+            Text(APP_TAGLINE, key="pydash_tagline"),
+            Text(f"Count: {counter.value}", key="pydash_count", size=20),
+            Button("Increment", key="pydash_increment", on_click=increment),
+            Button("Details", key="pydash_details",
+                   on_click=lambda _event: router.push("details")),
+        ]),
+    ))
+
+{% else %}
 """The Pydrud Native Playground — one screen, every superpower.
 
 Each card demonstrates one thing Pydrud gives you out of the box:
@@ -292,3 +323,4 @@ def navigation_card(page):
                      on_click=lambda _e: router.push("details")),
         ]),
     )
+{% endif %}

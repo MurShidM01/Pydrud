@@ -190,6 +190,36 @@ public class BridgeService {
             capabilities.put("resync", true);
             capabilities.put("coalescing", true);
             capabilities.put("native_animation_clock", true);
+            capabilities.put("native_view", true);
+            JSONArray services = new JSONArray();
+            String[] optionalServices = {
+                "dialog", "storage", "files", "clipboard", "share",
+                "permissions", "notifications", "location", "device",
+                "haptics", "secure", "background", "push", "shortcuts",
+                "camera", "sensors", "bluetooth", "nfc", "biometrics",
+                "audio", "system_theme"
+            };
+            for (String service : optionalServices) services.put(service);
+            capabilities.put("services", services);
+            JSONArray widgetTypes = new JSONArray();
+            String[] supportedWidgetTypes = {
+                "Container", "Center", "Padding", "SizedBox", "Positioned",
+                "Card", "Stack", "Column", "ListView", "Row", "GridView",
+                "Spacer", "Divider", "Text", "Button", "TextField", "Image",
+                "Icon", "Checkbox", "Switch", "Radio", "ProgressBar", "Slider",
+                "RangeSlider", "PageView", "Dropdown", "Canvas", "RichText",
+                "Markdown", "MapView", "CameraPreview", "ReorderableList",
+                "InfiniteList", "NativeView", "ListTile", "ExpansionTile", "Chip",
+                "Badge", "Avatar", "Banner", "Tooltip", "Tabs", "BottomNavigationBar",
+                "NavigationRail", "Drawer", "SegmentedButton", "SearchBar", "Rating",
+                "CircularProgress", "Skeleton", "RefreshIndicator", "Stepper", "WebView",
+                "VideoPlayer", "Chart", "PopupMenu", "Form", "FormField",
+                "GestureDetector", "InkWell", "Dismissible", "Draggable", "Hero",
+                "AnimatedContainer", "AnimatedOpacity", "AnimatedScale",
+                "AnimatedRotation", "AnimatedSwitcher", "FadeIn", "SlideIn", "ScaleIn"
+            };
+            for (String widgetType : supportedWidgetTypes) widgetTypes.put(widgetType);
+            capabilities.put("widget_types", widgetTypes);
             data.put("capabilities", capabilities);
             sendEvent("ready", "", data);
         } catch (Exception e) {
@@ -292,7 +322,7 @@ public class BridgeService {
             : uiType == android.content.res.Configuration.UI_MODE_TYPE_DESK ? "desk"
             : uiType == android.content.res.Configuration.UI_MODE_TYPE_CAR ? "car"
             : "normal");
-        data.put("sdk", android.os.Build.VERSION.SDK_INT);
+        data.put("platform_version", String.valueOf(android.os.Build.VERSION.SDK_INT));
         data.put("model", android.os.Build.MODEL);
         return data;
     }

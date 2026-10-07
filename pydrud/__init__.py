@@ -1,9 +1,9 @@
 """
-Pydrud — Build native Android apps with Python.
+Pydrud — Build Python UIs with Pydrud.
 
-A lightweight, Flutter-inspired framework that converts a declarative
-Python widget tree into native Android Views at runtime. No XML layouts,
-no Kotlin UI code — just Python.
+A lightweight, Flutter-inspired framework with a platform-neutral widget tree
+and renderer protocol. Pydash is the toolchain-free host-preview default;
+Chaquopy is the opt-in Android APK target that renders native Views.
 """
 
 __version__ = "2.1.0"

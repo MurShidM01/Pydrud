@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import pkgutil
 import subprocess
 import sys
 
@@ -69,13 +70,35 @@ def _android_dependent_modules(mod: object) -> list[str]:
 
 
 def _probe(module_names: list[str]) -> dict[str, list[str]]:
-    """Import each module and list the Android symbols reachable from it.
+    """Import each module and list platform-specific symbols reachable from it.
 
     This is the child half of :func:`_leaks_in_fresh_interpreter`; it is what
     runs when this file is executed as a script.
     """
-    return {name: _android_dependent_modules(importlib.import_module(name))
-            for name in module_names}
+    report = {
+        name: _android_dependent_modules(importlib.import_module(name))
+        for name in module_names
+    }
+    report["__loaded_android_modules__"] = sorted(
+        name for name in sys.modules
+        if name == "pydrud.android"
+        or name.startswith("pydrud.android.")
+        or name == "pydrud.platforms.android"
+        or name.startswith("pydrud.platforms.android.")
+    )
+    return report
+
+
+def _all_core_modules() -> list[str]:
+    """Discover every Python module below ``pydrud/core`` for isolation tests."""
+    import pydrud.core
+
+    discovered = [pydrud.core.__name__]
+    discovered.extend(
+        module.name for module in pkgutil.walk_packages(
+            pydrud.core.__path__, prefix="pydrud.core.")
+    )
+    return sorted(set(discovered))
 
 
 def _leaks_in_fresh_interpreter(
@@ -132,13 +155,18 @@ class TestCrossPlatformNeutrality:
         """Every listed core module can be imported without dragging in Android."""
         # A fresh interpreter, so previous test state cannot leak in and the
         # modules this process has already loaded are never touched.
-        report = _leaks_in_fresh_interpreter(self._CORE_MODULES)
-        for mod_name in self._CORE_MODULES:
+        module_names = sorted(set(self._CORE_MODULES + _all_core_modules()))
+        report = _leaks_in_fresh_interpreter(module_names)
+        for mod_name in module_names:
             leaks = report[mod_name]
             assert not leaks, (
                 f"Module {mod_name!r} pulls in Android-dependent symbols: "
                 + "; ".join(leaks)
             )
+        assert report["__loaded_android_modules__"] == [], (
+            "Importing the complete core/PSS surface loaded a platform adapter: "
+            + ", ".join(report["__loaded_android_modules__"])
+        )
 
     def test_neutrality_probe_leaves_loaded_modules_alone(self) -> None:
         """Regression: the probe once re-imported core modules in-process.
@@ -171,6 +199,13 @@ class TestCrossPlatformNeutrality:
         assert pydrud.MediaQuery is MediaQuery
         assert pydrud.Border is Border
         assert pydrud.core.tasks.GLOBAL_JOBS is GLOBAL_JOBS
+
+    def test_public_runtime_import_does_not_load_android_adapters(self) -> None:
+        """Importing App is safe for host preview before target selection."""
+        report = _leaks_in_fresh_interpreter([
+            "pydrud", "pydrud.runtime.app", "pydrud.runtime._lifecycle",
+        ])
+        assert report["__loaded_android_modules__"] == []
 
     def test_pss_schema_is_android_free(self) -> None:
         """The PSS schema (style vocabulary) has no Android deps."""

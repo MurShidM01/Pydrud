@@ -20,7 +20,11 @@ from pydrud.core.events import EventDispatcher
 from pydrud.core.bridge import BridgeProtocol
 from pydrud.core.protocol import MAX_FRAME_BYTES, RenderTransaction
 from pydrud.core.elements import ElementTree
-from pydrud.core.logcat import install as install_logcat
+from pydrud.core.styles import (
+    RendererProfile,
+    StyleSheet,
+    StyleSheetManager,
+)
 from pydrud.widgets import Widget
 
 # ``App`` is composed from cohesive mixins so no single module owns the whole
@@ -76,6 +80,9 @@ class App(RenderMixin, BridgeMixin, LifecycleMixin, HotReloadMixin):
         port: int = 8595,
         assets_dir: str = "assets",
         hot_reload: bool = False,
+        stylesheet: str | os.PathLike[str] | StyleSheet | None = None,
+        stylesheets=None,
+        renderer_profile: Optional[RendererProfile] = None,
         **kwargs,
     ):
         App._active = self
@@ -104,7 +111,9 @@ class App(RenderMixin, BridgeMixin, LifecycleMixin, HotReloadMixin):
         self._outbox_final_tree: Optional[Widget] = None
         self._render_pending = False
         self._render_pending_force_snapshot = False
-        self._native_capabilities: dict = {}
+        # ``None`` means no renderer has negotiated capabilities yet. An
+        # empty mapping after handshake means optional services are absent.
+        self._native_capabilities: Optional[dict] = None
         self._ui_thread_id: Optional[int] = None
         self._bridge = BridgeProtocol()
         self._connected = False
@@ -125,6 +134,18 @@ class App(RenderMixin, BridgeMixin, LifecycleMixin, HotReloadMixin):
         self._watcher: Optional[Any] = None
         self._watch_dirs: list[str] = ["src"]
         self._project_root: str = self._find_root()
+        self._stylesheet_manager = StyleSheetManager(
+            self._project_root, stylesheets=stylesheets)
+        if stylesheet is not None:
+            self._stylesheet_manager.add(stylesheet)
+        #: Optional renderer facts are injected as data; the neutral core
+        #: never selects or imports an Android renderer implicitly.
+        self._renderer_profile = renderer_profile
+        self._stylesheet_diagnostics: list = []
+        self._stylesheet_warnings: list[str] = []
+        # Files received from the Android dev server form a replaceable source
+        # set, so a full hot restart can remove stylesheets deleted on host.
+        self._hot_reload_stylesheet_sources: set[str] = set()
         self._hot_reload_requested = hot_reload
         # ── Lifecycle hooks ────────────────────────────────────────
         self._lifecycle_handlers: dict[str, list[Callable]] = {}
@@ -166,18 +187,55 @@ class App(RenderMixin, BridgeMixin, LifecycleMixin, HotReloadMixin):
     def connected(self) -> bool:
         return self._connected
 
-    def run(self, *, retry: bool = True, retry_delay: float = 0.5, max_retries: int = 30):
-        """Start the app: build the tree, connect to Android, enter the event loop.
+    @property
+    def stylesheet(self) -> StyleSheet:
+        """The current combined, last-known-good PSS stylesheet."""
+        return self._stylesheet_manager.stylesheet
+
+    @property
+    def stylesheet_diagnostics(self) -> tuple:
+        """Diagnostics from the most recent stylesheet load or reload."""
+        return tuple(self._stylesheet_diagnostics)
+
+    @property
+    def stylesheet_warnings(self) -> tuple[str, ...]:
+        """Renderer/profile warnings from the latest style resolution."""
+        return tuple(self._stylesheet_warnings)
+
+    def add_stylesheet(self, stylesheet) -> "App":
+        """Register a PSS file path or parsed ``StyleSheet`` (chainable).
+
+        Files under ``src/`` are discovered automatically; this method is
+        useful for styles kept elsewhere or supplied programmatically.
+        """
+        self._stylesheet_manager.add(stylesheet)
+        return self
+
+    def add_stylesheet_source(
+        self, source: str, *, filename: str = "<memory>"
+    ) -> "App":
+        """Parse and register in-memory PSS source, replacing the same name."""
+        self._stylesheet_manager.add_source(source, filename=filename)
+        return self
+
+    def run(self, *, retry: bool = True, retry_delay: float = 0.5,
+            max_retries: int = 30, use_platform_logging: bool = True):
+        """Start the app on its configured local runtime bridge.
 
         Args:
-            retry: Retry the TCP connection (the Android bridge server may
-                not be listening yet when Chaquopy starts Python).
+            retry: Retry the TCP connection while the local renderer starts.
             retry_delay: Seconds between connection retries.
             max_retries: Maximum connection attempts before giving up.
+            use_platform_logging: Install the Android log adapter for the
+                direct Chaquopy bridge (disable for neutral test renderers).
         """
-        # Route Python output to logcat under the stable `Pydrud` tag before
-        # anything else can fail (DX-004). No-op on the host.
-        install_logcat()
+        # The direct local bridge is the Chaquopy target. Host preview uses
+        # serve_transport and never installs a platform logging adapter.
+        if use_platform_logging:
+            from pydrud.platforms.android.logging import (
+                install as install_android_logging,
+            )
+            install_android_logging()
         self._build_tree()
 
         if self._hot_reload_requested:
@@ -191,7 +249,7 @@ class App(RenderMixin, BridgeMixin, LifecycleMixin, HotReloadMixin):
     def _start_dev_server(self) -> None:
         """Start on-device DevServer for hot reload."""
         try:
-            from pydrud.core.devserver import DevServer
+            from pydrud.platforms.android.devserver import DevServer
             self._dev_server = DevServer(self, host=self.host, port=self._dev_port)
             self._dev_server.start()
         except Exception:
@@ -227,7 +285,13 @@ class App(RenderMixin, BridgeMixin, LifecycleMixin, HotReloadMixin):
         self._running = self._connected = True
         self._shutdown_event.clear()
         self._transport = transport
-        self._native_capabilities = dict(capabilities or {})
+        negotiated = dict(capabilities) if capabilities is not None else None
+        if negotiated != self._native_capabilities:
+            # A capability-driven placeholder can change a widget's wire type.
+            # This transport sends a fresh authoritative snapshot, so reset the
+            # per-renderer element type registry before rebuilding that tree.
+            self._elements.clear()
+        self._native_capabilities = negotiated
         self._confirmed_revision = max(0, int(native_revision))
         self._desired_revision = max(self._desired_revision,
                                      self._confirmed_revision)

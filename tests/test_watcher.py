@@ -34,10 +34,29 @@ class TestReloadHandler(unittest.TestCase):
         self.handler.on_created(_Event("/p/new.py"))
         self.assertEqual(self.seen, [_abs("/p/new.py")])
 
+    def test_stylesheet_change_fires(self):
+        self.handler.on_modified(_Event("/p/theme.pss"))
+        self.assertEqual(self.seen, [_abs("/p/theme.pss")])
+
+    def test_deleted_stylesheet_fires(self):
+        self.handler.on_deleted(_Event("/p/theme.pss"))
+        self.assertEqual(self.seen, [_abs("/p/theme.pss")])
+
     def test_atomic_save_uses_the_destination(self):
         """Editors rename a temp file over the real one."""
         self.handler.on_moved(_Event("/p/.app.py.swp", "/p/app.py"))
         self.assertEqual(self.seen, [_abs("/p/app.py")])
+
+    def test_moved_stylesheet_reloads_old_and_new_paths(self):
+        self.handler.on_moved(_Event("/p/theme.pss", "/p/styles/theme.pss"))
+        self.assertEqual(self.seen, [
+            _abs("/p/theme.pss"),
+            _abs("/p/styles/theme.pss"),
+        ])
+
+    def test_moved_stylesheet_out_of_tree_removes_old_source(self):
+        self.handler.on_moved(_Event("/p/theme.pss", "/tmp/theme.backup"))
+        self.assertEqual(self.seen, [_abs("/p/theme.pss")])
 
     def test_non_python_and_directories_are_ignored(self):
         self.handler.on_modified(_Event("/p/notes.txt"))
@@ -75,6 +94,21 @@ class TestPollingFallback(unittest.TestCase):
         watcher = FileWatcher([root], seen.append, debounce=0.0)
         watcher._walk_and_check(root)
         os.utime(target, (time.time() + 5, time.time() + 5))
+        watcher._walk_and_check(root)
+        self.assertEqual(seen, [target])
+
+    def test_deleted_stylesheet_fires_once(self):
+        root = tempfile.mkdtemp()
+        target = os.path.join(root, "theme.pss")
+        with open(target, "w", encoding="utf-8") as handle:
+            handle.write("Button { color: red; }")
+
+        seen = []
+        watcher = FileWatcher([root], seen.append, debounce=0.0)
+        watcher._walk_and_check(root)
+        watcher._scanned = True
+        os.unlink(target)
+        watcher._walk_and_check(root)
         watcher._walk_and_check(root)
         self.assertEqual(seen, [target])
 

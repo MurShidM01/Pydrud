@@ -16,6 +16,7 @@ from typing import Callable, Optional
 from pydrud.core.protocol import MAX_FRAME_BYTES
 from pydrud.core.results import Result
 from pydrud.core.tasks import TaskRunner
+from pydrud.runtime._capabilities import capability_failure
 
 
 class BridgeMixin:
@@ -27,19 +28,23 @@ class BridgeMixin:
     def invoke(self, cmd: str, **data) -> Result:
         """Send a command that expects an answer and return a :class:`Result`.
 
-        A ``request_id`` is attached so the Android side can correlate its
-        reply.  When the bridge is not connected (tests, ``pydrud analyze``)
-        the result fails immediately instead of hanging forever.
+        A ``request_id`` is attached so the connected client can correlate its
+        reply. When the bridge is disconnected, or the client does not
+        advertise a required optional service, the result fails immediately
+        instead of hanging forever.
         """
         with self._lock:
             self._request_seq += 1
             request_id = f"r{self._request_seq}"
         result = Result(request_id, cmd)
-        self._pending[request_id] = result
         if not self._connected:
-            self._pending.pop(request_id, None)
             result.fail("bridge not connected")
             return result
+        unavailable = capability_failure(self._native_capabilities, cmd)
+        if unavailable is not None:
+            result.fail(unavailable)
+            return result
+        self._pending[request_id] = result
         payload = {k: v for k, v in data.items() if v is not None}
         self._send(self._bridge.encode_command(cmd, request_id=request_id,
                                                **payload))
@@ -75,8 +80,8 @@ class BridgeMixin:
     def run_on_ui(self, fn: Callable, *args, **kwargs) -> None:
         """Queue *fn* to run on the event-loop thread.
 
-        Widget mutations from a worker thread must go through this, exactly
-        like ``runOnUiThread`` on Android.
+        Widget mutations from a worker thread must go through this, using the
+        connected runtime's single UI actor.
         """
         if self._ui_thread_id == threading.get_ident():
             try:
@@ -108,7 +113,7 @@ class BridgeMixin:
     # ── bridge internals ──────────────────────────────────────────────────
 
     def _start_bridge(self, *, retry=True, retry_delay=0.5, max_retries=30):
-        """Connect to the Android side via TCP and run the event loop."""
+        """Connect to the configured local renderer and run the event loop."""
         self._running = True
         self._shutdown_event.clear()
         attempts = 0
@@ -128,11 +133,9 @@ class BridgeMixin:
                 # with the app's colours (no white flash, no stock blue).
                 self._send_theme()
 
-                # Send the full initial tree.
-                if self._current_tree is None:
-                    self._build_tree()
-                self._send(self._bridge.encode_full_render(self._current_tree.to_dict()))
-
+                # Wait for ``ready`` before the first tree: the renderer's
+                # optional capabilities decide whether widgets/services are
+                # available. ``_handle_ready`` builds and sends the snapshot.
                 self._reader_thread = threading.Thread(
                     target=self._reader_loop,
                     args=(sock,),
@@ -165,7 +168,7 @@ class BridgeMixin:
                 time.sleep(retry_delay)
 
         print(f"[Pydrud] Bridge connection failed after {attempts} attempts: {last_error}")
-        print("[Pydrud] Running in headless/test mode (no Android bridge).")
+        print("[Pydrud] Running in headless/test mode (no renderer bridge).")
         self._connected = False
 
     def _send(self, msg: str):

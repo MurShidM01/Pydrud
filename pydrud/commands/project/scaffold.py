@@ -82,13 +82,14 @@ def create_project(
     from pydrud.widgets.theme import Colors as _Colors
 
     seed_color = _normalise_color(accent) or _Colors.PRIMARY
-    default_capabilities = ["haptics", "notifications"]
-    # The manifest is generated from capability bundles here too — not just
-    # during ``pydrud sync`` — so a fresh project declares VIBRATE and
-    # POST_NOTIFICATIONS before its first build (the starter app demos both).
-    from pydrud.commands.release import CAPABILITY_PERMISSIONS
-    starter_permissions = sorted(set().union(*(
-        CAPABILITY_PERMISSIONS[name] for name in default_capabilities)))
+    default_capabilities = ["haptics", "notifications"] if is_chaquopy else []
+    # Android capability bundles are only needed for the opt-in APK target.
+    if is_chaquopy:
+        from pydrud.commands.release import CAPABILITY_PERMISSIONS
+        starter_permissions = sorted(set().union(*(
+            CAPABILITY_PERMISSIONS[name] for name in default_capabilities)))
+    else:
+        starter_permissions = []
     ctx = {
         "project_name": name,
         "app_name": android_app_name,
@@ -122,8 +123,8 @@ def create_project(
             "foreground_service": False,
             "boot_receiver": False,
             "wake_lock": False,
-            "haptics": True,
-            "notifications": True,
+            "haptics": is_chaquopy,
+            "notifications": is_chaquopy,
         },
         "capability_permissions": starter_permissions,
         # ABIs shipped in the APK. 32-bit arm is still common on budget

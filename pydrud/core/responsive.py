@@ -1,21 +1,21 @@
 """
 Responsive engine — real device-resolution detection and adaptive sizing.
 
-Three layers, all driven by live metrics pushed from the device:
+Three layers, all driven by live metrics reported by the connected client:
 
 - ``Breakpoints`` — the (fully customisable) window-size-class table.
-- ``MediaQuery`` — every metric the device reports: resolution, dp size,
+- ``MediaQuery`` — metrics the client reports: logical size, pixel size,
   density, dpi, orientation, safe-area insets, font scale, diagonal,
   keyboard height, dark mode, …  Plus change listeners.
 - ``Responsive`` — sizing helpers built on top: scaled dp/sp values,
   percent-of-screen units, breakpoint value pickers, grid maths.
 
-The Android bridge sends a ``ready`` event on connect **and** a ``metrics``
-event every time the window changes (rotation, split screen, foldable
-unfold, font-scale change, keyboard, insets).  ``App`` feeds both into
+The bridge sends a ``ready`` event on connect **and** a ``metrics``
+event every time the window changes (rotation, split screen, folding
+state, font-scale change, keyboard, insets). ``App`` feeds both into
 :meth:`MediaQuery.update`, which refreshes :class:`Responsive`, notifies
 listeners and re-renders the tree — so layouts genuinely follow the
-device instead of guessing once at startup.
+current window instead of guessing once at startup.
 
 Quick tour::
 
@@ -163,7 +163,9 @@ class ScreenInfo:
         return self._d.get(item, default)
 
     def as_dict(self) -> Dict[str, Any]:
-        return dict(self._d)
+        data = dict(self._d)
+        data["sdk"] = _legacy_sdk_value(data)
+        return data
 
     def __iter__(self):
         return iter(self._d)
@@ -184,6 +186,8 @@ class ScreenInfo:
 
     # Attribute access for every metric.
     def __getattr__(self, item: str) -> Any:
+        if item == "sdk":
+            return _legacy_sdk_value(self._d)
         try:
             return self._d[item]
         except KeyError:
@@ -198,6 +202,15 @@ class ScreenInfo:
 def _whole(value: float):
     """Keep dp values as ints when they are whole, so UI text reads nicely."""
     return int(value) if float(value).is_integer() else value
+
+
+def _legacy_sdk_value(data: Dict[str, Any]) -> int:
+    """Numeric compatibility view of the old ``MediaQuery.sdk`` metric."""
+    try:
+        value = float(data.get("platform_version", ""))
+    except (TypeError, ValueError):
+        return 0
+    return int(value) if value.is_integer() else 0
 
 
 def _as_float(value: Any, fallback: float) -> float:
@@ -227,6 +240,8 @@ class _MediaQueryMeta(type):
 
     def __getattr__(cls, item: str) -> Any:
         data = cls.__dict__.get("_data") or {}
+        if item == "sdk":
+            return _legacy_sdk_value(data)
         if item in data:
             value = data[item]
             # ``MediaQuery.breakpoint`` used to be a method; returning a
@@ -265,7 +280,8 @@ class MediaQuery(metaclass=_MediaQueryMeta):
     ``keyboard_height``   Visible IME height in dp (0 when hidden)
     ``dark``              True when the system is in dark mode
     ``refresh_rate``      Display refresh rate in Hz
-    ``sdk``               Android API level
+    ``platform_version``   Optional client operating-system version
+    ``sdk``                Deprecated numeric alias for older clients
     ===================== ==================================================
     """
 
@@ -287,7 +303,7 @@ class MediaQuery(metaclass=_MediaQueryMeta):
         "keyboard_height": 0,
         "dark": False,
         "refresh_rate": 60.0,
-        "sdk": 0,
+        "platform_version": "",
         # Derived — recomputed by _derive().
         "orientation": "portrait",
         "breakpoint": "compact",
@@ -301,8 +317,8 @@ class MediaQuery(metaclass=_MediaQueryMeta):
     _data: Dict[str, Any] = dict(_DEFAULTS)
     _listeners: List[Callable[["ScreenInfo"], None]] = []
 
-    #: A tablet is defined by its *shortest* side, like Flutter and
-    #: Android's ``sw600dp`` qualifier — a landscape phone is not a tablet.
+    #: A tablet is defined by its *shortest* logical side — a landscape
+    #: phone is not a tablet.
     TABLET_SHORTEST_SIDE = 600
     DESKTOP_SHORTEST_SIDE = 900
 
@@ -335,14 +351,17 @@ class MediaQuery(metaclass=_MediaQueryMeta):
     def update(cls, **metrics: Any) -> bool:
         """Merge raw metrics in, re-derive, sync ``Responsive``, notify.
 
-        Unknown keys are kept (forward compatible with newer Android
-        templates).  Returns ``True`` if the snapshot changed.
+        Unknown keys are kept for forward compatibility. Returns ``True`` when
+        the metrics snapshot changed.
         """
         before = dict(cls._data)
         data = cls._data
 
         # Accept both the bridge names and the public names.
         rename = {"width_dp": "width", "height_dp": "height"}
+        # Accept ``sdk`` from legacy runtime handshakes while exposing only
+        # the transport-neutral ``platform_version`` metric.
+        rename["sdk"] = "platform_version"
         for key, value in metrics.items():
             if value is None:
                 continue
@@ -380,6 +399,7 @@ class MediaQuery(metaclass=_MediaQueryMeta):
                     "padding_right", "keyboard_height"):
             d[key] = _whole(max(_as_float(d.get(key), 0), 0))
         d["dark"] = bool(d.get("dark", False))
+        d["platform_version"] = str(d.get("platform_version", "") or "")[:100]
 
         # Pixels follow dp * density unless the device reported them.
         if not cls._px_reported:
@@ -457,8 +477,10 @@ class MediaQuery(metaclass=_MediaQueryMeta):
 
     @classmethod
     def of(cls) -> Dict[str, Any]:
-        """A plain-dict snapshot of every metric."""
-        return dict(cls._data)
+        """A plain-dict snapshot of every metric, including the legacy ``sdk`` alias."""
+        data = dict(cls._data)
+        data["sdk"] = _legacy_sdk_value(data)
+        return data
 
     @classmethod
     def info(cls) -> ScreenInfo:

@@ -206,7 +206,7 @@ class Scaffold(Widget):
                              "resizeForKeyboard": self.resize_to_avoid_keyboard}
         if self.bg_color:
             stack_style["bg"] = self.bg_color
-        stack_style.update(self.style)
+        stack_style.update(self._effective_style())
 
         return Stack(
             key=f"{self.key}._stack",

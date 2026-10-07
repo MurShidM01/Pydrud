@@ -1,3 +1,19 @@
+{% if runtime == "pydash" %}
+"""A second cross-platform screen for the Pydash preview starter."""
+
+from pydrud import Button, Column, Text
+
+from app.runtime import router
+from app.state import counter
+
+
+def details_screen(page):
+    page.add(Column(spacing=12, children=[
+        Text("Details", key="pydash_details_title", size=24, weight=700),
+        Text(f"The shared counter is {counter.value}.", key="pydash_details_count"),
+        Button("Back", key="pydash_back", on_click=lambda _event: router.pop()),
+    ]))
+{% else %}
 """Details — the screen the playground pushes onto the navigation stack.
 
 It exists to prove three things:
@@ -58,3 +74,4 @@ def details_screen(page):
             .on_click(lambda _e: router.pop()),
         ]),
     ))
+{% endif %}

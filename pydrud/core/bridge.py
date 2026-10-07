@@ -1,12 +1,12 @@
 """
-Bridge protocol — defines how the Python ↔ Android communication works.
+Bridge protocol — defines the semantic messages exchanged by Python and a renderer.
 
 The protocol uses JSON messages over a lightweight socket or stdin/stdout
 channels.  Messages are newline-delimited JSON (NDJSON).
 
 Message types:
 
-  *Android -> Python (events)*
+  *Renderer -> Python (events)*
     {"type": "click",     "key": "...", "data": {}}
     {"type": "long_press","key": "...", "data": {}}
     {"type": "change",    "key": "...", "data": {"value": "..."}}
@@ -26,11 +26,11 @@ Message types:
   ``ok: false`` carries ``"error"`` instead of ``"value"`` and rejects the
   pending Result.  Unknown ids are ignored.
 
-  *Python -> Android (rendering)*
+  *Python -> renderer (rendering)*
     {"cmd": "render",      "patches": [...]}
     {"cmd": "full_render", "tree": {...}}
 
-  *Python -> Android (page / chrome; fire-and-forget)*
+  *Python -> renderer (page / chrome; fire-and-forget)*
     {"cmd": "toast",         "message": "...", "duration": "short|long"}
     {"cmd": "snackbar",      "message": "...", "action": "UNDO"}
     {"cmd": "set_title",     "title": "My App"}
@@ -50,7 +50,7 @@ Message types:
     {"cmd": "end_refresh",   "key": "refresh"}
     {"cmd": "vibrate",       "duration": 30}
 
-  *Python -> Android (native services; each replies with a ``result`` event)*
+  *Python -> optional client services (each replies with a ``result`` event)*
     dialogs      dialog, bottom_sheet, date_picker, time_picker,
                  color_picker, progress_dialog
     storage      prefs_set, prefs_get, prefs_remove, prefs_clear, prefs_keys
@@ -106,14 +106,14 @@ class BridgeProtocol:
 
     @staticmethod
     def encode_command(cmd: str, **data) -> str:
-        """Encode a command from Python to Android as JSON."""
+        """Encode a semantic command from Python to the connected renderer as JSON."""
         payload: dict = {"cmd": cmd}
         payload.update(data)
         return json.dumps(payload, default=str) + "\n"
 
     @staticmethod
     def decode_message(line: str) -> Optional[dict]:
-        """Decode an Android event while preserving the legacy API contract.
+        """Decode a renderer event while preserving the legacy API contract.
 
         The low-level decode_envelope decoder raises ProtocolError for
         malformed frames. The public bridge API historically returned None

@@ -6,6 +6,7 @@ All notable changes to Pydrud are documented here.
 
 | Version | Theme | Highlights |
 |---------|-------|------------|
+| [Unreleased](#unreleased) | Cross-platform runtime and PSS | Pydash default, runtime-aware tooling, platform-neutral stylesheets and hot reload |
 | [2.0.3](#203--2026-10-06) | Production readiness | All QA findings closed, renderer hardening, accessibility, modular structure (no file > 1,000 lines) |
 | [2.0.2](#202--reliable-haptics-and-expanded-widget-catalogue) | Reliability & widgets | Clean logs, reliable haptics, expanded widget catalogue |
 | [2.0.1](#201--starter-capability-and-ui-hardening) | Starter & UI hardening | Capabilities system, the Native Playground starter app |
@@ -21,6 +22,49 @@ All notable changes to Pydrud are documented here.
 | [1.0.0](#100) | First release | Declarative Python → native Android over a TCP bridge |
 
 ---
+
+## [Unreleased]
+
+### Changed — runtime selection and tooling
+* New and unconfigured projects default to the toolchain-free `pydash`
+  runtime; Chaquopy is an explicit Android-only opt-in selected with
+  `pydrud init <name> --runtime chaquopy`. Legacy generated Android projects
+  without a runtime key are still recognized as Chaquopy and keep their
+  behavior.
+* Project scaffolding, `pydrud sync`, `pydrud doctor`, package management
+  and analyzer checks now follow the selected runtime. Android-only build,
+  watch and project-editing commands reject Pydash projects and point to
+  `pydrud dev`. Pydash dependencies are recorded for the host environment
+  instead of being filtered through Android's package catalogue or inserted
+  into Gradle. Chaquopy package policy and APK bundling remain Android-specific.
+* Android-only renderer profile, on-device development server and logcat
+  adapters live under `pydrud/platforms/android`; shared protocol, PSS,
+  diffing and style vocabulary remain in platform-neutral packages.
+
+### Added — host preview and PSS stylesheets
+* Optional renderer capabilities are honored without changing renderer
+  protocol v2: unsupported service calls fail before transmission, explicit
+  widget catalogs can receive visible `Text` fallbacks, and `NativeView`
+  requires the explicit capability.
+* The Python-side PSS engine includes a shared style schema, lexer, parser,
+  selector matcher, specificity/source-order cascade, resolver, renderer
+  profile contract and project stylesheet manager. `class_` remains local
+  Python metadata and is not serialized or listed in `NATIVE_IGNORED_PROPS`.
+* Apps discover `*.pss` files under `src/` and apply them before rendering;
+  `.pss` edits rebuild styles without reloading Python modules. Invalid files
+  retain their last-known-good rules, while creating or deleting a stylesheet
+  updates the active rules. Composite PSS values accept CSS-style bare keys
+  and nested arrays/objects.
+* The watcher handles created, edited, moved and deleted `.pss` files in both
+  watchdog and polling modes. Documentation includes `docs/PSS_STYLESHEETS.md`,
+  the architecture and preview-protocol guides, the generated-project README,
+  and the root README.
+
+### Scope
+* The Pydash companion renderer/client is not implemented, bundled, or
+  validated here. This change provides the host-side preview endpoint; it does
+  not add a standalone Pydash export target. Android Gradle/APK/device
+  verification is also not claimed.
 
 ## [2.0.3] — 2026-10-06
 

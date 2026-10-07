@@ -17,39 +17,52 @@ _MIN_SDK_VERSION = 33
 
 
 def run_doctor():
-    """Run all environment checks and print a summary."""
+    """Check host requirements and the Android toolchain when selected.
+
+    Projects default to Pydash, whose host preview path needs no Android
+    tools. A generated Android project with no explicit runtime is resolved
+    as legacy Chaquopy by :func:`resolve_runtime` and keeps the full checks.
+    """
+    from pydrud.runtime.runtime import Runtime, resolve_runtime
+
+    project = _find_project(os.getcwd())
+    runtime = (resolve_runtime(project).runtime if project else Runtime.PYDASH)
+    android_target = runtime is Runtime.CHAQUOPY
     tui.safe_print(tui.render_command_header(
         "doctor",
         "Development environment",
-        subtitle="Checking the tools required to build and run native Android apps",
-        details=(("Python", sys.executable), ("Platform", sys.platform)),
+        subtitle=(
+            "Checking host and Android build tools" if android_target
+            else "Checking host requirements for the Pydash workflow"
+        ),
+        details=(("Python", sys.executable), ("Platform", sys.platform),
+                 ("Runtime", runtime.value)),
     ))
-    tui.safe_print(tui.render_section("Toolchain"))
+    tui.safe_print(tui.render_section("Host"))
 
     all_ok = True
-
-    # 1. Python
     all_ok &= _check_python()
-    # 2. Java / JDK
-    all_ok &= _check_java()
-    # 3. Android SDK
-    all_ok &= _check_android_sdk()
-    # 4. Android-native build pieces.
-    all_ok &= _check_ndk()
-    all_ok &= _check_cmake()
-    # 5. Gradle / device bridge.
-    all_ok &= _check_gradle()
-    all_ok &= _check_adb()
-    # 6. Python packages used to generate the project.
     all_ok &= _check_package("jinja2", "Jinja2")
     all_ok &= _check_package("click", "click")
-    # 7. A generated project receives consistency checks as well. These catch
-    # the manifest mismatch before a camera/file-picker call does at runtime.
-    project = _find_project(os.getcwd())
+
+    if android_target:
+        tui.safe_print(tui.render_section("Android toolchain"))
+        all_ok &= _check_java()
+        all_ok &= _check_android_sdk()
+        all_ok &= _check_ndk()
+        all_ok &= _check_cmake()
+        all_ok &= _check_gradle()
+        all_ok &= _check_adb()
+    else:
+        tui.safe_print(tui.ok_badge(
+            "Android toolchain not required for the Pydash runtime"))
+
     if project:
         tui.safe_print(tui.render_section("Project"))
-        all_ok &= _check_chaquopy(project)
-        all_ok &= _check_manifest_permissions(project)
+        if android_target:
+            # These checks apply only to a generated Android project.
+            all_ok &= _check_chaquopy(project)
+            all_ok &= _check_manifest_permissions(project)
         all_ok &= _check_project_shadowing(project)
 
     tui.safe_print(tui.render_summary(

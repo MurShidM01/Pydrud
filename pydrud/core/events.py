@@ -1,7 +1,7 @@
 """
-Event dispatcher — routes UI events from the Android layer back to Python callbacks.
+Event dispatcher — routes renderer UI events back to Python callbacks.
 
-Events arrive as JSON messages from the Java bridge:
+Events arrive as JSON messages from the connected renderer:
 
     {"type": "click", "key": "btn_abc123", "data": {}}
     {"type": "change", "key": "tf_xyz", "data": {"value": "hello"}}
@@ -115,7 +115,7 @@ class EventDispatcher:
         return [result]
 
     def create_event_json(self, event_type: str, key: str, data: dict | None = None) -> str:
-        """Create a JSON event string (used by the Java bridge to send events)."""
+        """Create a JSON event string for the renderer event channel."""
         payload = {"type": event_type, "key": key}
         if data:
             payload["data"] = data

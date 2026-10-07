@@ -21,6 +21,7 @@ from pydrud.core.preview import (
 from pydrud.core.qr import encode_matrix as encode_qr_matrix
 from pydrud.core.preview_server import PreviewServer
 from pydrud.runtime.app import App
+from pydrud.core.styles.manager import StyleSheetManager
 
 
 class PreviewRunner:
@@ -165,6 +166,11 @@ def load_preview_app(project_dir: str, *, config: Optional[dict] = None) -> App:
         hot_reload=False,
         dev_server=False,
     )
+    # The loader is also used directly by tests and embedding tools that may
+    # not chdir into the project first. Point automatic PSS discovery at the
+    # loaded project's source tree explicitly.
+    app._project_root = root
+    app._stylesheet_manager = StyleSheetManager(root)
     runtime = sys.modules.get("app.runtime")
     bind = getattr(runtime, "bind", None) if runtime else None
     if callable(bind):
