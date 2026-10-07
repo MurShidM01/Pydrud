@@ -27,21 +27,14 @@ __all__ = ["main", "refresh", "router"]
 """
 {{ project_name }} — entry point.
 
-The starter app is the **Pydrud Native Playground**: a single screen of
-small, working demos (native Android services, Material components,
-reactive state and navigation), plus a second screen that shows stack
-navigation and back handling. The code lives in:
+The starter opens to a focused, responsive counter app: a live total,
+accessible decrement/reset controls, and a floating action button. Its visual
+system lives in ``app/theme.pss`` and its reactive value lives in
+``app/state.py``. A details route is included as an optional example for
+future navigation.
 
-    app/
-      config.py        app name, tagline, accent colour
-      state.py         the shared State objects
-      runtime.py       the router and the live App handle (refresh())
-      components/      reusable UI building blocks shared by screens
-      screens/         playground.py + details.py — one module per screen
-      jobs.py          background work (WorkManager)
-
-Edit a screen, then run ``pydrud run`` for interactive Flutter-style hot
-reload (press ``r`` for hot reload, ``R`` for hot restart).
+Edit the screen or stylesheet, then run ``pydrud run`` for interactive
+Flutter-style hot reload (press ``r`` for hot reload, ``R`` for hot restart).
 """
 
 import os
@@ -52,6 +45,8 @@ from app.config import ACCENT, APP_NAME
 from app.jobs import JOBS, job, run_background_job   # noqa: F401 (Java entry)
 from app.runtime import bind, current, refresh, router
 from app.screens import details_screen, playground_screen
+
+Theme.seed(ACCENT)
 
 # ── Routes ──────────────────────────────────────────────────────────────────
 
@@ -67,7 +62,6 @@ def main(page):
 
 def start_app():
     """Called by MainActivity via Chaquopy."""
-    Theme.seed(ACCENT)
     app = bind(App(
         target=router.build_root(),
         title=APP_NAME,

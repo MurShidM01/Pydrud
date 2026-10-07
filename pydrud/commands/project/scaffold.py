@@ -86,14 +86,11 @@ def create_project(
     from pydrud.widgets.theme import Colors as _Colors
 
     seed_color = _normalise_color(accent) or _Colors.PRIMARY
-    default_capabilities = ["haptics", "notifications"] if is_chaquopy else []
-    # Android capability bundles are only needed for the opt-in APK target.
-    if is_chaquopy:
-        from pydrud.commands.release import CAPABILITY_PERMISSIONS
-        starter_permissions = sorted(set().union(*(
-            CAPABILITY_PERMISSIONS[name] for name in default_capabilities)))
-    else:
-        starter_permissions = []
+    # The focused counter starter uses no Android service APIs, so it needs
+    # no runtime capabilities or permissions out of the box. Apps can opt in
+    # later with the capabilities/permissions commands when they need them.
+    default_capabilities: list[str] = []
+    starter_permissions: list[str] = []
     ctx = {
         "project_name": name,
         "app_name": android_app_name,
@@ -127,8 +124,8 @@ def create_project(
             "foreground_service": False,
             "boot_receiver": False,
             "wake_lock": False,
-            "haptics": is_chaquopy,
-            "notifications": is_chaquopy,
+            "haptics": False,
+            "notifications": False,
         },
         "capability_permissions": starter_permissions,
         # ABIs shipped in the APK. 32-bit arm is still common on budget

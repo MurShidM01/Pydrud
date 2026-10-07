@@ -35,14 +35,16 @@ class TestYamlControlledAndroidSync(unittest.TestCase):
                   encoding="utf-8") as handle:
             handle.write(text)
 
-    def test_new_projects_enable_starter_native_capabilities(self):
+    def test_new_counter_projects_request_no_starter_service_permissions(self):
         config = load_project_config(self.project)
-        self.assertIn("haptics", config["capabilities"])
-        self.assertIn("notifications", config["capabilities"])
+        self.assertNotIn("haptics", config["capabilities"])
+        self.assertNotIn("notifications", config["capabilities"])
         manifest = self.read("android/app/src/main/AndroidManifest.xml")
-        self.assertIn("android.permission.VIBRATE", manifest)
-        self.assertIn("android.permission.POST_NOTIFICATIONS", manifest)
+        self.assertNotIn("android.permission.VIBRATE", manifest)
+        self.assertNotIn("android.permission.POST_NOTIFICATIONS", manifest)
 
+        # The generated runtime still supports services when an app opts in;
+        # the minimal counter starter simply doesn't request them by default.
         bridge = self.read(
             "android/app/src/main/java/com/pydrud/gone/BridgeService.java")
         self.assertIn("VIBRATOR_MANAGER_SERVICE", bridge)

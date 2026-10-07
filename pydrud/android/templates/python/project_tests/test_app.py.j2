@@ -14,7 +14,6 @@ sys.path.insert(0, os.path.join(
 from pydrud.testing import AppTester  # noqa: E402
 from app.main import main  # noqa: E402
 from app.runtime import router  # noqa: E402
-{% if runtime == "pydash" %}
 from app.state import counter  # noqa: E402
 
 
@@ -27,52 +26,38 @@ class TestApp(unittest.TestCase):
     def tearDown(self):
         self.app.stop()
 
-    def test_preview_starter_renders(self):
+    def test_counter_screen_is_the_default_experience(self):
         self.assertTrue(self.app.shows("{{ project_name }}"))
-        self.assertTrue(self.app.shows("A cross-platform UI preview built with Python"))
+        self.assertTrue(self.app.shows("Count the things that matter."))
+        self.assertTrue(self.app.shows("A little progress, one tap at a time."))
+        self.assertEqual(self.app.prop("counter_value", "value"), "0")
+        self.assertTrue(self.app.prop("inc_btn", "_fab"))
+        for key in ("counter_panel", "counter_actions", "dec_btn",
+                    "reset_btn", "inc_btn"):
+            with self.subTest(key=key):
+                self.assertTrue(self.app.exists(key))
+        self.assertFalse(self.app.exists("name_input"))
+        self.assertFalse(self.app.shows("Pydrud Native Playground"))
 
-    def test_counter_increments(self):
-        self.assertEqual(self.app.prop("pydash_count", "value"), "Count: 0")
-        self.app.tap("pydash_increment")
-        self.assertEqual(self.app.prop("pydash_count", "value"), "Count: 1")
-
-    def test_details_navigation(self):
-        self.app.tap("pydash_details")
-        self.assertTrue(self.app.shows("Details"))
-
-    def test_starter_stylesheet_applies(self):
-        from pydrud.core.styles.parser import parse_pss
-
-        pss = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "src", "app", "theme.pss")
-        with open(pss, encoding="utf-8") as handle:
-            sheet = parse_pss(handle.read(), filename="theme.pss")
-        self.assertFalse([d for d in sheet.diagnostics if d.kind == "error"])
-        title = self.app.node("pydash_title")
-        self.assertEqual(title.style.get("color"), "#0F172A")
-{% else %}
-
-class TestApp(unittest.TestCase):
-    def setUp(self):
-        router.reset()
-        self.app = AppTester(main, title="{{ project_name }}").start()
-
-    def tearDown(self):
-        self.app.stop()
-
-    def test_playground_renders(self):
-        self.assertTrue(self.app.shows("Pydrud Native Playground"))
-
-    def test_counter_increments(self):
+    def test_floating_action_button_increments_the_total(self):
         self.app.tap("inc_btn")
         self.assertEqual(self.app.prop("counter_value", "value"), "1")
+        self.app.tap("inc_btn")
+        self.assertEqual(self.app.prop("counter_value", "value"), "2")
+        self.assertEqual(self.app.prop("counter_unit", "value"), "counts")
 
-    def test_typing_a_name_updates_the_greeting(self):
-        self.app.type_in("name_input", "Ada")
-        self.assertEqual(self.app.prop("greeting", "value"), "Hello, Ada!")
+    def test_decrement_and_reset_controls(self):
+        self.app.tap("inc_btn")
+        self.app.tap("inc_btn")
+        self.app.tap("dec_btn")
+        self.assertEqual(self.app.prop("counter_value", "value"), "1")
+        self.app.tap("reset_btn")
+        self.assertEqual(self.app.prop("counter_value", "value"), "0")
+        self.assertEqual(self.app.prop("counter_unit", "value"), "counts")
+        self.app.tap("dec_btn")
+        self.assertEqual(self.app.prop("counter_value", "value"), "0")
 
-    def test_starter_stylesheet_exists(self):
+    def test_starter_stylesheet_and_responsive_layout(self):
         from pydrud.core.styles.parser import parse_pss
 
         pss = os.path.join(
@@ -81,10 +66,18 @@ class TestApp(unittest.TestCase):
         with open(pss, encoding="utf-8") as handle:
             sheet = parse_pss(handle.read(), filename="theme.pss")
         self.assertFalse([d for d in sheet.diagnostics if d.kind == "error"])
-        self.assertGreater(len(sheet.rules), 3)
-        counter_node = self.app.node("counter_value")
-        self.assertIsNotNone(counter_node)
-{% endif %}
+        self.assertGreater(len(sheet.rules), 10)
+
+        panel = self.app.node("counter_panel")
+        value = self.app.node("counter_value")
+        self.assertEqual(panel.style.get("borderRadius"), 28)
+        self.assertEqual(value.style.get("font", {}).get("size"), 76)
+
+        # A wide window gets a centred, capped content column rather than a
+        # phone-width screen stretched edge-to-edge.
+        self.app.device.resize(1024, 768)
+        self.app.settle()
+        self.assertEqual(self.app.node("counter_wrap").style.get("width"), 720)
 
 
 if __name__ == "__main__":

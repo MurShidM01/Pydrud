@@ -231,15 +231,16 @@ def test_starter_stylesheet_parses_clean_and_styles_preview(tmp_path,
                      or m == "app" or m.startswith("app.")]:
             sys.modules.pop(name, None)
     stack = [tree]
-    title = None
+    heading = None
     while stack:
         node = stack.pop()
-        if node.get("key") == "pydash_title":
-            title = node
+        if node.get("key") == "counter_heading":
+            heading = node
             break
         stack.extend(node.get("children", []))
-    assert title is not None
-    assert title["style"]["color"] == "#0F172A"  # from .app-title
+    assert heading is not None
+    assert heading["style"]["font"]["size"] == 32  # from .counter-heading
+    assert heading["style"]["font"]["color"] == "#182230"
 
 
 def test_analyze_reports_stylesheet_errors(tmp_path):

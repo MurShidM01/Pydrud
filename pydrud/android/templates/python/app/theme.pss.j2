@@ -1,51 +1,91 @@
 /*
  * Starter Pydrud Style Sheet (PSS).
  *
- * These classes are attached with class_ in the generated screen modules.
- * Edit this file and save: pydrud dev reapplies the rules without reloading
- * your Python code.
+ * The generated counter screen is styled here rather than with scattered
+ * inline values. Edit this file and save to re-skin the app with hot reload.
  */
 
-.app-shell {
-    bg: #F8FAFC;
-    padding: { all: 24 };
+.counter-screen {
+    bg: #F7F8FA;
 }
 
-.app-title {
-    color: #0F172A;
-    font: { size: 26, weight: 700 };
+.page-content {
+    spacing: 16;
 }
 
-.app-tagline {
-    color: #64748B;
-    font: { size: 14 };
+.responsive-content {
+    alignment: topCenter;
+}
+
+.counter-intro {
+    padding: { left: 2, right: 2, top: 0, bottom: 0 };
+}
+
+.counter-eyebrow {
+    font: { size: 12, weight: 700, color: {{ seed_color | default("#FF6366F1") }} };
+}
+
+.counter-heading {
+    font: { size: 32, weight: 700, color: #182230 };
+}
+
+.counter-subtitle {
+    font: { size: 15, weight: 400, color: #667085 };
+}
+
+.counter-panel {
+    bg: #FFFFFF;
+    border-radius: 28;
+    padding: { all: 28 };
+    elevation: 2;
+}
+
+.counter-icon-wrap {
+    bg: {{ seed_color | default("#FF6366F1") }};
+    border-radius: 18;
+    alignment: center;
+}
+
+.counter-caption {
+    font: { size: 12, weight: 700, color: #667085 };
 }
 
 .counter-value {
-    color: #1E293B;
-    font: { size: 20, weight: 600 };
-    padding: { vertical: 8 };
+    font: { size: 76, weight: 700, color: {{ seed_color | default("#FF6366F1") }} };
+    text-align: center;
 }
 
-.primary-action {
+.counter-unit {
+    font: { size: 15, weight: 500, color: #667085 };
+}
+
+.counter-accent-rule {
     bg: {{ seed_color | default("#FF6366F1") }};
-    color: #FFFFFF;
-    border-radius: 12;
-    padding: { horizontal: 16, vertical: 12 };
+    border-radius: 999;
 }
 
-.secondary-action {
-    bg: #E0E7FF;
-    color: #312E81;
-    border-radius: 12;
-    padding: { horizontal: 16, vertical: 12 };
+.counter-hint {
+    font: { size: 13, weight: 400, color: #667085 };
 }
 
-.details-title {
-    color: #0F172A;
-    font: { size: 24, weight: 700 };
+.counter-actions {
+    spacing: 8;
 }
 
-.details-copy {
-    color: #475569;
+.counter-decrement {
+    bg: #EEF0FF;
+    border-radius: 16;
+    padding: { horizontal: 18, vertical: 10 };
+    font: { size: 14, weight: 700, color: {{ seed_color | default("#FF6366F1") }} };
+}
+
+.counter-reset {
+    border-radius: 16;
+    padding: { horizontal: 18, vertical: 10 };
+    font: { size: 14, weight: 600, color: #667085 };
+}
+
+.counter-fab {
+    bg: {{ seed_color | default("#FF6366F1") }};
+    elevation: 6;
 }
