@@ -750,6 +750,7 @@ static final int VIRTUALIZE_THRESHOLD = 24;
     }
 
     View createCameraPreview(JSONObject json) {
+{% if camera | default(false) %}
         FrameLayout holder = new FrameLayout(vf.activity);
         androidx.camera.view.PreviewView preview =
             new androidx.camera.view.PreviewView(vf.activity);
@@ -793,6 +794,48 @@ static final int VIRTUALIZE_THRESHOLD = 24;
         }
         vf.activity.bindCameraPreview(json.optString("key", ""), preview, fallback, p);
         return holder;
+{% else %}
+        // The camera stack is not bundled into this build (see `camera:` in
+        // pydrud.yaml). Render the widget's declared fallback — or a labelled
+        // placeholder — and report it through the widget's `error` event so
+        // Python sees why there is no preview instead of a silent blank box.
+        FrameLayout holder = new FrameLayout(vf.activity);
+        JSONArray children = json.optJSONArray("children");
+        View fallback = null;
+        if (children != null && children.length() > 0) {
+            JSONObject fallbackJson = children.optJSONObject(0);
+            fallback = createView(fallbackJson);
+            if (fallback != null) {
+                holder.addView(fallback, vf.mLayout.frameParams(
+                    fallbackJson, Gravity.CENTER));
+                String childKey = fallbackJson.optString("key", "");
+                String parentKey = json.optString("key", "");
+                if (!childKey.isEmpty() && !parentKey.isEmpty()) {
+                    vf.parentMap.put(childKey, parentKey);
+                }
+            }
+        }
+        if (fallback == null) {
+            TextView message = new TextView(vf.activity);
+            message.setText("CameraPreview needs the camera stack");
+            message.setGravity(Gravity.CENTER);
+            message.setTextColor(PydrudTheme.onSurfaceVariant);
+            holder.addView(message, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+        }
+        String key = json.optString("key", "");
+        if (!key.isEmpty() && vf.eventDispatcher != null) {
+            JSONObject data = new JSONObject();
+            try {
+                data.put("code", "camera_disabled");
+                data.put("error", "camera is not bundled in this build; set "
+                    + "camera: true in pydrud.yaml and run 'pydrud sync'");
+            } catch (JSONException ignored) { }
+            vf.eventDispatcher.dispatch("error", key, data);
+        }
+        return holder;
+{% endif %}
     }
 
     View createRecyclerList(JSONObject json, String key,

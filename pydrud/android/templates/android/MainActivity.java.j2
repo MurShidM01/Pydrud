@@ -36,6 +36,7 @@ public class {{ app_name }}Activity extends AppCompatActivity{% if not (standalo
     private volatile boolean awaitingBackResult = false;
     private Runnable pendingBack;
     private volatile boolean drawerOpen = false;
+{% if camera | default(false) %}
 
     /** Live CameraX previews, keyed by widget key. */
     private final java.util.Map<String, androidx.camera.view.PreviewView>
@@ -60,6 +61,7 @@ public class {{ app_name }}Activity extends AppCompatActivity{% if not (standalo
     private String scanKey = "";
     private final java.util.concurrent.ExecutorService cameraExecutor =
         java.util.concurrent.Executors.newSingleThreadExecutor();
+{% endif %}
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -265,6 +267,7 @@ public class {{ app_name }}Activity extends AppCompatActivity{% if not (standalo
     public void onRequestPermissionsResult(int requestCode, String[] permissions,
                                            int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+{% if camera | default(false) %}
         String cameraKey = pendingCameraPermissions.remove(requestCode);
         if (cameraKey != null) {
             boolean granted = grantResults.length > 0
@@ -277,6 +280,7 @@ public class {{ app_name }}Activity extends AppCompatActivity{% if not (standalo
             }
             return;
         }
+{% endif %}
         if (bridge != null) {
             bridge.services().onPermissionResult(requestCode, permissions, grantResults);
         }
@@ -585,6 +589,7 @@ public class {{ app_name }}Activity extends AppCompatActivity{% if not (standalo
         bridge.sendEvent("deep_link", "", data);
         pendingDeepLink = null;
     }
+{% if camera | default(false) %}
 
     // ── camera ───────────────────────────────────────────────────────────
 
@@ -920,6 +925,7 @@ public class {{ app_name }}Activity extends AppCompatActivity{% if not (standalo
                 }
             });
     }
+{% endif %}
 
     /** Animate the next full render (Router transitions). */
     public void setRouteTransition(final String transition, final int duration) {
@@ -1120,14 +1126,18 @@ public class {{ app_name }}Activity extends AppCompatActivity{% if not (standalo
         sendLifecycle("destroy");
         if (bridge != null) bridge.stop();
         if (viewFactory != null) viewFactory.clear();
+{% if camera | default(false) %}
         stopCamera();
+{% endif %}
         if (bridge != null && bridge.platform() != null) {
             bridge.platform().dispose();
         }
         if (bridge != null && bridge.connectivity() != null) {
             bridge.connectivity().dispose();
         }
+{% if camera | default(false) %}
         cameraExecutor.shutdown();
+{% endif %}
         super.onDestroy();
     }
 }

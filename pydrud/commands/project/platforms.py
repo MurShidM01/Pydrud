@@ -204,6 +204,9 @@ def _init_android(project_dir: str, *, standalone: bool) -> bool:
     _sync_toml_identity(project_dir, ctx)
     persist_runtime(project_dir, Runtime.CHAQUOPY)
     set_scalar(project_dir, "standalone", bool(standalone))
+    # Record the camera choice so `camera:` is discoverable in pydrud.yaml
+    # instead of being an undocumented default.
+    set_scalar(project_dir, "camera", bool(ctx.get("camera", False)))
     _stamp_version(project_dir)
 
     if standalone:

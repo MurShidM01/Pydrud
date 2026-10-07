@@ -27,7 +27,9 @@
 
 # ── AndroidX pieces reached reflectively ─────────────────────────────────
 -keep class androidx.work.** { *; }
+{% if camera | default(false) %}
 -keep class androidx.camera.** { *; }
+{% endif %}
 -keep class androidx.security.crypto.** { *; }
 -keep class androidx.biometric.** { *; }
 -keepclassmembers class * extends androidx.work.Worker {

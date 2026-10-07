@@ -137,6 +137,10 @@ def create_project(
         "app_links_host": "",
         "cleartext_traffic": True,
         "assets_dir": "assets",
+        # CameraX + ML Kit ship ~10 MB of native libraries into every APK.
+        # New projects start without them; opt in with `camera: true` in
+        # pydrud.yaml (or `pydrud permissions add camera`) + `pydrud sync`.
+        "camera": False,
         "runtime": chosen,
         # Direct ``--runtime chaquopy`` projects are always the standalone
         # target: the activity boots ``app.main.start_app()`` on device.

@@ -1,47 +1,142 @@
-name: Pydrud CI
+name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Re-runs supersede stale ones: a force-push should not keep burning minutes
+# on a commit nobody is looking at any more.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: every job below is read-only.
+permissions:
+  contents: read
+
+env:
+  # A single supported interpreter, pinned here so there is exactly one
+  # place to bump it. Pydrud tracks the newest stable CPython; widening this
+  # to a 3.10-3.13 matrix would quadruple CI time without catching bugs the
+  # neutral-core tests do not already cover.
+  PYTHON_VERSION: "3.13"
 
 jobs:
-  python:
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python: ["3.13"]
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+
       - uses: actions/setup-python@v7
         with:
-          python-version: ${{ matrix.python }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install Ruff
+        run: python -m pip install -U pip ruff
+
+      # Rules and target version live in [tool.ruff] in pyproject.toml.
+      # --output-format=github turns findings into inline PR annotations.
+      - name: Ruff
+        run: ruff check --output-format=github .
+
+  test:
+    name: Tests (Python ${{ env.PYTHON_VERSION }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
       - name: Install
         run: python -m pip install -U pip && pip install -e ".[dev]"
+
       - name: Compile Python
-        run: python -m compileall -q pydrud tests
+        run: python -m compileall -q pydrud tests tools
+
+      # -ra summarises skips/xfails so a test silently dropping out is
+      # visible in the log instead of hiding behind a green tick.
       - name: Test
-        run: python -m pytest -q
+        run: python -m pytest -ra -q
 
   generated-java:
+    name: Generated Android sources
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
       - name: Install generator dependencies
-        run: python -m pip install -e ".[dev]"
+        run: python -m pip install -U pip && pip install -e ".[dev]"
+
       - name: Static generated-source validation
         run: python tools/check_java.py
 
-  lint:
+  packaging:
+    name: Distribution
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
-      - name: Install Ruff
-        run: python -m pip install ruff
-      - name: Lint (errors and undefined names only)
-        run: ruff check --select F,E9 pydrud tools tests
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # A wheel that ships without android/templates/** installs cleanly and
+      # then cannot scaffold anything. Nothing in the test suite would catch
+      # that, because the suite imports from the source tree.
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install -U pip build
+          python -m build
+
+      - name: Verify the templates ship in the wheel
+        run: python tools/check_wheel.py
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+
+  smoke:
+    name: CLI smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: python -m pip install -U pip && pip install -e ".[dev]"
+
+      # Drives the installed `pydrud` executable through create → init
+      # android → sync → analyze for both project shapes.
+      - name: Scaffold, sync and analyze both runtimes
+        run: python tools/smoke.py

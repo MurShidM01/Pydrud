@@ -23,6 +23,70 @@ All notable changes to Pydrud are documented here.
 
 ---
 
+## [Unreleased]
+
+### Fixed — a quiet, lean `pydrud build`
+* **`buildPython` no longer reports a Python version for preview shells.**
+  Preview builds embed no interpreter, yet `pydrud build` still probed the
+  host and printed *"buildPython: using Python 3.12 (the app ships Python
+  3.11); Pydrud will disable .pyc pre-compilation automatically …"* before
+  every Gradle run. `PYDRUD_PYTHON` and `PYDRUD_COMPILE_PYC` are now only
+  resolved for standalone (Chaquopy) targets, where the note is real
+  information.
+* **CameraX and ML Kit are opt-in, so the NDK strip warning is gone.**
+  Every scaffolded app bundled `androidx.camera:*` and
+  `com.google.mlkit:barcode-scanning` whether it used a camera or not —
+  roughly 10 MB of `libimage_processing_util_jni.so` and
+  `libbarhopper_v3.so`, which release builds then reported as *"Unable to
+  strip the following libraries, packaging them as they are"*.
+
+### Added — camera opt-in and explicit build variants
+* New `camera:` key in `pydrud.yaml` (default `false`). Set it to `true`, or
+  declare the CAMERA permission with `pydrud permissions add camera`, then
+  run `pydrud sync` to bundle the camera stack. Without it `CameraPreview`
+  renders its declared fallback child (or a labelled placeholder) and
+  `page.camera` calls answer with an error naming the exact fix, instead of
+  a silent blank box. `pydrud sync` reports `Camera bundled` / `Camera not
+  bundled` and writes the resolved choice back to `pydrud.yaml`.
+* Projects generated before `camera:` existed keep the stack across the
+  upgrade: an existing `build.gradle.kts` that already lists CameraX is the
+  default, so no app loses a camera it already uses. That `sync` prints a
+  hint pointing at `camera: false` so the inheritance is not invisible.
+* `pydrud analyze` now reports `CameraPreview` / `page.camera` use in a
+  project whose APK does not bundle the camera stack, naming `camera: true`
+  and `pydrud sync` as the fix. The bundled runtime under `src/pydrud` is
+  skipped: it defines those APIs rather than using them.
+* `tools/check_java.py` renders every Java template twice — with the camera
+  stack bundled and without it — so both generated variants stay valid in CI.
+
+### Changed — CI
+* The workflow is now five jobs on a single pinned interpreter
+  (`PYTHON_VERSION: "3.13"`, no version matrix): **Lint**, **Tests**,
+  **Generated Android sources**, **Distribution** and **CLI smoke**. It
+  cancels superseded runs, requests `contents: read` only, sets a timeout
+  per job and caches pip from `pyproject.toml`.
+* Ruff is configured in `pyproject.toml` (`[tool.ruff]`, errors and
+  undefined names), so plain `ruff check .` reproduces CI and annotates
+  findings inline on the PR.
+* New **Distribution** job: builds the sdist and wheel, asserts the wheel
+  still ships `pydrud/android/templates/**`, and runs `pydrud create` from
+  an installed wheel in a clean venv (`tools/check_wheel.py`) — a template
+  packaging regression the test suite cannot see, because it imports from
+  the source tree.
+* New **CLI smoke** job (`tools/smoke.py`): drives the installed `pydrud`
+  executable through create → init android → sync → analyze for both
+  project shapes, so a broken console script or a command that only fails
+  against a real project directory is caught before release.
+* `fonttools` joined the `dev` extra: without it the icon-generator drift
+  test skipped itself, so CI was silently not checking the committed Java
+  against the generator. The suite now reports 0 skipped.
+* `pydrud build --debug` and `pydrud run --debug` state the debug variant
+  explicitly. Debug was — and remains — the default; passing `--debug`
+  together with `--release` is an error (exit code 2) rather than a silent
+  surprise.
+
+---
+
 ## [2.1.0] — 2026-10-07
 
 The platform release. Apps are created with `pydrud create`, the Android

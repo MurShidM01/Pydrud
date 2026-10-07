@@ -467,6 +467,30 @@ class TestBuildPython(unittest.TestCase):
             os.chdir(cwd)
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_preview_shells_never_probe_build_python(self):
+        """A preview shell ships no interpreter, so a ``buildPython`` note
+        ("using Python 3.12, the app ships Python 3.11 …") is pure noise."""
+        from pydrud.commands.builder import Builder
+        from pydrud.commands.project import init_platform
+
+        tmp = tempfile.mkdtemp(prefix="pydrud-buildenv-")
+        cwd = os.getcwd()
+        try:
+            os.chdir(tmp)
+            create_project("shell", org="com.example", runtime="pydash")
+            root = os.path.join(tmp, "shell")
+            init_platform(root, "android")
+            builder = Builder(root)
+            with mock.patch("pydrud.commands.project._detect_build_python",
+                            return_value="/opt/py311") as detect:
+                env = builder._build_env()
+            detect.assert_not_called()
+            self.assertNotIn("PYDRUD_PYTHON", env)
+            self.assertNotIn("PYDRUD_COMPILE_PYC", env)
+        finally:
+            os.chdir(cwd)
+            shutil.rmtree(tmp, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

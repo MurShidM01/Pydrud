@@ -36,6 +36,12 @@ capabilities:
 firebase: {{ "true" if firebase | default(false) else "false" }}
 shrink: {{ shrink | default("false") }}
 
+# Camera stack (CameraPreview, page.camera, barcode/QR scanning). It ships
+# ~10 MB of CameraX + ML Kit native libraries, so it is off by default.
+# Set it to true — or declare the CAMERA permission with
+# `pydrud permissions add camera` — and run `pydrud sync` to bundle it.
+camera: {{ "true" if camera | default(false) else "false" }}
+
 # Android build toolchain
 python_version: "{{ python_version }}"
 chaquopy_version: "{{ chaquopy_version | default("17.0.0") }}"

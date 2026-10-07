@@ -1,11 +1,13 @@
 """Tests for pydrud.yaml parsing and NDK detection used by the builder."""
 
 import os
+import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 from pydrud.commands.builder import Builder
-from pydrud.commands.project import _detect_ndk, _version_key
+from pydrud.commands.project import _detect_ndk, _version_key, create_project
 from pydrud.compatibility import COMPATIBILITY
 
 YAML = """\
@@ -61,6 +63,61 @@ class TestDetectNdk(unittest.TestCase):
 
     def test_version_key_orders_numerically(self):
         self.assertLess(_version_key("9.0.1"), _version_key("28.2.3"))
+
+
+class TestBuildVariants(unittest.TestCase):
+    """``pydrud build`` speaks both variants explicitly: ``--debug`` (the
+    default) and ``--release``."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="pydrud-variant-")
+        self.cwd = os.getcwd()
+        os.chdir(self.tmp)
+        create_project("variant", org="com.example", runtime="chaquopy")
+        os.chdir(os.path.join(self.tmp, "variant"))
+
+    def tearDown(self):
+        os.chdir(self.cwd)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _invoke(self, *args):
+        from click.testing import CliRunner
+        from pydrud.commands.cli import main
+
+        with mock.patch.object(Builder, "build",
+                               return_value="/tmp/app.apk") as build:
+            result = CliRunner().invoke(main, list(args))
+        return result, build
+
+    def test_debug_is_the_default_variant(self):
+        _result, build = self._invoke("build")
+        build.assert_called_once_with(release=False, debug=False)
+
+    def test_debug_flag_builds_the_debug_variant(self):
+        result, build = self._invoke("build", "--debug")
+        self.assertEqual(result.exit_code, 0, result.output)
+        build.assert_called_once_with(release=False, debug=True)
+
+    def test_release_flag_still_builds_release(self):
+        result, build = self._invoke("build", "--release")
+        self.assertEqual(result.exit_code, 0, result.output)
+        build.assert_called_once_with(release=True, debug=False)
+
+    def test_debug_and_release_are_mutually_exclusive(self):
+        result, build = self._invoke("build", "--debug", "--release")
+        self.assertEqual(result.exit_code, 2)
+        self.assertIn("either --debug or --release", result.output)
+        build.assert_not_called()
+
+    def test_run_accepts_the_same_flag(self):
+        from click.testing import CliRunner
+        from pydrud.commands.cli import main
+
+        with mock.patch.object(Builder, "run", return_value=0) as run:
+            result = CliRunner().invoke(main, ["run", "--debug"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertFalse(run.call_args.kwargs["release"])
+        self.assertTrue(run.call_args.kwargs["debug"])
 
 
 if __name__ == "__main__":

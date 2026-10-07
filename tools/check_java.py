@@ -51,10 +51,19 @@ CONTEXT = {
 }
 
 
-def check(name: str) -> tuple[bool, str]:
-    env = Environment(loader=FileSystemLoader(str(TEMPLATES)),
-                      keep_trailing_newline=True)
-    source = env.get_template(name).render(**CONTEXT)
+#: Optional feature switches that change which code is generated. Every
+#: template is rendered once per combination so neither variant can rot.
+VARIANTS = ({"camera": False}, {"camera": True})
+
+
+def _environment() -> Environment:
+    return Environment(loader=FileSystemLoader(str(TEMPLATES)),
+                       keep_trailing_newline=True)
+
+
+def check(name: str, variant: dict) -> tuple[bool, str]:
+    source = _environment().get_template(name).render(
+        **CONTEXT, **variant)
     try:
         javalang.parse.parse(source)
     except Exception as exc:  # noqa: BLE001 - report any parse failure
@@ -62,13 +71,12 @@ def check(name: str) -> tuple[bool, str]:
     return True, f"{len(source.splitlines())} lines"
 
 
-def symbol_check(names: list[str]) -> int:
+def symbol_check(names: list[str], variant: dict) -> int:
     """Cross-class symbol resolution over the whole generated source set."""
     from pydrud.android.javacheck import check_sources
 
-    env = Environment(loader=FileSystemLoader(str(TEMPLATES)),
-                      keep_trailing_newline=True)
-    rendered = {name: env.get_template(name).render(**CONTEXT)
+    env = _environment()
+    rendered = {name: env.get_template(name).render(**CONTEXT, **variant)
                 for name in names}
     problems = check_sources(rendered)
     for problem in problems:
@@ -85,15 +93,20 @@ def main() -> int:
             str(p.relative_to(TEMPLATES))
             for p in TEMPLATES.rglob("*.java.j2"))
     failures = 0
-    for name in names:
-        ok, detail = check(name)
-        print(f"{'OK  ' if ok else 'FAIL'} {name:<44} {detail}")
-        failures += not ok
-    print(f"\n{len(names) - failures}/{len(names)} templates parse")
-    if failures:
-        return 1
-    print()
-    return symbol_check(names)
+    for variant in VARIANTS:
+        label = "camera bundled" if variant["camera"] else "camera opt-in"
+        print(f"── {label} ──")
+        for name in names:
+            ok, detail = check(name, variant)
+            print(f"{'OK  ' if ok else 'FAIL'} {name:<44} {detail}")
+            failures += not ok
+        print(f"\n{len(names) - failures}/{len(names)} templates parse")
+        if failures:
+            return 1
+        print()
+        if symbol_check(names, variant):
+            return 1
+    return 0
 
 
 if __name__ == "__main__":

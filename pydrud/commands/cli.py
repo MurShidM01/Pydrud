@@ -196,14 +196,22 @@ def sync(no_runtime):
 
 @main.command()
 @click.option("--device", default=None, help="Target device ID (adb).")
+@click.option("--debug", "debug", is_flag=True, default=False,
+              help="Build and install the debuggable debug APK (the default).")
 @click.option("--release", is_flag=True, default=False, help="Build in release mode.")
 @click.option("--watch", is_flag=True, default=False, help="Legacy flag: watch mode with hot reload (default behavior).")
 @click.option("--no-interactive", is_flag=True, default=False, help="Disable interactive terminal shortcuts.")
-def run(device, release, watch, no_interactive):
+def run(device, debug, release, watch, no_interactive):
     """Build the APK, install, launch and start interactive Hot Reload on a connected device."""
     _require_chaquopy("run")
     from pydrud.commands.builder import Builder
 
+    if release and debug:
+        _show_error("Pass either --debug or --release, not both.",
+                    "Debug is the default: 'pydrud run' and "
+                    "'pydrud run --debug' are the same thing.")
+        sys.exit(2)
+
     root = _find_project_root()
     if not root:
         _show_error("Not inside a Pydrud project.",
@@ -211,16 +219,30 @@ def run(device, release, watch, no_interactive):
         sys.exit(1)
 
     builder = Builder(root)
-    builder.run(device=device, release=release, watch=watch, interactive=not no_interactive)
+    builder.run(device=device, release=release, watch=watch,
+                interactive=not no_interactive, debug=debug)
 
 
 @main.command()
+@click.option("--debug", "debug", is_flag=True, default=False,
+              help="Produce a debuggable debug APK (the default variant).")
 @click.option("--release", is_flag=True, default=False, help="Produce a release APK.")
 @click.option("--output", default=None, help="Output APK path.")
-def build(release, output):
-    """Build the APK only (no install)."""
+def build(debug, release, output):
+    """Build the APK only (no install).
+
+    ``pydrud build`` produces a debug APK. Pass ``--debug`` to say so
+    explicitly (handy in scripts and CI logs), or ``--release`` for a
+    signed release APK.
+    """
     _require_chaquopy("build")
     from pydrud.commands.builder import Builder
+
+    if release and debug:
+        _show_error("Pass either --debug or --release, not both.",
+                    "Debug is the default: 'pydrud build' and "
+                    "'pydrud build --debug' are the same thing.")
+        sys.exit(2)
 
     root = _find_project_root()
     if not root:
@@ -229,7 +251,7 @@ def build(release, output):
         sys.exit(1)
 
     builder = Builder(root)
-    apk_path = builder.build(release=release)
+    apk_path = builder.build(release=release, debug=debug)
     if not apk_path:
         sys.exit(1)
 
