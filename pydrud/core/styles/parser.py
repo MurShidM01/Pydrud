@@ -33,7 +33,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from pydrud.core.styles.lexer import Token, TokenKind, LexerError
+from pydrud.core.styles.lexer import Token, TokenKind
 
 
 @dataclass(frozen=True)

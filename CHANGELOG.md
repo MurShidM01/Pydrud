@@ -349,6 +349,10 @@ tests so it cannot regress.
   into a second `GLOBAL_JOBS`. The import check now runs in a throw-away
   interpreter, and a regression test pins that already-loaded modules are left
   alone. Nothing in the framework changed — only the test.
+* **`ruff --select F,E9` is clean again.** Dead imports and locals are gone,
+  and `pydrud analyze` no longer carries a hand-copied second list of valid
+  style keys next to the shared `pydrud.core.styles.VALID_STYLE_KEYS` it
+  already imported (the two were identical, so its findings do not change).
 
 ### Fixed — runtime hardening batch
 * **Legacy Gingerbread-era icons removed.** The ~106-entry

@@ -24,13 +24,11 @@ An :class:`AndroidRendererProfile` warns about known problematic patterns:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Iterable, Optional
 
 from pydrud.widgets.base import Widget
-from pydrud.core.styles.parser import (
-    StyleSheet, Rule, Selector, CompoundSelector, DeclarationBlock,
-)
+from pydrud.core.styles.parser import StyleSheet, Selector, DeclarationBlock
 
 
 @dataclass(frozen=True)
@@ -109,7 +107,6 @@ def resolve_styles(
     for rule in stylesheet.rules:
         sel = rule.selector
         body = rule.body
-        spec = _specificity(sel)
         for comp in sel.compounds:
             if comp.widget_type:
                 type_rules.setdefault(comp.widget_type, []).append((sel, body))
