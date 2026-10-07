@@ -58,6 +58,28 @@ All notable changes to Pydrud are documented here.
   skipped: it defines those APIs rather than using them.
 * `tools/check_java.py` renders every Java template twice — with the camera
   stack bundled and without it — so both generated variants stay valid in CI.
+
+### Changed — CI
+* The workflow is now five jobs on a single pinned interpreter
+  (`PYTHON_VERSION: "3.13"`, no version matrix): **Lint**, **Tests**,
+  **Generated Android sources**, **Distribution** and **CLI smoke**. It
+  cancels superseded runs, requests `contents: read` only, sets a timeout
+  per job and caches pip from `pyproject.toml`.
+* Ruff is configured in `pyproject.toml` (`[tool.ruff]`, errors and
+  undefined names), so plain `ruff check .` reproduces CI and annotates
+  findings inline on the PR.
+* New **Distribution** job: builds the sdist and wheel, asserts the wheel
+  still ships `pydrud/android/templates/**`, and runs `pydrud create` from
+  an installed wheel in a clean venv (`tools/check_wheel.py`) — a template
+  packaging regression the test suite cannot see, because it imports from
+  the source tree.
+* New **CLI smoke** job (`tools/smoke.py`): drives the installed `pydrud`
+  executable through create → init android → sync → analyze for both
+  project shapes, so a broken console script or a command that only fails
+  against a real project directory is caught before release.
+* `fonttools` joined the `dev` extra: without it the icon-generator drift
+  test skipped itself, so CI was silently not checking the committed Java
+  against the generator. The suite now reports 0 skipped.
 * `pydrud build --debug` and `pydrud run --debug` state the debug variant
   explicitly. Debug was — and remains — the default; passing `--debug`
   together with `--release` is an error (exit code 2) rather than a silent

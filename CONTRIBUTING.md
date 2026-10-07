@@ -9,16 +9,38 @@ python3 -m venv .venv
 
 ## Before you open a PR
 
+CI runs five jobs on Python 3.13 — the single supported interpreter, pinned
+as `PYTHON_VERSION` in `.github/workflows/ci.yml`. Every one of them is a
+command you can run locally:
+
 ```bash
-.venv/bin/python -m pytest -q        # the whole suite, no emulator needed
-.venv/bin/python tools/check_java.py # parse + symbol-check every Java template
-.venv/bin/pip install ruff           # once; it is not part of the dev extra
-.venv/bin/ruff check --select F,E9 pydrud tools tests   # exactly what CI lints
+.venv/bin/python -m pytest -ra -q     # the whole suite, no emulator needed
+.venv/bin/python tools/check_java.py  # parse + symbol-check every Java template
+.venv/bin/python tools/smoke.py       # drive the installed CLI end to end
+.venv/bin/pip install ruff            # once; it is not part of the dev extra
+.venv/bin/ruff check .                # reads [tool.ruff] from pyproject.toml
 ```
 
-The lint job only enforces errors and undefined names (`F`, `E9`), so use
-that selection: ruff's default rule set is much wider and reports a large
-backlog that CI does not.
+The lint job only enforces errors and undefined names (`F`, `E9`) — that
+selection lives in `pyproject.toml`, so plain `ruff check .` matches CI
+exactly. Ruff's default rule set is much wider and reports a large backlog
+that CI does not.
+
+`tools/check_java.py` renders each template once per optional feature
+(`camera` bundled and not), so a template that only breaks in one variant
+still fails here instead of two minutes into a Gradle build.
+
+The packaging job needs a build first, and is only worth running when you
+touch `[tool.setuptools]`, package data or the templates:
+
+```bash
+.venv/bin/pip install build
+.venv/bin/python -m build && .venv/bin/python tools/check_wheel.py
+```
+
+It proves the wheel still ships `pydrud/android/templates/**` and that
+`pydrud create` works from an installed wheel — something the test suite
+cannot catch, because it imports from the source tree.
 
 A new project must also be green out of the box:
 
@@ -47,8 +69,12 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). In short: runtime code in
 * **Tests describe behaviour, not implementation.** Drive the app through
   `AppTester` by key and visible text where you can.
 * **Templates are code.** Changes under `pydrud/android/templates/android/`
-  must pass `tools/check_java.py`; changes under `.../python/` must leave
-  `pydrud create` + `pytest` green.
+  must pass `tools/check_java.py` in every feature variant; changes under
+  `.../python/` must leave `pydrud create` + `pytest` green.
+* **Heavy native dependencies are opt-in.** CameraX and ML Kit are gated
+  behind the `camera:` setting for a reason: they add ~10 MB to every APK.
+  A new library that ships native code needs the same treatment — a YAML
+  switch, a graceful path when it is off, and a test for both variants.
 * **Pydash and Chaquopy packaging are different.** Only the opt-in
   Chaquopy scaffold vendors the runtime into `src/pydrud/`; the default
   Pydash scaffold runs the installed package on the host. For the APK, CLI

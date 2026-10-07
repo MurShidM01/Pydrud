@@ -49,6 +49,9 @@ dev = [
     "pytest>=7.0",
     "javalang>=0.13",
     "watchdog>=3.0",
+    # Without fonttools the icon-generator drift test skips itself, so CI
+    # would quietly stop checking the committed Java against the generator.
+    "fonttools>=4.0",
 ]
 
 [project.urls]
@@ -70,4 +73,16 @@ include = ["pydrud*"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+# One place to change the lint gate; CI runs plain `ruff check .`.
+target-version = "py310"
+line-length = 100
+extend-exclude = ["build", "dist", "*.egg-info"]
+
+[tool.ruff.lint]
+# Errors and undefined names only. The suite is the contract for behaviour,
+# so Ruff stays a fast syntax/static-error gate rather than a style arbiter:
+# a growing rule set would turn unrelated refactors into CI failures.
+select = ["F", "E9"]
 
