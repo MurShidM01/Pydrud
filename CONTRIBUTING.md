@@ -12,8 +12,13 @@ python3 -m venv .venv
 ```bash
 .venv/bin/python -m pytest -q        # the whole suite, no emulator needed
 .venv/bin/python tools/check_java.py # parse + symbol-check every Java template
-.venv/bin/ruff check pydrud tests
+.venv/bin/pip install ruff           # once; it is not part of the dev extra
+.venv/bin/ruff check --select F,E9 pydrud tools tests   # exactly what CI lints
 ```
+
+The lint job only enforces errors and undefined names (`F`, `E9`), so use
+that selection: ruff's default rule set is much wider and reports a large
+backlog that CI does not.
 
 A new project must also be green out of the box:
 
