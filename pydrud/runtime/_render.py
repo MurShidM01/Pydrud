@@ -10,6 +10,7 @@ the desired / confirmed / in-flight UI states stay separate. Split out of
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from typing import Optional
 
 from pydrud.core.diff import TreeDiff
@@ -24,6 +25,24 @@ MAX_PATCHES = 60
 
 class RenderMixin:
     """Desired-tree diffing, snapshot streaming, theming and metrics."""
+
+
+    @contextmanager
+    def _rendering(self):
+        """Mark the render pipeline busy while a frame is prepared and sent.
+
+        ``_render_pending`` only covers a render *queued* behind an in-flight
+        frame. Diffing and encoding one takes real time (and hot restart can
+        run it off the UI thread), so this is what keeps "the pipeline is
+        idle" an honest signal for the test harness and diagnostics (IC-002).
+        """
+        with self._render_gate:
+            self._render_in_progress += 1
+        try:
+            yield
+        finally:
+            with self._render_gate:
+                self._render_in_progress -= 1
 
 
     def update(self):
@@ -46,6 +65,10 @@ class RenderMixin:
         failure is rolled back, reported loudly, and an oversized snapshot is
         split into a sequence of frames that each fit (see
         :meth:`_plan_snapshot_frames`).
+
+        The call runs inside :meth:`_rendering`, so a consumer that watches
+        for an idle pipeline (the test harness, a diagnostics dump) never sees
+        "nothing rendering" while a frame is still being prepared (IC-002).
         """
         if not (self._connected and self._transport):
             return
@@ -56,6 +79,15 @@ class RenderMixin:
             return
         force_snapshot = force_snapshot or getattr(self, "_render_pending_force_snapshot", False)
         self._render_pending_force_snapshot = False
+        with self._rendering():
+            # This call renders the latest desired tree, so it serves every
+            # render queued so far; one queued *during* the call survives and
+            # is picked up by the next acknowledgement.
+            self._render_pending = False
+            self._send_desired_tree_now(force_snapshot=force_snapshot)
+
+    def _send_desired_tree_now(self, *, force_snapshot: bool) -> None:
+        """Prepare and hand over at most one frame for the current tree."""
         desired = self._desired_tree
         if desired is None:
             return
@@ -160,8 +192,10 @@ class RenderMixin:
         payload, kind = self._outbox.pop(0)
         is_last = not self._outbox
         tree = self._outbox_final_tree if is_last else None
-        if not self._send_payload(payload, kind, self._confirmed_revision,
-                                  snapshot_tree=tree):
+        with self._rendering():
+            sent = self._send_payload(payload, kind, self._confirmed_revision,
+                                      snapshot_tree=tree)
+        if not sent:
             self._outbox.clear()
             self._outbox_final_tree = None
             self._report_error(FrameTooLargeError(
@@ -279,7 +313,9 @@ class RenderMixin:
                 self._flush_outbox()
                 return
             if self._render_pending:
-                self._render_pending = False
+                # The queued request is consumed *inside* the call, once the
+                # pipeline is already marked busy, so a watcher can never see
+                # "idle" in between (IC-002).
                 self._send_desired_tree()
             return
 
@@ -290,12 +326,13 @@ class RenderMixin:
         self._outbox.clear()
         self._outbox_final_tree = None
         desired = self._desired_tree
-        payload = {"tree": desired.to_dict()}
-        if self._send_payload(payload, "snapshot", self._confirmed_revision,
-                              snapshot_tree=desired.clone()):
-            return
-        if self._send_chunked_snapshot(desired, self._confirmed_revision):
-            return
+        with self._rendering():
+            payload = {"tree": desired.to_dict()}
+            if self._send_payload(payload, "snapshot", self._confirmed_revision,
+                                  snapshot_tree=desired.clone()):
+                return
+            if self._send_chunked_snapshot(desired, self._confirmed_revision):
+                return
         self._report_error(FrameTooLargeError(
             "render recovery frame exceeds the maximum size of "
             f"{MAX_FRAME_BYTES} bytes"))

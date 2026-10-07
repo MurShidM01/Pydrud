@@ -111,6 +111,12 @@ class App(RenderMixin, BridgeMixin, LifecycleMixin, HotReloadMixin):
         self._outbox_final_tree: Optional[Widget] = None
         self._render_pending = False
         self._render_pending_force_snapshot = False
+        #: Frames currently being diffed, encoded or handed to the transport.
+        #: ``_render_pending`` covers a render *queued* behind an in-flight
+        #: frame; this covers the work of sending one, so "the pipeline is
+        #: idle" stays honest for the test harness and diagnostics (IC-002).
+        self._render_in_progress = 0
+        self._render_gate = threading.Lock()
         # ``None`` means no renderer has negotiated capabilities yet. An
         # empty mapping after handshake means optional services are absent.
         self._native_capabilities: Optional[dict] = None

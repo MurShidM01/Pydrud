@@ -546,8 +546,53 @@ class FakeRenderer:
 FakeDevice = FakeRenderer
 
 
+def _rendering_in_progress(app) -> bool:
+    """True while the app is diffing, encoding or sending a frame."""
+    return bool(getattr(app, "_render_in_progress", 0))
+
+
+def _render_converged(app) -> bool:
+    """True when the renderer has acknowledged every frame the app queued.
+
+    A native ACK is the only thing that advances the confirmed revision, so
+    ``desired == confirmed`` with nothing in flight means the device's tree
+    *is* the app's latest tree. A frame being prepared counts as *not*
+    converged: it is still owed to the device.
+    """
+    desired = getattr(app, "_desired_revision", 0) or 0
+    return (
+        desired > 0
+        and not getattr(app, "_inflight", None)
+        and not getattr(app, "_render_pending", False)
+        and not _rendering_in_progress(app)
+        and (getattr(app, "_confirmed_revision", 0) or 0) == desired
+    )
+
+
+def wait_for_render_convergence(app, device: FakeRenderer,
+                                timeout: float = 5.0) -> bool:
+    """Wait until *device* has applied every frame *app* has queued so far.
+
+    Startup is not finished when the socket is up. The ``ready`` handshake
+    makes the app send an initial snapshot so the screen is never blank,
+    then a metrics-driven follow-up once it knows the real window size; that
+    second frame is deferred until the first one is acknowledged. A harness
+    (or a test) that looks at the tree, or at ``device.full_renders``, before
+    the follow-up lands is reading a half-started app — and a tap handled in
+    that window gets coalesced into the pending forced snapshot instead of
+    being patched in (IC-002).
+    """
+    return device.wait_for(
+        lambda d: d.root is not None and _render_converged(app), timeout)
+
+
 def run_app(app, device: FakeRenderer) -> threading.Thread:
-    """Run ``app.run()`` on a background thread connected to *device*."""
+    """Run ``app.run()`` on a background thread connected to *device*.
+
+    Returns only once the app is connected *and* its startup render sequence
+    has reached the device, so a test may immediately assert on what is on
+    screen — and count renders from there — without racing the second frame.
+    """
     app.host = device.host
     app.port = device.port
     # The reference renderer exercises only the neutral bridge contract; it
@@ -562,6 +607,12 @@ def run_app(app, device: FakeRenderer) -> threading.Thread:
     thread.start()
     if not device.wait_connected(timeout=5):
         raise AssertionError("app never connected to the fake device")
+    if not wait_for_render_convergence(app, device, timeout=5):
+        raise AssertionError(
+            "the app connected but its startup render never reached the "
+            f"device (desired={getattr(app, '_desired_revision', 0)}, "
+            f"confirmed={getattr(app, '_confirmed_revision', 0)}, "
+            f"inflight={len(getattr(app, '_inflight', None) or {})})")
     return thread
 
 
@@ -714,6 +765,7 @@ class AppTester:
             getattr(app, "_confirmed_revision", 0),
             getattr(app, "_desired_revision", 0),
             bool(getattr(app, "_render_pending", False)),
+            _rendering_in_progress(app),
             bool(getattr(app, "_inflight", None)),
         )
 
@@ -733,8 +785,12 @@ class AppTester:
             return False
         # A handler may have requested a render that the device has not
         # applied yet; waiting for it is what makes `prop()` reliable
-        # immediately after `tap()`.
+        # immediately after `tap()`. A frame being prepared counts too: the
+        # queued-render flag is consumed at the start of that work, so this
+        # is the only thing standing between a poll and the middle of a
+        # render (IC-002).
         return not getattr(app, "_render_pending", False) \
+            and not _rendering_in_progress(app) \
             and not getattr(app, "_inflight", None)
 
     # ── assertions / queries ─────────────────────────────────────────────
