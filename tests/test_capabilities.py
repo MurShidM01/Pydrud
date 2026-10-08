@@ -88,3 +88,57 @@ def test_native_view_requires_explicit_capability_even_with_widget_catalogue():
     )
     assert widget_supported({"native_view": True}, "NativeView")
     assert widget_supported({}, "Text")
+
+
+def test_composite_widgets_are_checked_by_their_rendered_type():
+    """Scaffold/AppBar/FAB serialise as Stack/Row/Container.
+
+    Regression: the capability check used the Python ``_widget_type``, so a
+    supported ``Scaffold`` was mistaken for an unsupported widget and the
+    whole screen collapsed to a single ``Text`` placeholder.
+    """
+    from pydrud import AppBar, Column, FloatingActionButton, Scaffold
+    from pydrud.runtime._capabilities import replace_unsupported_widgets
+
+    capabilities = {
+        "widget_types": ["Stack", "Column", "Row", "Container", "Text", "Icon"],
+    }
+    tree = Scaffold(
+        key="screen",
+        app_bar=AppBar(title="Demo", key="bar"),
+        body=Column(key="body", children=[Text("hello", key="greeting")]),
+        floating_action_button=FloatingActionButton(key="add", icon="plus"),
+    )
+
+    assert tree.render_type() == "Stack"
+    result = replace_unsupported_widgets(tree, capabilities)
+    assert result is tree
+    assert result.find_by_key("greeting") is not None
+    assert result.find_by_key("add").render_type() == "Container"
+    assert "Unsupported widget" not in result.to_json()
+
+
+def test_unsupported_widget_inside_composite_is_replaced_and_survives_serialisation():
+    from pydrud import Column, Scaffold, WebView
+    from pydrud.runtime._capabilities import replace_unsupported_widgets
+
+    capabilities = {"widget_types": ["Stack", "Column", "Container", "Text"]}
+    tree = Scaffold(
+        key="screen",
+        body=Column(key="body", children=[
+            Text("ok", key="keep"),
+            WebView("https://example.com", key="web"),
+        ]),
+    )
+    replace_unsupported_widgets(tree, capabilities)
+
+    def collect(node, out):
+        out.append((node["type"], node["key"]))
+        for child in node.get("children", []):
+            collect(child, out)
+
+    wire: list[tuple[str, str]] = []
+    collect(tree.to_dict(), wire)
+    assert ("Text", "web") in wire
+    assert ("WebView", "web") not in wire
+    assert ("Text", "keep") in wire

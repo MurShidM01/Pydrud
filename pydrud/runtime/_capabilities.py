@@ -218,16 +218,24 @@ def replace_unsupported_widgets(
     The tree is a fresh build, so replacing its children is safe. Stable keys
     are retained, keeping render reconciliation deterministic. A warning is
     emitted once per unsupported widget type for the host process.
+
+    The comparison uses :meth:`Widget.render_type` — the type each node
+    actually serialises to — not the Python ``_widget_type``. Composite
+    widgets (``Scaffold``, ``AppBar``, ``Flex`` …) render as an internal
+    layout node, and ``FloatingActionButton`` renders as a ``Container``;
+    testing ``_widget_type`` would wrongly replace a supported composite with
+    a placeholder.
     """
-    if widget_supported(capabilities, root._widget_type):
+    if widget_supported(capabilities, root.render_type()):
         stack = [root]
         while stack:
             parent = stack.pop()
             children: list[Widget] = []
             for child in parent.children:
-                if not widget_supported(capabilities, child._widget_type):
+                rendered = child.render_type()
+                if not widget_supported(capabilities, rendered):
                     children.append(_placeholder(child))
-                    _warn_unsupported(child._widget_type)
+                    _warn_unsupported(rendered)
                 else:
                     children.append(child)
                     stack.append(child)
@@ -235,7 +243,7 @@ def replace_unsupported_widgets(
         return root
 
     placeholder = _placeholder(root)
-    _warn_unsupported(root._widget_type)
+    _warn_unsupported(root.render_type())
     return placeholder
 
 

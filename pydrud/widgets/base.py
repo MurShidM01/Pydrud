@@ -302,6 +302,20 @@ class Widget:
         """
         return self
 
+    def render_type(self) -> str:
+        """The native widget type this node serialises to on the wire.
+
+        Composite widgets render as an internal layout node
+        (``Scaffold`` → ``Stack``, ``AppBar`` → its built node), and a few
+        widgets serialise under a different type than their Python class
+        (``FloatingActionButton`` → ``Container``). Capability checks must
+        compare the type the renderer actually receives — not
+        ``_widget_type`` — or a supported composite is mistaken for an
+        unsupported one and swapped for a placeholder.
+        """
+        node = self.unwrap()
+        return self._widget_type if node is self else node.render_type()
+
     def clone(self) -> "Widget":
         """Deep-copy this widget subtree.
 
