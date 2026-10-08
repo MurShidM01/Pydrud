@@ -1,0 +1,61 @@
+package {{ package }};
+
+import android.content.Context;
+import android.util.Log;
+
+/**
+ * The host backend — Python runs on the developer's machine, not the device.
+ *
+ * The APK carries no interpreter; the bridge dials out to a Python process
+ * started with {@code pydrud dev --bridge} and draws the trees it receives.
+ * Use it to run your real Python app without embedding Chaquopy — over an
+ * {@code adb reverse} forward or a LAN address. Unlike the Chaquopy backend
+ * there is nothing to boot here: {@link #start} only records that this
+ * backend is active, and {@link BridgeService} owns the reconnect loop.
+ */
+public class HostRuntime implements PythonRuntime {
+
+    private static final String TAG = "PydrudRuntime";
+
+    private volatile boolean ready = false;
+
+    @Override
+    public String id() {
+        return "host";
+    }
+
+    @Override
+    public void start(Context context) {
+        // No on-device interpreter: Python lives on the host. The bridge
+        // dials PydrudRuntimeConfig.REMOTE_HOST:REMOTE_PORT.
+        ready = true;
+        Log.i(TAG, "Host runtime active — expecting Python at "
+                   + PydrudRuntimeConfig.REMOTE_HOST + ":"
+                   + PydrudRuntimeConfig.REMOTE_PORT);
+    }
+
+    @Override
+    public boolean isReady() {
+        return ready;
+    }
+
+    @Override
+    public void startApp(String moduleName) {
+        // The host runs the app itself; the device only renders it.
+        Log.i(TAG, "Host runtime: " + moduleName + " is started on the host");
+    }
+
+    @Override
+    public String callBackgroundJob(String moduleName, String job,
+                                    String inputsJson) {
+        // Background jobs need an on-device interpreter; there is none here.
+        Log.w(TAG, "Background job '" + job + "' ignored: the host runtime has "
+                   + "no on-device interpreter.");
+        return "{\"error\": \"background jobs require an on-device runtime\"}";
+    }
+
+    @Override
+    public void shutdown() {
+        ready = false;
+    }
+}

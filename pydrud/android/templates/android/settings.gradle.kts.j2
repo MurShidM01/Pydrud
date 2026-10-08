@@ -3,7 +3,7 @@ pluginManagement {
         google()
         mavenCentral()
         gradlePluginPortal()
-{% if standalone | default(true) %}
+{% if (runtime_backend | default('chaquopy')) == 'chaquopy' %}
         maven { setUrl("https://chaquo.com/maven") }
 {% endif %}
     }
@@ -14,7 +14,7 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-{% if standalone | default(true) %}
+{% if (runtime_backend | default('chaquopy')) == 'chaquopy' %}
         maven { setUrl("https://chaquo.com/maven") }
 {% endif %}
     }

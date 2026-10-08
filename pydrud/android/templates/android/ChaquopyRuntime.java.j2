@@ -1,0 +1,88 @@
+package {{ package }};
+
+import android.content.Context;
+import android.util.Log;
+
+import com.chaquo.python.PyObject;
+import com.chaquo.python.Python;
+import com.chaquo.python.android.AndroidPlatform;
+
+/**
+ * The Chaquopy backend — a CPython interpreter embedded in the APK.
+ *
+ * This is the default Android backend and the only file in the generated
+ * project that depends on Chaquopy. Swapping it out (for the host or none
+ * backend) leaves the renderer untouched.
+ */
+public class ChaquopyRuntime implements PythonRuntime {
+
+    private static final String TAG = "PydrudRuntime";
+
+    private volatile boolean ready = false;
+
+    @Override
+    public String id() {
+        return "chaquopy";
+    }
+
+    @Override
+    public void start(Context context) {
+        // Chaquopy extracts the bundled sources into a cache directory; after
+        // an upgrade a stale cache shadows the newly bundled code, so clear it
+        // before the interpreter looks at it.
+        try {
+            java.io.File cacheDir = new java.io.File(
+                context.getFilesDir(), "chaquopy/AssetFinder/app");
+            if (cacheDir.exists()) {
+                deleteDir(cacheDir);
+            }
+        } catch (Throwable ignored) {
+            // A missing or unreadable cache is not fatal — Chaquopy rebuilds it.
+        }
+
+        if (!Python.isStarted()) {
+            Python.start(new AndroidPlatform(context));
+        }
+        ready = true;
+        Log.i(TAG, "Python interpreter started (chaquopy)");
+    }
+
+    @Override
+    public boolean isReady() {
+        return ready;
+    }
+
+    @Override
+    public void startApp(String moduleName) {
+        Log.i(TAG, "Invoking Python " + moduleName + ".start_app()");
+        PyObject module = Python.getInstance().getModule(moduleName);
+        module.callAttr("start_app");
+    }
+
+    @Override
+    public String callBackgroundJob(String moduleName, String job,
+                                    String inputsJson) {
+        PyObject module = Python.getInstance().getModule(moduleName);
+        PyObject result = module.callAttr("run_background_job", job,
+                                          inputsJson == null ? "{}" : inputsJson);
+        return result == null ? "" : result.toString();
+    }
+
+    @Override
+    public void shutdown() {
+        ready = false;
+    }
+
+    private static void deleteDir(java.io.File file) {
+        if (file == null || !file.exists()) return;
+        if (file.isDirectory()) {
+            java.io.File[] children = file.listFiles();
+            if (children != null) {
+                for (java.io.File child : children) {
+                    deleteDir(child);
+                }
+            }
+        }
+        file.delete();
+    }
+}

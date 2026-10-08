@@ -1,0 +1,49 @@
+package {{ package }};
+
+import android.content.Context;
+import android.util.Log;
+
+/**
+ * The none backend — no Python at all.
+ *
+ * The generated APK is a pure native renderer: it builds whatever widget
+ * tree it is handed and forwards events, but there is no interpreter and no
+ * outbound connection. It is useful when the Python side is supplied
+ * externally (a test harness, another process, or a future platform
+ * backend) and as the smallest possible starting point for a new renderer.
+ */
+public class NoRuntime implements PythonRuntime {
+
+    private static final String TAG = "PydrudRuntime";
+
+    @Override
+    public String id() {
+        return "none";
+    }
+
+    @Override
+    public void start(Context context) {
+        Log.i(TAG, "No runtime backend — the renderer is waiting for a client.");
+    }
+
+    @Override
+    public boolean isReady() {
+        return false;
+    }
+
+    @Override
+    public void startApp(String moduleName) {
+        // Nothing to start.
+    }
+
+    @Override
+    public String callBackgroundJob(String moduleName, String job,
+                                    String inputsJson) {
+        Log.w(TAG, "Background job '" + job + "' ignored: no runtime backend.");
+        return "{\"error\": \"no runtime backend\"}";
+    }
+
+    @Override
+    public void shutdown() {
+    }
+}

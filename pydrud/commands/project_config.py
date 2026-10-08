@@ -188,7 +188,7 @@ def set_scalar(project_dir: str, key: str, value: object) -> None:
     Booleans render as ``true``/``false`` and numbers unquoted; anything
     else is double-quoted with :func:`quote_yaml`. Used by
     ``pydrud init android`` to record platform choices such as
-    ``standalone:`` without disturbing hand-written comments.
+    ``camera:`` without disturbing hand-written comments.
     """
     path = os.path.join(project_dir, "pydrud.yaml")
     if not os.path.isfile(path):

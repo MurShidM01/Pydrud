@@ -90,7 +90,7 @@ def _config_list(config: dict, key: str, default=()) -> list[str]:
 
 
 #: Valid runtime values and their defaults.
-_VALID_RUNTIMES = ("pydash", "chaquopy")
+_VALID_RUNTIMES = ("pydash", "chaquopy", "host", "none")
 
 
 def _config_runtime(config: dict, key: str = "runtime", default: str = "pydash") -> str:

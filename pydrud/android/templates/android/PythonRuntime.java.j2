@@ -1,0 +1,41 @@
+package {{ package }};
+
+import android.content.Context;
+
+/**
+ * The bridge between the generated native UI and your Python app.
+ *
+ * Pydrud can run a project's Python through different backends — an
+ * interpreter embedded in the APK (Chaquopy), a Python process on the
+ * developer's machine (host), or no interpreter at all (none) — while the
+ * renderer, the wire protocol and every widget stay exactly the same.
+ *
+ * {@link PydrudRuntimeFactory} chooses the backend at build time, so nothing
+ * else in the native layer ever refers to a concrete runtime. To add a new
+ * backend (iOS, desktop, web, …) implement this interface and teach the
+ * factory about it; no other generated file needs to change.
+ */
+public interface PythonRuntime {
+
+    /** Short identifier used in logs: {@code "chaquopy"}, {@code "host"} or
+     *  {@code "none"}. */
+    String id();
+
+    /** Boot the backend. Called once, off the UI thread. */
+    void start(Context context);
+
+    /** Whether the Python app is reachable right now. */
+    boolean isReady();
+
+    /** Run the app's entry point, e.g. {@code app.main.start_app()}. */
+    void startApp(String moduleName);
+
+    /**
+     * Run a background job scheduled with {@code page.background.schedule}.
+     * Returns the job's JSON result, or a diagnostic string on failure.
+     */
+    String callBackgroundJob(String moduleName, String job, String inputsJson);
+
+    /** Release anything the backend holds. Safe to call more than once. */
+    void shutdown();
+}

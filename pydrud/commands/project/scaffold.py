@@ -24,6 +24,11 @@ from pydrud.commands.project.paths import (
 from pydrud.commands.project.python_runtime import _detect_build_python
 from pydrud.commands.project.templates import _render_app_package, _render_native_layer
 
+#: The brand colour the generated starter app is designed around — the
+#: coral heart in the Heartbeat screen. Override with ``pydrud create
+#: --accent``; the value is recorded as ``[theme] seed`` in pydrud.toml.
+STARTER_ACCENT = "#FFE85D68"
+
 
 def create_project(
     name: str,
@@ -47,8 +52,7 @@ def create_project(
 
         pydash (default) — no Android directory; use ``pydrud dev`` for
             live preview in the Pydash client. Add ``android/`` later with
-            ``pydrud init android`` (preview shell) or
-            ``pydrud init android --standalone`` (offline APK).
+            ``pydrud init android`` (offline APK with embedded Python).
         chaquopy — full standalone Android project with embedded CPython;
             use ``pydrud run`` / ``pydrud build`` to produce an APK.
     """
@@ -83,11 +87,12 @@ def create_project(
     else:
         sdk_dir = python_exe = ndk_version = ""
 
-    from pydrud.widgets.theme import Colors as _Colors
-
-    seed_color = _normalise_color(accent) or _Colors.PRIMARY
-    # The focused counter starter uses no Android service APIs, so it needs
-    # no runtime capabilities or permissions out of the box. Apps can opt in
+    # The starter app is designed around this coral red; passing ``accent``
+    # re-brands it. The value is recorded as ``[theme] seed`` in pydrud.toml,
+    # so ``pydrud sync`` regenerates the native theme resources to match.
+    seed_color = _normalise_color(accent) or STARTER_ACCENT
+    # The Heartbeat starter uses no Android service APIs, so it needs no
+    # runtime capabilities or permissions out of the box. Apps can opt in
     # later with the capabilities/permissions commands when they need them.
     default_capabilities: list[str] = []
     starter_permissions: list[str] = []
@@ -143,7 +148,9 @@ def create_project(
         "camera": False,
         "runtime": chosen,
         # Direct ``--runtime chaquopy`` projects are always the standalone
-        # target: the activity boots ``app.main.start_app()`` on device.
+        # target: the activity boots ``app.main.start_app()`` on device. The
+        # backend id selects which PythonRuntime the Gradle/Java layer uses.
+        "runtime_backend": "chaquopy",
         "standalone": True,
         "python_entry": "app.main",
     }

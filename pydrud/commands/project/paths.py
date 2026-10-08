@@ -200,10 +200,19 @@ _JAVA_TEMPLATES = (
     "EventBinder", "NativeViewFactory", "ViewAnimator", "BuiltinViews",
     # MaterialViews collaborator (navigation family).
     "MaterialNavigationViews",
-    # Preview-mode client for `pydrud init android` (dormant in standalone
-    # builds, where the activity boots embedded Python instead).
-    "PreviewClient",
+    # Runtime backend selection — always generated. The concrete backend
+    # (ChaquopyRuntime / HostRuntime / NoRuntime) is written separately by
+    # ``_render_native_layer`` based on the project's runtime.
+    "PythonRuntime", "PydrudRuntimeFactory", "PydrudRuntimeConfig",
 )
+
+#: Concrete ``PythonRuntime`` implementations, keyed by backend id. Only the
+#: project's own backend is written to the generated project.
+_RUNTIME_BACKENDS = {
+    "chaquopy": "ChaquopyRuntime",
+    "host": "HostRuntime",
+    "none": "NoRuntime",
+}
 
 
 def _normalise_color(value: str | None) -> str | None:
@@ -262,6 +271,7 @@ _APP_MODULES = (
     ("python/app.py.j2",                     "__init__.py"),
     ("python/main.py.j2",                    "main.py"),
     ("python/app/config.py.j2",              "config.py"),
+    ("python/app/theme.py.j2",               "theme.py"),
     ("python/app/state.py.j2",               "state.py"),
     ("python/app/runtime.py.j2",             "runtime.py"),
     ("python/app/jobs.py.j2",                "jobs.py"),
@@ -271,8 +281,7 @@ _APP_MODULES = (
     ("python/app/components/__init__.py.j2", "components/__init__.py"),
     ("python/app/components/common.py.j2",   "components/common.py"),
     ("python/app/screens/__init__.py.j2",    "screens/__init__.py"),
-    ("python/app/screens/playground.py.j2",  "screens/playground.py"),
-    ("python/app/screens/details.py.j2",     "screens/details.py"),
+    ("python/app/screens/heartbeat.py.j2",   "screens/heartbeat.py"),
 )
 
 

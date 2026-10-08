@@ -20,7 +20,8 @@ from pydrud.commands.project.config import (
     _validate_package,
 )
 from pydrud.commands.project.paths import (
-    _camel, _JAVA_TEMPLATES, _normalise_color, _slugify, _version, _write_template,
+    _camel, _JAVA_TEMPLATES, _RUNTIME_BACKENDS, _normalise_color, _slugify,
+    _version, _write_template,
 )
 from pydrud.commands.project.templates import _render_managed_android
 
@@ -174,6 +175,12 @@ def _sync_context(project_dir: str, found: dict) -> dict:
         "version_name": version_name,
         "scheme": scheme,
         "app_links_host": _config_string(config, "app_links_host"),
+        # Host backend: the address the APK dials for its Python. Loopback by
+        # default, which 'pydrud dev --bridge' reaches through 'adb reverse'.
+        "preview_host": _config_string(
+            config, "preview_host", "127.0.0.1") or "127.0.0.1",
+        "preview_port": _config_int(
+            config, "preview_port", 8597, minimum=1),
         "cleartext_traffic": _config_bool(config, "cleartext_traffic", True),
         "abi_filters_list": abi_filters_list,
         "abi_filters": ", ".join(f'"{abi}"' for abi in abi_filters_list),
@@ -205,6 +212,9 @@ def _remove_generated_java(project_dir: str, found: dict) -> None:
     generated = {f"{name}.java" for name in _JAVA_TEMPLATES}
     generated.update({"PydrudMessagingService.java",
                       f"{found['app_name']}Activity.java"})
+    # Remove every concrete backend, not just the active one, so switching
+    # backends cannot leave a stale (and now unreferenced) implementation.
+    generated.update(f"{name}.java" for name in _RUNTIME_BACKENDS.values())
     for filename in generated:
         try:
             os.remove(os.path.join(old_dir, filename))
@@ -222,13 +232,13 @@ def _remove_generated_java(project_dir: str, found: dict) -> None:
 def _sync_generated_metadata(project_dir: str, ctx: dict) -> None:
     """Refresh generated non-app metadata without touching ``src/app``.
 
-    ``setup.py`` only exists for the standalone target (Chaquopy's pip
-    install step); preview shells run Python on the host and never need it.
+    ``setup.py`` is Chaquopy's pip install step, so it only exists for the
+    embedded-interpreter backend; host/none targets ship no Python source.
     """
     _write_template("python/pydrud_config.py.j2",
                     os.path.join(project_dir, "src", "pydrud_config.py"),
                     {**ctx, "runtime": "chaquopy"})
-    if ctx.get("standalone", True):
+    if ctx.get("runtime_backend", "chaquopy") == "chaquopy":
         _write_template("python/setup.py.j2",
                         os.path.join(project_dir, "setup.py"), ctx)
 
@@ -334,13 +344,10 @@ def sync_project(project_dir: str, *, update_runtime: bool = True) -> bool:
     Pydash projects have no Android layer, so this command is an informational
     no-op for them. ``sync`` refreshes an already-generated Android project;
     to create that target inside an existing project, run
-    ``pydrud init android`` (preview shell) or
-    ``pydrud init android --standalone`` (offline APK with embedded Python).
+    ``pydrud init android`` (offline APK with embedded Python).
     """
     # Local import: platforms.py builds on these sync helpers.
-    from pydrud.commands.project.platforms import (
-        android_is_standalone, android_python_entry,
-    )
+    from pydrud.commands.project.platforms import android_python_entry
 
     # Resolve runtime first so we can short-circuit for pydash projects.
     descriptor = resolve_runtime(project_dir)
@@ -366,13 +373,11 @@ def sync_project(project_dir: str, *, update_runtime: bool = True) -> bool:
     except (ProjectConfigError, ValueError) as exc:
         print(fail(f"Invalid pydrud.yaml: {exc}"))
         return False
-    standalone = android_is_standalone(project_dir)
-    ctx["standalone"] = standalone
+    ctx["standalone"] = True
+    ctx["runtime_backend"] = descriptor.backend
     entry = android_python_entry(project_dir)
-    if (standalone and entry == "app.main"
-            and not _main_defines_start_app(project_dir)):
-        # A pydash entry point has no start_app for the device to call
-        # (e.g. a preview shell flipped to standalone via YAML): the
+    if entry == "app.main" and not _main_defines_start_app(project_dir):
+        # A pydash entry point has no start_app for the device to call: the
         # managed adapter below boots it without touching user code.
         entry = "app.android_main"
     ctx["python_entry"] = entry
@@ -383,7 +388,7 @@ def sync_project(project_dir: str, *, update_runtime: bool = True) -> bool:
         subtitle="Applying pydrud.yaml to the generated Android project",
         details=(("Package", ctx["package"]), ("Pydrud", _version()),
                  ("Runtime", ctx["pydrud_runtime_version"]),
-                 ("Mode", "standalone" if standalone else "preview")),
+                 ("Mode", "standalone")),
     ))
 
     identity_changed = (found["package"] != ctx["package"]
@@ -392,30 +397,32 @@ def sync_project(project_dir: str, *, update_runtime: bool = True) -> bool:
     _render_managed_android(project_dir, ctx)
     _sync_generated_metadata(project_dir, ctx)
     _sync_toml_identity(project_dir, ctx)
-    if standalone:
-        # Managed standalone entry point (init-android projects only) and
-        # the background-jobs adapter, created when missing. Hand-written
-        # app code is never overwritten: jobs.py is only seeded, while
-        # android_main.py is regenerated because it is a managed file.
-        if ctx["python_entry"] == "app.android_main":
-            _write_template(
-                "python/app/android_main.py.j2",
-                os.path.join(project_dir, "src", "app", "android_main.py"),
-                ctx)
-        jobs_path = os.path.join(project_dir, "src", "app", "jobs.py")
-        if not os.path.isfile(jobs_path):
-            _write_template("python/app/jobs.py.j2", jobs_path, ctx)
+    # Managed standalone entry point (init-android projects only) and the
+    # background-jobs adapter, created when missing. Hand-written app code is
+    # never overwritten: jobs.py is only seeded, while android_main.py is
+    # regenerated because it is a managed file.
+    if ctx["python_entry"] == "app.android_main":
+        _write_template(
+            "python/app/android_main.py.j2",
+            os.path.join(project_dir, "src", "app", "android_main.py"),
+            ctx)
+    jobs_path = os.path.join(project_dir, "src", "app", "jobs.py")
+    if not os.path.isfile(jobs_path):
+        _write_template("python/app/jobs.py.j2", jobs_path, ctx)
     # Fill in any launcher icon files the project is missing (never
     # overwriting icons the user generated or replaced themselves).
     _copy_icon_resources(project_dir, overwrite=False)
 
-    count = len(_JAVA_TEMPLATES) + 1 + (1 if ctx["firebase"] else 0)
+    # Every _JAVA_TEMPLATES class, plus the app-named Activity and the one
+    # concrete runtime backend written for this project.
+    count = len(_JAVA_TEMPLATES) + 2 + (1 if ctx["firebase"] else 0)
     detail = "all Android configuration"
     if identity_changed:
         detail += " + package migration"
     print(info(f"Rewrote {count} Java classes + {detail}"))
 
-    if update_runtime and standalone:
+    if update_runtime and descriptor.backend == "chaquopy":
+        # Only an embedded interpreter imports the framework on device.
         _bundle_pydrud_source(project_dir)
 
     # Persist the resolved camera choice: the YAML always shows why the

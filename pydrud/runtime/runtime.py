@@ -1,11 +1,16 @@
 """
 Runtime selection for Pydrud projects.
 
-Pydrud supports two runtimes:
+Pydrud builds an Android app through a pluggable *runtime backend*:
 
 * ``pydash`` (default) — host-side development for a cross-platform preview
   client. It requires no Android build toolchain.
-* ``chaquopy`` (opt-in) — an Android-only standalone APK with embedded CPython.
+* ``chaquopy`` — a standalone APK with an embedded CPython interpreter
+  (Chaquopy, MIT-licensed). The default when the Android target is present.
+* ``host`` — a standalone APK with no interpreter: the native renderer dials
+  a Python process running on the developer's machine (``pydrud dev``).
+* ``none`` — a standalone APK that renders whatever tree it is handed and
+  holds no runtime of its own.
 
 A project's runtime is declared in ``pydrud.toml`` under ``runtime:``.
 New and otherwise unconfigured projects resolve to ``pydash``. For compatibility,
@@ -25,6 +30,8 @@ class Runtime(Enum):
 
     PYDASH = "pydash"
     CHAQUOPY = "chaquopy"
+    HOST = "host"
+    NONE = "none"
 
     @classmethod
     def resolve(cls, raw: object | None) -> "Runtime":
@@ -60,11 +67,26 @@ class RuntimeDescriptor:
     requires_android_toolchain: bool = False
 
     def __post_init__(self) -> None:
-        if self.runtime is Runtime.CHAQUOPY:
+        if self.runtime is not Runtime.PYDASH:
             object.__setattr__(self, "produces_binary", True)
             object.__setattr__(
                 self, "requires_android_toolchain", True
             )
+
+    @property
+    def backend(self) -> str:
+        """The generated Java backend id for this runtime.
+
+        Every non-pydash runtime produces the same native renderer and only
+        differs in which ``PythonRuntime`` implementation is compiled in, so
+        this is the single value the templates key off.
+        """
+        return {
+            Runtime.PYDASH: "pydash",
+            Runtime.CHAQUOPY: "chaquopy",
+            Runtime.HOST: "host",
+            Runtime.NONE: "none",
+        }[self.runtime]
 
     def assert_not_pydash(self, command: str) -> None:
         """Raise when *command* is not supported in pydash mode."""

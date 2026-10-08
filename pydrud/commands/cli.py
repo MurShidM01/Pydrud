@@ -122,16 +122,21 @@ def create(name, org, min_sdk, target_sdk, accent, runtime_):
 
 @main.command()
 @click.argument("platform", required=False, default=None)
-@click.option("--standalone", is_flag=True, default=False,
-              help="For android: embed Python with Chaquopy for a fully "
-                   "offline APK. Without it, a preview shell is generated "
-                   "that renders 'pydrud dev' over the LAN.")
-def init(platform, standalone):
+@click.option("--backend", default="chaquopy",
+              type=click.Choice(["chaquopy", "host", "none"],
+                                case_sensitive=False),
+              help="Android Python runtime backend. 'chaquopy' embeds CPython "
+                   "in the APK; 'host' runs Python on your machine; 'none' "
+                   "builds a renderer with no runtime.")
+def init(platform, backend):
     """Add a native platform to this project (``pydrud init android``).
 
-    Run inside a project created with ``pydrud create``. Only ``android``
-    is supported in this release; ios, linux, windows, web and macos are
-    reserved for future platforms.
+    ``android`` builds a standalone target. By default it embeds Python with
+    Chaquopy so the APK runs fully offline; pass ``--backend host`` (no
+    on-device interpreter) or ``--backend none`` (renderer only) to build
+    without Chaquopy. Run inside a project created with ``pydrud create``.
+    Only ``android`` is supported in this release; ios, linux, windows, web
+    and macos are reserved for future platforms.
     """
     from pydrud.commands.project import (
         FUTURE_PLATFORMS, SUPPORTED_PLATFORMS, init_platform,
@@ -167,10 +172,7 @@ def init(platform, standalone):
         sys.exit(1)
 
     root = _project_or_exit()
-    if standalone and platform != "android":
-        _show_error("--standalone only applies to the android platform.")
-        sys.exit(1)
-    if not init_platform(root, platform, standalone=standalone):
+    if not init_platform(root, platform, backend=backend.lower()):
         sys.exit(1)
 
 
@@ -203,7 +205,7 @@ def sync(no_runtime):
 @click.option("--no-interactive", is_flag=True, default=False, help="Disable interactive terminal shortcuts.")
 def run(device, debug, release, watch, no_interactive):
     """Build the APK, install, launch and start interactive Hot Reload on a connected device."""
-    _require_chaquopy("run")
+    _require_android_target("run")
     from pydrud.commands.builder import Builder
 
     if release and debug:
@@ -235,7 +237,7 @@ def build(debug, release, output):
     explicitly (handy in scripts and CI logs), or ``--release`` for a
     signed release APK.
     """
-    _require_chaquopy("build")
+    _require_android_target("build")
     from pydrud.commands.builder import Builder
 
     if release and debug:
@@ -265,7 +267,7 @@ def build(debug, release, output):
 @click.option("--device", default=None, help="Target device ID.")
 def clean(device):
     """Clean generated build artifacts."""
-    _require_chaquopy("clean")
+    _require_android_target("clean")
     from pydrud.commands.builder import Builder
 
     root = _find_project_root()
@@ -293,7 +295,19 @@ def clean(device):
     help="Address encoded in the QR code (useful for VPNs or multiple NICs).",
 )
 @click.option("--no-qr", is_flag=True, help="Print the connection URI without a QR code.")
-def dev(project_dir, host, port, connect_host, no_qr):
+@click.option(
+    "--bridge", is_flag=True,
+    help="Serve a host-backend APK over the device bridge instead of Pydash.",
+)
+@click.option(
+    "--device", default=None, metavar="SERIAL",
+    help="Device serial for 'adb reverse' (default: the only attached device).",
+)
+@click.option(
+    "--no-reverse", is_flag=True,
+    help="Skip the automatic 'adb reverse' port forward.",
+)
+def dev(project_dir, host, port, connect_host, no_qr, bridge, device, no_reverse):
     """Run project Python locally for a Pydash live UI preview."""
     requested = os.path.abspath(project_dir)
     root = requested
@@ -303,6 +317,25 @@ def dev(project_dir, host, port, connect_host, no_qr):
             raise click.ClickException(
                 f"Not a Pydrud project: {requested} (pydrud.yaml not found)")
         root = parent
+
+    if bridge:
+        from pydrud.commands.bridge import BridgeRunner
+
+        try:
+            BridgeRunner(
+                root,
+                host=host if host != "0.0.0.0" else "127.0.0.1",
+                port=port,
+                device=device,
+                reverse=not no_reverse,
+            ).run()
+        except click.ClickException:
+            raise
+        except (OSError, ValueError) as exc:
+            raise click.ClickException(
+                f"Could not start the device bridge: {exc}") from exc
+        return
+
     from pydrud.commands.preview import PreviewRunner
 
     try:
@@ -325,7 +358,7 @@ def dev(project_dir, host, port, connect_host, no_qr):
 @click.option("--no-interactive", is_flag=True, default=False, help="Disable interactive terminal shortcuts.")
 def watch(device, release, no_interactive):
     """Start the Chaquopy Android Hot Reload runner."""
-    _require_chaquopy("watch")
+    _require_android_target("watch")
     from pydrud.commands.builder import Builder
     from pydrud.commands.project import android_is_standalone
 
@@ -337,10 +370,9 @@ def watch(device, release, no_interactive):
 
     if not android_is_standalone(root):
         _show_error("'pydrud watch' pushes code to on-device Python, but "
-                    "this Android shell is a preview build without an "
-                    "embedded interpreter.",
-                    "Use 'pydrud dev' for live preview, or upgrade with "
-                    "'pydrud init android --standalone'.")
+                    "this Android target has no embedded interpreter.",
+                    "Run 'pydrud init android' (or 'pydrud sync') to "
+                    "generate the standalone shell.")
         sys.exit(1)
     builder = Builder(root)
     builder.run(device=device, release=release, watch=True, interactive=not no_interactive)
@@ -436,11 +468,15 @@ def _project_or_exit() -> str:
     return root
 
 
-def _require_chaquopy(command: str) -> None:
-    """Exit with a helpful message when *command* needs the Android target."""
+def _require_android_target(command: str) -> None:
+    """Exit with a helpful message when *command* needs the Android target.
+
+    Any non-pydash runtime (chaquopy, host, none) produces an Android app
+    binary, so this only rejects projects that have no Android target at all.
+    """
     from pydrud.runtime.runtime import resolve_runtime
     descriptor = resolve_runtime(_project_or_exit())
-    if descriptor.runtime is not Runtime.CHAQUOPY:
+    if descriptor.runtime is Runtime.PYDASH:
         if command in {"run", "build", "clean"}:
             message = (
                 f"'pydrud {command}' builds an Android app binary, but this "
@@ -448,31 +484,17 @@ def _require_chaquopy(command: str) -> None:
             )
         else:
             message = (
-                f"'pydrud {command}' requires the Android Chaquopy target; "
-                "this project runs in pydash mode and has no Android project."
+                f"'pydrud {command}' requires an Android target; this project "
+                "runs in pydash mode and has no Android project."
             )
         _show_error(
             message,
             hint=(
                 "Use 'pydrud dev' for live preview, or add the Android "
-                "platform with 'pydrud init android' ('--standalone' for a "
-                "chaquopy offline APK)."
+                "platform with 'pydrud init android'."
             ),
         )
         sys.exit(1)
-
-
-def _preview_shell(project_dir: str) -> bool:
-    """Whether *project_dir* has an Android shell without embedded Python."""
-    from pydrud.commands.project import (
-        android_is_standalone, android_platform_present,
-    )
-    from pydrud.runtime.runtime import Runtime, resolve_runtime
-
-    if resolve_runtime(project_dir).runtime is not Runtime.CHAQUOPY:
-        return False
-    return (android_platform_present(project_dir)
-            and not android_is_standalone(project_dir))
 
 
 def _resolve_pip_backend(project_dir: str):
@@ -521,16 +543,10 @@ def pip_add(packages, force, no_sync):
             f"{entry['description']}{warning}"))
 
     gradle_info = "—"
-    if runtime == "chaquopy" and not no_sync and _preview_shell(root):
-        gradle_info = "recorded; ships with standalone builds"
-        click.echo(tui.neutral_badge(
-            "Preview shell: recorded in pydrud.toml. Packages ship inside "
-            "the APK after 'pydrud init android --standalone'."))
-    elif runtime == "chaquopy" and not no_sync:
+    if runtime == "chaquopy" and not no_sync:
         result = backend.sync_gradle(root)
         if result.success:
-            import os.path as _osp
-            gradle_info = _osp.relpath(root, root)  # placeholder
+            gradle_info = "updated"
         else:
             click.echo(tui.warn_badge(result.message), err=True)
     elif runtime == "pydash":
@@ -564,10 +580,7 @@ def pip_remove(packages):
             removed += 1
         else:
             click.echo(tui.neutral_badge(name))
-    if runtime == "chaquopy" and _preview_shell(root):
-        click.echo(tui.neutral_badge(
-            "Preview shell: nothing to sync into Gradle."))
-    elif runtime == "chaquopy":
+    if runtime == "chaquopy":
         result = backend.sync_gradle(root)
         if not result.success:
             click.echo(tui.warn_badge(result.message), err=True)
@@ -662,14 +675,10 @@ def pip_sync():
 
     root = _project_or_exit()
     backend, runtime = _resolve_pip_backend(root)
-    if runtime == "pydash" or _preview_shell(root):
+    if runtime == "pydash":
         result = backend.sync_gradle(root)
-        subtitle = result.message
-        if runtime == "chaquopy":
-            subtitle = ("Preview shell: dependencies stay in pydrud.toml "
-                        "until 'pydrud init android --standalone'.")
         _show_header("pip sync", "Synchronize Python packages",
-                     subtitle,
+                     result.message,
                      details=(("Project", os.path.basename(root)),
                               ("Runtime", runtime)))
         return
@@ -700,7 +709,7 @@ def pip_sync():
 @click.option("--dname", default=None, help="X.500 distinguished name.")
 def keygen(alias, password, validity, dname):
     """Create an upload keystore and wire it into release builds."""
-    _require_chaquopy("keygen")
+    _require_android_target("keygen")
     from pydrud.commands.release import create_keystore
 
     root = _project_or_exit()
@@ -728,7 +737,7 @@ def icons(source, background):
     follows the app theme (see the generated themes.xml), not a surface
     for the launcher icon.
     """
-    _require_chaquopy("icons")
+    _require_android_target("icons")
     from pydrud.commands.release import generate_icons
 
     root = _project_or_exit()
@@ -753,7 +762,7 @@ def permissions():
 @click.argument("names", nargs=-1, required=True)
 def permissions_add(names):
     """Add permissions, e.g. ``pydrud permissions add camera location``."""
-    _require_chaquopy("permissions add")
+    _require_android_target("permissions add")
     from pydrud.commands.release import update_permissions
 
     root = _project_or_exit()
@@ -774,7 +783,7 @@ def permissions_add(names):
 @click.argument("names", nargs=-1, required=True)
 def permissions_remove(names):
     """Remove permissions from the manifest."""
-    _require_chaquopy("permissions remove")
+    _require_android_target("permissions remove")
     from pydrud.commands.release import update_permissions
 
     root = _project_or_exit()
@@ -833,7 +842,7 @@ def capabilities():
 @click.argument("names", nargs=-1, required=True)
 def capabilities_add(names):
     """Enable capabilities, e.g. ``pydrud capabilities add haptics``."""
-    _require_chaquopy("capabilities add")
+    _require_android_target("capabilities add")
     from pydrud.commands.release import update_capabilities
 
     root = _project_or_exit()
@@ -861,7 +870,7 @@ def capabilities_add(names):
 @click.argument("names", nargs=-1, required=True)
 def capabilities_remove(names):
     """Disable generated capabilities."""
-    _require_chaquopy("capabilities remove")
+    _require_android_target("capabilities remove")
     from pydrud.commands.release import update_capabilities
 
     root = _project_or_exit()

@@ -6,14 +6,12 @@ preview needs no native toolchain). Platforms are added afterwards, inside
 the project directory::
 
     cd my_app
-    pydrud init android               # preview shell, no Chaquopy needed
-    pydrud init android --standalone  # offline APK with embedded Python
+    pydrud init android   # standalone APK with embedded Python
 
-``android`` is the only platform in 2.1.0. The preview shell renders the
-same widget tree through the authenticated preview protocol (``pydrud dev``
-remains the development loop); ``--standalone`` additionally embeds CPython
-with Chaquopy so the APK runs fully offline. iOS, Linux, Windows, web and
-macOS are reserved names for future platforms.
+``android`` is the only platform in 2.1.0. It embeds CPython with Chaquopy
+so the APK runs the app fully offline; ``pydrud dev`` remains the desktop
+development loop. iOS, Linux, Windows, web and macOS are reserved names for
+future platforms.
 """
 
 from __future__ import annotations
@@ -55,24 +53,36 @@ def android_platform_present(project_dir: str) -> bool:
 
 
 def android_is_standalone(project_dir: str) -> bool:
-    """Whether the Android target embeds Python (Chaquopy) or is a preview shell.
+    """Whether the generated Android target carries a Pydrud runtime backend.
 
-    The explicit ``standalone:`` key in ``pydrud.yaml`` always wins. Projects
-    that predate the key keep their current shape: a Gradle file applying the
-    Chaquopy plugin stays standalone, anything else (including a missing
-    Android target) resolves to the legacy standalone default so existing
-    APK projects never lose their embedded runtime on ``sync``.
+    Pydrud always generates a standalone target — either an embedded
+    interpreter (Chaquopy) or, with the ``host``/``none`` backends, a native
+    renderer driven by ``PythonRuntime``. A project created by an older
+    release may still be a Chaquopy-free preview shell, so this reports the
+    on-disk shape and lets ``pydrud init android`` / ``pydrud sync`` upgrade
+    it in place. A missing Android target resolves to the legacy standalone
+    default so existing APK projects keep their embedded runtime.
     """
-    config = load_project_config(project_dir)
-    if "standalone" in config:
-        return str(config["standalone"]).strip().lower() in {
-            "1", "true", "yes", "on"}
     gradle = os.path.join(project_dir, "android", "app", "build.gradle.kts")
     try:
         with open(gradle, encoding="utf-8") as handle:
-            return "com.chaquo.python" in handle.read()
+            if "com.chaquo.python" in handle.read():
+                return True
     except OSError:
         return True
+    # No Chaquopy plugin — a host/none target is still standalone as long as
+    # it generated the runtime factory; a legacy preview shell has neither.
+    return _has_runtime_factory(project_dir)
+
+
+def _has_runtime_factory(project_dir: str) -> bool:
+    """Whether the generated Java layer contains ``PydrudRuntimeFactory``."""
+    java_root = os.path.join(
+        project_dir, "android", "app", "src", "main", "java")
+    for _root, _dirs, files in os.walk(java_root):
+        if "PydrudRuntimeFactory.java" in files:
+            return True
+    return False
 
 
 def android_python_entry(project_dir: str) -> str:
@@ -88,9 +98,14 @@ def android_python_entry(project_dir: str) -> str:
     return "app.main"
 
 
-def init_platform(project_dir: str, platform: str, *,
-                  standalone: bool = False) -> bool:
-    """Generate the native *platform* inside an existing Pydrud project."""
+def init_platform(project_dir: str, platform: str,
+                  backend: str = "chaquopy") -> bool:
+    """Generate the native *platform* inside an existing Pydrud project.
+
+    *backend* selects which ``PythonRuntime`` the generated Android target
+    compiles in: ``chaquopy`` (embedded CPython, the default), ``host``
+    (Python runs on the developer's machine) or ``none`` (renderer only).
+    """
     project_dir = os.path.abspath(project_dir)
     platform = str(platform or "").strip().lower()
     if platform not in SUPPORTED_PLATFORMS:
@@ -103,10 +118,10 @@ def init_platform(project_dir: str, platform: str, *,
             print(info("Supported: android. Planned: ios, linux, windows, "
                        "web, macos."))
         return False
-    return _init_android(project_dir, standalone=standalone)
+    return _init_android(project_dir, backend=backend)
 
 
-def _init_android(project_dir: str, *, standalone: bool) -> bool:
+def _init_android(project_dir: str, backend: str = "chaquopy") -> bool:
     """Create (or upgrade) ``android/`` from the project's YAML/TOML identity."""
     if not os.path.isfile(os.path.join(project_dir, "pydrud.yaml")):
         print(fail("Not inside a Pydrud project."))
@@ -124,24 +139,14 @@ def _init_android(project_dir: str, *, standalone: bool) -> bool:
         print(fail(f"Invalid pydrud.yaml: {exc}"))
         return False
 
+    if android_platform_present(project_dir) and android_is_standalone(project_dir):
+        print(tui.warn_badge(
+            "Android platform already exists. "
+            "Run 'pydrud sync' to refresh it from pydrud.yaml."))
+        return True
     if android_platform_present(project_dir):
-        current = android_is_standalone(project_dir)
-        if current == bool(standalone):
-            mode = "standalone (Chaquopy)" if current else "preview shell"
-            print(tui.warn_badge(
-                f"Android platform already exists as a {mode}. "
-                "Run 'pydrud sync' to refresh it from pydrud.yaml."))
-            return True
-        if current and not standalone:
-            # Never silently strip the embedded runtime from an existing
-            # standalone target; that downgrade is a deliberate YAML edit.
-            print(fail("Android platform already exists as a standalone "
-                       "(Chaquopy) target."))
-            print(info("Re-run with '--standalone' to keep it, or set "
-                       "'standalone: false' in pydrud.yaml and run "
-                       "'pydrud sync' to switch to the preview shell."))
-            return False
-        print(info("Upgrading the preview shell to a standalone target."))
+        print(info("Upgrading the Android target to the standalone "
+                   "(embedded Python) shape."))
 
     display_name = (str(config.get("app_name") or "").strip()
                     or _toml_section(project_dir, "app").get("name", "")
@@ -157,23 +162,29 @@ def _init_android(project_dir: str, *, standalone: bool) -> bool:
     except (ProjectConfigError, ValueError) as exc:
         print(fail(f"Invalid pydrud.yaml: {exc}"))
         return False
-    ctx["standalone"] = bool(standalone)
+    ctx["standalone"] = True
+    # The backend id drives which PythonRuntime the Gradle/Java layer compiles
+    # in; chaquopy embeds CPython, host/none do not.
+    ctx["runtime_backend"] = backend
     ctx["python_entry"] = "app.android_main"
-    if standalone:
-        # A fresh standalone target has no Gradle history to preserve, so
-        # probe the build interpreter now; preview shells need no Python.
+    if backend == "chaquopy":
+        # A fresh embedded target has no Gradle history to preserve, so probe
+        # the build interpreter now. Host/none targets embed no interpreter.
         ctx["python_executable"] = _detect_build_python(
             ctx.get("python_version") or "3.11")
 
-    subtitle = ("Standalone APK shell with embedded Python (Chaquopy)"
-                if standalone else
-                "Preview shell for 'pydrud dev' (no Chaquopy, no NDK needed)")
+    _BACKEND_LABELS = {
+        "chaquopy": "Standalone APK shell with embedded Python (Chaquopy)",
+        "host": "Native APK shell — Python runs on your machine (host)",
+        "none": "Native APK shell with no embedded runtime (renderer only)",
+    }
     print(tui.render_command_header(
         "init android",
         f"Adding Android to {ctx['project_name']}",
-        subtitle=subtitle,
+        subtitle=_BACKEND_LABELS.get(backend, _BACKEND_LABELS["chaquopy"]),
         details=(("Package", ctx["package"]),
-                 ("Mode", "standalone" if standalone else "preview"),
+                 ("Mode", "standalone"),
+                 ("Backend", backend),
                  ("Pydrud", _version())),
     ))
 
@@ -193,37 +204,36 @@ def _init_android(project_dir: str, *, standalone: bool) -> bool:
     _copy_icon_resources(project_dir, overwrite=False)
 
     _sync_generated_metadata(project_dir, ctx)
-    if standalone:
-        jobs_path = os.path.join(project_dir, "src", "app", "jobs.py")
-        if not os.path.isfile(jobs_path):
-            _write_template("python/app/jobs.py.j2", jobs_path, ctx)
-        _write_template(
-            "python/app/android_main.py.j2",
-            os.path.join(project_dir, "src", "app", "android_main.py"), ctx)
+    jobs_path = os.path.join(project_dir, "src", "app", "jobs.py")
+    if not os.path.isfile(jobs_path):
+        _write_template("python/app/jobs.py.j2", jobs_path, ctx)
+    _write_template(
+        "python/app/android_main.py.j2",
+        os.path.join(project_dir, "src", "app", "android_main.py"), ctx)
+    if backend == "chaquopy":
+        # Only an embedded interpreter imports the framework on device; a
+        # host/none build ships no Python source at all.
         _bundle_pydrud_source(project_dir)
     _sync_toml_identity(project_dir, ctx)
-    persist_runtime(project_dir, Runtime.CHAQUOPY)
-    set_scalar(project_dir, "standalone", bool(standalone))
+    persist_runtime(project_dir, Runtime(backend))
     # Record the camera choice so `camera:` is discoverable in pydrud.yaml
     # instead of being an undocumented default.
     set_scalar(project_dir, "camera", bool(ctx.get("camera", False)))
     _stamp_version(project_dir)
 
-    if standalone:
-        next_steps = (("pydrud run", "build, install and hot-reload"),
-                      ("pydrud build --release", "signed release APK"))
-        summary = "Standalone Android platform added"
-    else:
-        next_steps = (("pydrud dev", "start the preview server first"),
-                      ("pydrud run", "install the shell, then connect from the app"))
-        summary = "Android preview shell added"
+    runtime_summary = {
+        "chaquopy": "embedded (Chaquopy)",
+        "host": "host (Python on your machine)",
+        "none": "none (renderer only)",
+    }.get(backend, "embedded (Chaquopy)")
     print(tui.render_summary(
-        summary,
-        ((("Python", "embedded (Chaquopy)") if standalone
-          else ("Python", "host via 'pydrud dev'")),
+        "Standalone Android platform added",
+        (("Runtime", runtime_summary),
          ("Package", ctx["package"])),
     ))
-    print(tui.render_next_steps(next_steps))
+    print(tui.render_next_steps(
+        (("pydrud run", "build, install and hot-reload"),
+         ("pydrud build --release", "signed release APK"))))
     return True
 
 

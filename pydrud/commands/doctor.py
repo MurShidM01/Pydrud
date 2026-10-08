@@ -28,10 +28,6 @@ def run_doctor():
     project = _find_project(os.getcwd())
     runtime = (resolve_runtime(project).runtime if project else Runtime.PYDASH)
     android_target = runtime is Runtime.CHAQUOPY
-    standalone = True
-    if android_target and project:
-        from pydrud.commands.project import android_is_standalone
-        standalone = android_is_standalone(project)
     tui.safe_print(tui.render_command_header(
         "doctor",
         "Development environment",
@@ -41,8 +37,8 @@ def run_doctor():
         ),
         details=(("Python", sys.executable), ("Platform", sys.platform),
                  ("Runtime", runtime.value),
-                 ("Android", "standalone" if standalone else "preview")
-                 if android_target else ("Android", "—")),
+                 ("Android", "standalone") if android_target
+                 else ("Android", "—")),
     ))
     tui.safe_print(tui.render_section("Host"))
 
@@ -55,14 +51,8 @@ def run_doctor():
         tui.safe_print(tui.render_section("Android toolchain"))
         all_ok &= _check_java()
         all_ok &= _check_android_sdk()
-        if standalone:
-            all_ok &= _check_ndk()
-            all_ok &= _check_cmake()
-        else:
-            # Preview shells compile no native code and embed no
-            # interpreter: NDK and CMake are genuinely not needed.
-            _skip_check("Android NDK", "not required for preview shells")
-            _skip_check("CMake", "not required for preview shells")
+        all_ok &= _check_ndk()
+        all_ok &= _check_cmake()
         all_ok &= _check_gradle()
         all_ok &= _check_adb()
     else:
@@ -73,10 +63,7 @@ def run_doctor():
         tui.safe_print(tui.render_section("Project"))
         if android_target:
             # These checks apply only to a generated Android project.
-            if standalone:
-                all_ok &= _check_chaquopy(project)
-            else:
-                all_ok &= _check_preview_shell(project)
+            all_ok &= _check_chaquopy(project)
             all_ok &= _check_manifest_permissions(project)
         all_ok &= _check_project_shadowing(project)
 
@@ -270,35 +257,6 @@ def _check_chaquopy(project_dir: str) -> bool:
         configured = False
     _print_check("Chaquopy", "configured" if configured else "missing from Android Gradle", configured)
     return configured
-
-
-def _check_preview_shell(project_dir: str) -> bool:
-    """Verify a Chaquopy-free preview shell is complete and consistent."""
-    java_root = os.path.join(project_dir, "android", "app", "src", "main",
-                             "java")
-    client_found = False
-    if os.path.isdir(java_root):
-        for _root, _dirs, files in os.walk(java_root):
-            if "PreviewClient.java" in files:
-                client_found = True
-                break
-    gradle = os.path.join(project_dir, "android", "app", "build.gradle.kts")
-    try:
-        with open(gradle, encoding="utf-8") as handle:
-            chaquopy_free = "com.chaquo.python" not in handle.read()
-    except OSError:
-        chaquopy_free = False
-    ok_ = client_found and chaquopy_free
-    detail = ("preview client ready" if ok_ else
-              "run 'pydrud sync' to regenerate the preview shell")
-    _print_check("Preview shell", detail, ok_)
-    return ok_
-
-
-def _skip_check(name: str, detail: str) -> bool:
-    """Report a check that does not apply, without failing the run."""
-    tui.safe_print(tui.neutral_badge(f"{name:<20} {detail}"))
-    return True
 
 
 def _check_project_shadowing(project_dir: str) -> bool:

@@ -8,7 +8,8 @@ import os
 
 from pydrud.commands.project.config import _project_seed
 from pydrud.commands.project.paths import (
-    _APP_MODULES, _JAVA_TEMPLATES, _ensure_dir, _theme_colors, _write_template,
+    _APP_MODULES, _JAVA_TEMPLATES, _RUNTIME_BACKENDS, _ensure_dir,
+    _theme_colors, _write_template,
 )
 
 def _render_native_layer(project_dir: str, java_package_path: str, ctx: dict):
@@ -25,6 +26,14 @@ def _render_native_layer(project_dir: str, java_package_path: str, ctx: dict):
                     f"{java_dir}/{ctx['app_name']}Activity.java", ctx)
     for name in _JAVA_TEMPLATES:
         _write_template(f"android/{name}.java.j2", f"{java_dir}/{name}.java", ctx)
+
+    # The concrete runtime backend. Only one is ever generated, so a host/none
+    # project never compiles — or even contains — ChaquopyRuntime.
+    backend = _RUNTIME_BACKENDS.get(
+        ctx.get("runtime_backend", "chaquopy"), "ChaquopyRuntime")
+    _write_template(f"android/{backend}.java.j2",
+                    f"{java_dir}/{backend}.java", ctx)
+
     if ctx.get("firebase"):
         _write_template("android/PydrudMessagingService.java.j2",
                         f"{java_dir}/PydrudMessagingService.java", ctx)

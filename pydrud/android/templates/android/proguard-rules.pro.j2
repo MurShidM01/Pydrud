@@ -6,10 +6,26 @@
 # Python runtime and your .py sources are assets, so they are untouched —
 # use `pydrud build --release --abi arm64-v8a` to halve *that* half.
 
+{% if (runtime_backend | default('chaquopy')) == 'chaquopy' %}
 # ── Chaquopy / Python runtime ────────────────────────────────────────────
 -keep class com.chaquo.python.** { *; }
 -keep class org.jetbrains.annotations.** { *; }
 -dontwarn com.chaquo.python.**
+{% endif %}
+
+# ── Pydrud runtime backend ───────────────────────────────────────────────
+# PydrudRuntimeFactory constructs the active backend by name, so R8 must not
+# strip it or the interface it implements.
+-keep class {{ package }}.PydrudRuntimeFactory { *; }
+-keep class {{ package }}.PythonRuntime { *; }
+{% if (runtime_backend | default('chaquopy')) == 'chaquopy' %}
+-keep class {{ package }}.ChaquopyRuntime { *; }
+{% elif (runtime_backend | default('chaquopy')) == 'host' %}
+-keep class {{ package }}.HostRuntime { *; }
+-keep class {{ package }}.PydrudRuntimeConfig { *; }
+{% else %}
+-keep class {{ package }}.NoRuntime { *; }
+{% endif %}
 
 # Python calls into these by name through reflection, so they must keep
 # their exact names even when everything else is renamed.
