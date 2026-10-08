@@ -1,7 +1,7 @@
 """Tests for {{ project_name }}.
 
 ``AppTester`` boots the app against a protocol reference renderer, so these
-run without an emulator or platform build toolchain.
+run without an emulator or a platform build toolchain.
 """
 
 import os
@@ -14,50 +14,45 @@ sys.path.insert(0, os.path.join(
 from pydrud.testing import AppTester  # noqa: E402
 from app.main import main  # noqa: E402
 from app.runtime import router  # noqa: E402
-from app.state import counter  # noqa: E402
+from app.screens import heartbeat  # noqa: E402
+from app.state import bpm, running  # noqa: E402
 
 
 class TestApp(unittest.TestCase):
     def setUp(self):
-        counter.value = 0
+        running.value = False
+        bpm.value = 72
+        heartbeat._anim.update(started=0.0, next_beat=0.0, beat_at=-99.0,
+                               timer=None, page=None)
         router.reset()
         self.app = AppTester(main, title="{{ project_name }}").start()
 
     def tearDown(self):
         self.app.stop()
 
-    def test_counter_screen_is_the_default_experience(self):
+    def test_heartbeat_is_the_default_experience(self):
         self.assertTrue(self.app.shows("{{ project_name }}"))
-        self.assertTrue(self.app.shows("Count the things that matter."))
-        self.assertTrue(self.app.shows("A little progress, one tap at a time."))
-        self.assertEqual(self.app.prop("counter_value", "value"), "0")
-        self.assertTrue(self.app.prop("inc_btn", "_fab"))
-        for key in ("counter_panel", "counter_actions", "dec_btn",
-                    "reset_btn", "inc_btn"):
+        self.assertTrue(self.app.shows("Tap Start to begin"))
+        self.assertTrue(self.app.shows("Visual rhythm"))
+        self.assertEqual(self.app.prop("hb_number", "value"), "72")
+        for key in ("hb_topbar", "hb_visual", "hb_glow", "hb_ring_one",
+                    "hb_ring_two", "hb_heart", "hb_number", "hb_unit",
+                    "hb_message", "hb_ecg", "hb_transport",
+                    "hb_transport._icon", "hb_footnote"):
             with self.subTest(key=key):
                 self.assertTrue(self.app.exists(key))
-        self.assertFalse(self.app.exists("name_input"))
-        self.assertFalse(self.app.shows("Pydrud Native Playground"))
+        self.assertFalse(self.app.shows("Nowhere"))
 
-    def test_floating_action_button_increments_the_total(self):
-        self.app.tap("inc_btn")
-        self.assertEqual(self.app.prop("counter_value", "value"), "1")
-        self.app.tap("inc_btn")
-        self.assertEqual(self.app.prop("counter_value", "value"), "2")
-        self.assertEqual(self.app.prop("counter_unit", "value"), "counts")
+    def test_the_transport_button_starts_and_stops_the_rhythm(self):
+        self.app.tap("hb_transport")
+        self.assertTrue(self.app.shows("Rhythm is running"))
+        self.assertTrue(self.app.shows("Active"))
 
-    def test_decrement_and_reset_controls(self):
-        self.app.tap("inc_btn")
-        self.app.tap("inc_btn")
-        self.app.tap("dec_btn")
-        self.assertEqual(self.app.prop("counter_value", "value"), "1")
-        self.app.tap("reset_btn")
-        self.assertEqual(self.app.prop("counter_value", "value"), "0")
-        self.assertEqual(self.app.prop("counter_unit", "value"), "counts")
-        self.app.tap("dec_btn")
-        self.assertEqual(self.app.prop("counter_value", "value"), "0")
+        self.app.tap("hb_transport")
+        self.assertTrue(self.app.shows("Tap Start to begin"))
+        self.assertTrue(self.app.shows("Ready"))
 
-    def test_starter_stylesheet_and_responsive_layout(self):
+    def test_the_stylesheet_styles_the_screen(self):
         from pydrud.core.styles.parser import parse_pss
 
         pss = os.path.join(
@@ -68,16 +63,37 @@ class TestApp(unittest.TestCase):
         self.assertFalse([d for d in sheet.diagnostics if d.kind == "error"])
         self.assertGreater(len(sheet.rules), 10)
 
-        panel = self.app.node("counter_panel")
-        value = self.app.node("counter_value")
-        self.assertEqual(panel.style.get("borderRadius"), 28)
-        self.assertEqual(value.style.get("font", {}).get("size"), 76)
+        # Fixed shapes and type come from the stylesheet…
+        self.assertEqual(self.app.node("hb_glow").style.get("borderRadius"),
+                         999)
+        self.assertEqual(
+            self.app.node("hb_footnote").style.get("font", {}).get("size"), 9)
+        # …and the clamp()-driven sizes follow the live window.
+        self.assertEqual(self.app.node("hb_number").style["font"]["size"],
+                         heartbeat._layout()["number"])
 
-        # A wide window gets a centred, capped content column rather than a
-        # phone-width screen stretched edge-to-edge.
-        self.app.device.resize(1024, 768)
+    def test_the_reading_follows_the_window(self):
+        """The design sizes the reading with clamp(); a narrow window shrinks
+        it without a second layout."""
+        wide = heartbeat._layout()["number"]
+        self.app.device.resize(320, 640)
         self.app.settle()
-        self.assertEqual(self.app.node("counter_wrap").style.get("width"), 720)
+        narrow = self.app.node("hb_number").style["font"]["size"]
+        self.assertLess(narrow, wide)
+
+    def test_the_reading_clips_instead_of_ellipsising(self):
+        """A one-line reading must not flash a '…' while it re-styles."""
+        style = self.app.node("hb_number").style
+        self.assertEqual(style.get("maxLines"), 1)
+        self.assertEqual(style.get("overflow"), "clip")
+
+    def test_the_caption_and_button_clear_the_edges(self):
+        # The caption centres: no trailing padding to dodge the button.
+        self.assertNotIn("padding", self.app.node("hb_bottom").style)
+        # The button keeps safe-area handling on, so the renderer lifts it
+        # above the gesture bar rather than resting on it.
+        self.assertTrue(
+            self.app.node("hb_transport").style.get("safeAreaBottom", True))
 
 
 if __name__ == "__main__":

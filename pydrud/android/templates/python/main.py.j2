@@ -5,16 +5,13 @@ Run ``pydrud dev`` to execute this module locally and connect a Pydash client.
 The client receives renderer snapshots and patches; Python source stays here.
 """
 
-from pydrud import Theme
-
-from app.config import ACCENT
+from app import theme
 from app.runtime import refresh, router
-from app.screens import details_screen, playground_screen
+from app.screens import heartbeat_screen
 
-Theme.seed(ACCENT)
-router.define("playground", playground_screen)
-router.define("details", details_screen)
-router.initial("playground")
+theme.use_light()
+router.define("heartbeat", heartbeat_screen)
+router.initial("heartbeat")
 
 
 def main(page):
@@ -27,32 +24,32 @@ __all__ = ["main", "refresh", "router"]
 """
 {{ project_name }} — entry point.
 
-The starter opens to a focused, responsive counter app: a live total,
-accessible decrement/reset controls, and a floating action button. Its visual
-system lives in ``app/theme.pss`` and its reactive value lives in
-``app/state.py``. A details route is included as an optional example for
-future navigation.
+The starter opens to Heartbeat: one calm screen with a softly pulsing
+heart, a live BPM reading, a tiny ECG trace and one compact transport
+button. Its visual system lives in ``app/theme.py`` and ``app/theme.pss``;
+its reactive values live in ``app/state.py``.
 
-Edit the screen or stylesheet, then run ``pydrud run`` for interactive
+Edit the screen or the stylesheet, then run ``pydrud run`` for interactive
 Flutter-style hot reload (press ``r`` for hot reload, ``R`` for hot restart).
 """
 
 import os
 
-from pydrud import App, Theme
+from pydrud import App
 
-from app.config import ACCENT, APP_NAME
+from app import theme
+from app.config import APP_NAME
 from app.jobs import JOBS, job, run_background_job   # noqa: F401 (Java entry)
 from app.runtime import bind, current, refresh, router
-from app.screens import details_screen, playground_screen
+from app.screens import heartbeat_screen
+from app.screens.heartbeat import pause
 
-Theme.seed(ACCENT)
+theme.use_light()
 
 # ── Routes ──────────────────────────────────────────────────────────────────
 
-router.define("playground", playground_screen)
-router.define("details", details_screen)
-router.initial("playground")
+router.define("heartbeat", heartbeat_screen)
+router.initial("heartbeat")
 
 
 def main(page):
@@ -68,12 +65,15 @@ def start_app():
         stylesheet=os.path.join(os.path.dirname(__file__), "theme.pss"),
     ))
     app.attach_router(router)
-    # Deep links ({{ scheme }}://details), launcher shortcuts and push
+    # A 60 fps loop has no business running behind the home screen, so the
+    # rhythm stops with the app and waits to be started again.
+    app.on_lifecycle("pause", lambda _data: pause())
+    # Deep links ({{ scheme }}://heartbeat), launcher shortcuts and push
     # notification taps all arrive here and are routed automatically.
     app.on_deep_link(lambda url: print(f"[{APP_NAME}] link:", url))
     app.run()
 
 
-__all__ = ["JOBS", "bind", "current", "job", "main", "refresh", "router",
-           "run_background_job", "start_app"]
+__all__ = ["JOBS", "bind", "current", "job", "main", "pause", "refresh",
+           "router", "run_background_job", "start_app"]
 {% endif %}

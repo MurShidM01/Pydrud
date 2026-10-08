@@ -1,0 +1,517 @@
+"""Heartbeat — the screen the starter opens to.
+
+One screen, one idea: a heart that beats. Everything you see is an ordinary
+Pydrud widget — the soft pulse field, the two rings, the beating heart, the
+live BPM reading, the tiny ECG trace and the one floating action button.
+
+The motion comes from a single frame loop. ``heartbeat_screen`` is re-run on
+every frame and reads a clock, so each widget is built already at the right
+phase and the diff engine sends only what actually moved. When the rhythm is
+stopped the loop is cancelled and the screen is completely still — no idle
+timer, no battery cost.
+
+Tap the button to start; the rate drifts between 68 and 78 BPM, the way a
+resting heart does.
+
+Sizes are responsive: the design expresses them as CSS ``clamp()`` rules, and
+:func:`_layout` reproduces those from the live window metrics that
+:class:`~pydrud.MediaQuery` reports — so the same screen adapts from a 320 dp
+phone to a foldable without a second layout.
+"""
+
+from __future__ import annotations
+
+import random
+import time
+
+from pydrud import (
+    Canvas, Column, Container, FloatingActionButton, Icon, Icons, MediaQuery,
+    Path, Row, Scaffold, Stack, Text, Theme,
+)
+
+from app import state, theme
+from app.components import footnote, session_chip
+from app.config import APP_NAME, BPM_MAX, BPM_MIN, FOOTNOTE
+from app.state import bpm, message, running, status
+
+# ── Motion, straight from the design ────────────────────────────────────
+#
+# Every number below is seconds or device-independent pixels — the same
+# values the reference design animates with. Change one and the loop follows.
+
+FRAME = 1.0 / 60        # the animation tick
+GLOW_PERIOD = 1.12
+RING_PERIOD = 1.12
+RING_TWO_DELAY = 0.37
+BEAT_PERIOD = 0.84
+ECG_PERIOD = 1.68
+ECG_STRIP = 320.0       # the trace is 320 dp long…
+ECG_WINDOW = 160.0      # …and scrolls one 160 dp complex per cycle
+POP_SECONDS = 0.16
+FLASH_SECONDS = 0.55
+
+#: The pulse field — a soft disc that swells and fades.
+_GLOW = ((0.0, {"opacity": 0.18, "scale": 0.78}),
+         (0.45, {"opacity": 0.10, "scale": 1.22}),
+         (1.0, {"opacity": 0.0, "scale": 1.70}))
+
+#: One ring, echoed by a second one a third of a second behind it.
+_RING = ((0.0, {"opacity": 0.42, "scale": 0.68}),
+         (1.0, {"opacity": 0.0, "scale": 1.65}))
+
+#: Lub-dub. Two quick squeezes, then a long rest.
+_BEAT = ((0.0, {"scale": 1.0}), (0.09, {"scale": 1.10}),
+         (0.16, {"scale": 1.0}), (0.24, {"scale": 1.055}),
+         (0.34, {"scale": 1.0}), (1.0, {"scale": 1.0}))
+
+#: A short squeeze of the reading on every beat.
+_POP = ((0.0, {"scale": 1.0}), (0.5, {"scale": 1.035}),
+        (1.0, {"scale": 1.0}))
+
+#: The translucent disc that flashes out from the centre on every beat.
+_FLASH = ((0.0, {"opacity": 0.75, "scale": 0.55}),
+          (1.0, {"opacity": 0.0, "scale": 1.35}))
+
+#: What every widget settles back to when the rhythm is stopped. These are
+#: the design's *resting* declarations (``.glow{transform:scale(.8)}``, the
+#: rings carry no transform, ``.flash{transform:…scale(.55)}``) — not the
+#: first keyframe, which only applies while an animation is running.
+_RESTING = {
+    "glow_opacity": 0.0, "glow_scale": 0.80,
+    "ring_one_opacity": 0.0, "ring_one_scale": 1.0,
+    "ring_two_opacity": 0.0, "ring_two_scale": 1.0,
+    "heart_scale": 1.0, "number_scale": 1.0,
+    "flash_opacity": 0.0, "flash_scale": 0.55,
+    "ecg_offset": 0.0,
+}
+
+#: The animation clock. Module-level so it survives the rebuild that happens
+#: on every frame — ``heartbeat_screen`` runs again from scratch each time.
+_anim = {
+    "started": 0.0,      # monotonic time of the last Start
+    "next_beat": 0.0,    # when the next BPM step is due
+    "beat_at": -99.0,    # when the last BPM step happened
+    "timer": None,       # the running frame timer, or None
+    "page": None,        # the page the loop is painting
+}
+
+#: The ECG trace: two identical 160 dp complexes with a flat gap between
+#: them, so sliding the 320 dp strip through a 160 dp window reads as a
+#: repeating trace. Built once; the painter only moves it.
+#:
+#: Each subpath starts *on* its first point, so the lead-in flat run
+#: (``M0 13 H28`` in the design) is drawn rather than skipped — ``polyline``
+#: moves to its first point, so that point has to be in the list.
+_ECG = (Path()
+        .polyline([(0, 13), (28, 13), (35, 13), (39, 11), (42, 15), (46, 13),
+                   (76, 13), (82, 13), (87, 13), (91, 5), (95, 20),
+                   (100, 13), (133, 13)])
+        .polyline([(160, 13), (188, 13), (195, 13), (199, 11), (202, 15),
+                   (206, 13), (236, 13), (242, 13), (247, 13), (251, 5),
+                   (255, 20), (260, 13), (293, 13), (300, 13), (304, 13),
+                   (320, 13)]))
+
+
+# ── the layout ──────────────────────────────────────────────────────────
+
+def _clamp(low: float, ideal: float, high: float) -> float:
+    """CSS ``clamp(low, ideal, high)`` — never below *low*, never above *high*."""
+    return max(low, min(high, ideal))
+
+
+def _layout() -> dict:
+    """The design's responsive metrics, sampled from the live window.
+
+    The reference stylesheet sizes everything with ``clamp()``: a floor, a
+    viewport-proportional ideal and a ceiling. ``MediaQuery`` reports the
+    window in dp, so each rule is one :func:`_clamp` call. The four media
+    queries the design carries — real phones, small phones, short (landscape)
+    windows and very narrow screens — are applied in the same order, so later
+    rules win exactly as they do in CSS.
+    """
+    vw = MediaQuery.width / 100.0
+    vh = MediaQuery.height / 100.0
+
+    m = {
+        # Page + stage breathing room. The design pads the page with
+        # ``max(16px, 18px + env(safe-area-inset-*))``; the framework adds
+        # the inset itself, so only the fixed base lives here.
+        "pad": _clamp(16, 5 * vw, 24),
+        "body_top": 18,
+        "body_bottom": 18,
+        "stage_top": _clamp(18, 7 * vh, 64),
+        "stage_bottom": _clamp(14, 4 * vh, 30),
+        # The pulse field and its contents.
+        "visual": _clamp(150, 50 * vw, 230),
+        "glow": _clamp(78, 25 * vw, 112),
+        "ring": _clamp(112, 38 * vw, 156),
+        "heart": _clamp(48, 16 * vw, 62),
+        # The reading.
+        "number": _clamp(78, 24 * vw, 108),
+        "number_top": _clamp(-18, -2.5 * vw, -12),
+        "track": _clamp(-9, -1.8 * vw, -6),
+        "unit_top": 12,
+        "unit_size": 11,
+        "message_top": 11,
+        "message_size": 10,
+        # The trace.
+        "ecg": _clamp(130, 42 * vw, 160),
+        "ecg_height": 22,
+        "ecg_top": _clamp(12, 3 * vw, 18),
+        # The button.
+        "fab": 56,
+        "fab_icon": 19,
+        "fab_right": _clamp(16, 5 * vw, 24),
+        "fab_bottom": 20,
+    }
+
+    # The design's media queries, applied in the same order so later rules
+    # win exactly as they do in CSS.
+    if MediaQuery.width <= 699:          # a phone: keep the FAB on screen
+        m.update(fab_right=_clamp(14, 5 * vw, 20), fab_bottom=16)
+    if MediaQuery.width <= 360:          # small phones
+        m.update(body_top=14, body_bottom=14, stage_top=12, stage_bottom=8,
+                 number_top=-8, unit_top=8, unit_size=10, message_top=8,
+                 message_size=9, ecg_top=11, ecg_height=20, fab=52,
+                 fab_right=14, fab_bottom=14)
+    if MediaQuery.height <= 700:         # short windows / landscape
+        m.update(body_top=12, body_bottom=12, stage_top=6, stage_bottom=6,
+                 visual=150, number=78, number_top=-6, unit_top=6,
+                 message_top=6, ecg_top=8)
+    if MediaQuery.width <= 320:          # very narrow screens
+        m["pad"] = 14
+
+    # ``fab_bottom`` is the design's margin *above the safe area*: the
+    # renderer adds the gesture-bar inset itself (see ``frameParams``), so
+    # the button ends up 16dp clear of the home indicator rather than
+    # sitting on top of it.
+    return m
+
+
+# ── the clock ───────────────────────────────────────────────────────────
+
+def _ease_out(u: float) -> float:
+    """CSS ``ease-out`` — quick to start, gentle to finish."""
+    return 1.0 - (1.0 - u) ** 3
+
+
+def _phase(t: float, period: float) -> float:
+    """Where *t* sits in a loop of *period* seconds, as 0.0 – 1.0."""
+    return (t % period) / period
+
+
+def _between(frames, u: float, ease=None) -> dict:
+    """Sample a CSS-style keyframe list at fraction *u*."""
+    for index in range(len(frames) - 1):
+        at0, values0 = frames[index]
+        at1, values1 = frames[index + 1]
+        if at0 <= u <= at1:
+            span = (at1 - at0) or 1.0
+            f = (u - at0) / span
+            if ease is not None:
+                f = ease(f)
+            return {k: values0[k] + (values1[k] - values0[k]) * f
+                    for k in values0}
+    return dict(frames[-1][1])
+
+
+def _motion(now: float) -> dict:
+    """Sample every animation at *now* (a ``time.monotonic`` reading)."""
+    if not running.value:
+        return dict(_RESTING)
+
+    t = max(0.0, now - _anim["started"])
+    glow = _between(_GLOW, _phase(t, GLOW_PERIOD), _ease_out)
+    ring_one = _between(_RING, _phase(t, RING_PERIOD), _ease_out)
+
+    # The trailing ring waits 370 ms before its first pass; after that it
+    # simply repeats, so the offset only ever applies once.
+    trailing = t - RING_TWO_DELAY
+    ring_two = ({"opacity": 0.0, "scale": 1.0} if trailing < 0
+                else _between(_RING, _phase(trailing, RING_PERIOD), _ease_out))
+
+    heart = _between(_BEAT, _phase(t, BEAT_PERIOD))
+
+    # Both transients are measured from the last beat, not the loop start.
+    since = now - _anim["beat_at"]
+    pop = (_between(_POP, since / POP_SECONDS, _ease_out)
+           if 0.0 <= since <= POP_SECONDS else {"scale": 1.0})
+    flash = (_between(_FLASH, since / FLASH_SECONDS, _ease_out)
+             if 0.0 <= since <= FLASH_SECONDS
+             else {"opacity": 0.0, "scale": 0.55})
+
+    return {
+        "glow_opacity": glow["opacity"], "glow_scale": glow["scale"],
+        "ring_one_opacity": ring_one["opacity"],
+        "ring_one_scale": ring_one["scale"],
+        "ring_two_opacity": ring_two["opacity"],
+        "ring_two_scale": ring_two["scale"],
+        "heart_scale": heart["scale"], "number_scale": pop["scale"],
+        "flash_opacity": flash["opacity"], "flash_scale": flash["scale"],
+        "ecg_offset": _phase(t, ECG_PERIOD) * ECG_WINDOW,
+    }
+
+
+# ── the loop ────────────────────────────────────────────────────────────
+
+def _beat(now: float) -> None:
+    """Nudge the rate the way a real resting heart wanders."""
+    step = random.choice((-1, 0, 0, 1, 0, 0, 1, -1))
+    bpm.value = max(BPM_MIN, min(BPM_MAX, bpm.value + step))
+    _anim["beat_at"] = now
+    _anim["next_beat"] = now + 60.0 / bpm.value
+
+
+def _frame(page) -> None:
+    """One animation frame: advance the beat, then repaint."""
+    if not running.value:
+        return
+    now = time.monotonic()
+    if now >= _anim["next_beat"]:
+        _beat(now)
+    page.update()
+
+
+def _start(page) -> None:
+    """Start the rhythm and the frame loop that drives it."""
+    now = time.monotonic()
+    _anim["started"] = now
+    _anim["beat_at"] = now
+    _anim["next_beat"] = now + 60.0 / max(1, bpm.value)
+    state.start()
+    if _anim["timer"] is None:
+        _anim["timer"] = page.every(FRAME, lambda: page.run_on_ui(_frame, page))
+    page.update()
+
+
+def _stop(page) -> None:
+    """Stop the rhythm, cancel the loop and settle the screen."""
+    state.stop()
+    timer = _anim["timer"]
+    if timer is not None:
+        timer.cancel()
+    _anim["timer"] = None
+    _anim["started"] = 0.0
+    page.update()
+
+
+def _toggle(_event=None) -> None:
+    """The transport button: start when stopped, stop when running."""
+    page = _anim["page"]
+    if page is None:
+        return
+    _stop(page) if running.value else _start(page)
+
+
+def pause() -> None:
+    """Called when the app goes to the background — don't burn battery."""
+    page = _anim["page"]
+    if page is not None and running.value:
+        page.run_on_ui(_stop, page)
+
+
+# ── the screen ──────────────────────────────────────────────────────────
+
+def _topbar() -> Row:
+    """The tiny, native-feeling header: the app's name and the session chip."""
+    return Row(
+        key="hb_topbar",
+        class_="hb-topbar",
+        width="match",
+        horizontal_alignment="space_between",
+        vertical_alignment="center",
+        children=[
+            Text(APP_NAME, key="hb_app_name", class_="hb-app-name",
+                 max_lines=1),
+            session_chip(status.value, live=running.value),
+        ],
+    )
+
+
+def _draw_ecg(canvas: Canvas, offset: float, window: float) -> None:
+    """Slide the 320 dp trace left through the *window*-wide viewport."""
+    # The design clips the trace to its window (`overflow: hidden`). Without
+    # this the moving strip would spill across the reading above it.
+    canvas.save()
+    canvas.clip_rect(0.0, 0.0, window, canvas.height)
+    canvas.translate(-offset, 0.0)
+    canvas.path(_ECG, color=theme.ECG_INK, width=1.15, cap="round",
+                join="round")
+    canvas.restore()
+
+
+def _stage(m: dict, motion: dict) -> Column:
+    """The heart, the reading and the trace — the middle of the screen."""
+    return Column(
+        key="hb_stage",
+        class_="hb-stage",
+        expand=1,
+        horizontal_alignment="center",
+        vertical_alignment="center",
+        style={"padding": {"top": m["stage_top"],
+                           "bottom": m["stage_bottom"]}},
+        children=[
+            Stack(
+                key="hb_visual",
+                class_="hb-visual",
+                width=m["visual"],
+                height=m["visual"],
+                alignment="center",
+                children=[
+                    Container(
+                        key="hb_glow",
+                        class_="hb-glow",
+                        style={"width": m["glow"], "height": m["glow"],
+                               "bg": theme.HEART_SOFT,
+                               "opacity": motion["glow_opacity"],
+                               "scale": motion["glow_scale"]},
+                    ),
+                    Container(
+                        key="hb_ring_one",
+                        class_="hb-ring-one",
+                        style={"width": m["ring"], "height": m["ring"],
+                               "border": {"width": 1,
+                                          "color": theme.HEART_LINE},
+                               "opacity": motion["ring_one_opacity"],
+                               "scale": motion["ring_one_scale"]},
+                    ),
+                    Container(
+                        key="hb_ring_two",
+                        class_="hb-ring-two",
+                        style={"width": m["ring"], "height": m["ring"],
+                               "border": {"width": 1,
+                                          "color": theme.HEART_FAINT},
+                               "opacity": motion["ring_two_opacity"],
+                               "scale": motion["ring_two_scale"]},
+                    ),
+                    Icon(
+                        Icons.FAVORITE,
+                        key="hb_heart",
+                        class_="hb-heart",
+                        size=m["heart"],
+                        color=theme.HEART,
+                        style={"scale": motion["heart_scale"]},
+                    ),
+                ],
+            ),
+            Text(
+                str(bpm.value),
+                key="hb_number",
+                class_="hb-number",
+                max_lines=1,
+                # Keep it on one line but never ellipsize: the reading is
+                # re-styled on every animation frame, and a single-line
+                # TextView that ellipsizes flashes a "…" while it relayouts.
+                # A two-digit number never overflows, so clipping is free.
+                overflow="clip",
+                # The reading is sized to the window, so its whole `font`
+                # block is set here rather than in PSS (an inline `font`
+                # replaces the stylesheet's, it does not merge into it).
+                style={
+                    "font": {"size": m["number"], "weight": 870,
+                             "color": Theme.text, "lineHeight": 0.86,
+                             "letterSpacing": m["track"] / m["number"]},
+                    "textAlign": "center",
+                    "margin": {"top": m["number_top"]},
+                    "scale": motion["number_scale"],
+                },
+            ),
+            Text("BPM", key="hb_unit", class_="hb-unit",
+                 style={"font": {"size": m["unit_size"], "weight": 750,
+                                 "color": Theme.text_secondary,
+                                 "letterSpacing": 0.25 / m["unit_size"]},
+                        "margin": {"top": m["unit_top"]}}),
+            Text(message.value, key="hb_message", class_="hb-message",
+                 style={"font": {"size": m["message_size"], "weight": 650,
+                                 "color": Theme.text_secondary},
+                        "textAlign": "center",
+                        # The design reserves the line so a longer message
+                        # cannot push the trace down.
+                        "minHeight": 17,
+                        "margin": {"top": m["message_top"]}}),
+            Canvas(
+                key="hb_ecg",
+                class_="hb-ecg",
+                width=m["ecg"],
+                height=m["ecg_height"],
+                units="px",
+                style={"margin": {"top": m["ecg_top"]}},
+                on_draw=lambda canvas: _draw_ecg(canvas, motion["ecg_offset"],
+                                                 m["ecg"]),
+            ),
+        ],
+    )
+
+
+def _transport(m: dict) -> FloatingActionButton:
+    """The one action: a floating circular button — play, or stop.
+
+    The heart's tint fills it while the rhythm runs; the renderer gives it
+    the Material FAB response (ripple + press-and-shrink).
+    """
+    live = running.value
+    return FloatingActionButton(
+        key="hb_transport",
+        icon=Icons.STOP if live else Icons.PLAY_ARROW,
+        bg_color=theme.HEART_SOFT if live else Theme.text,
+        text_color=theme.HEART if live else "#FFFFFFFF",
+        size=m["fab"],
+        elevation=0,                       # the design's FAB is flat
+        bottom=m["fab_bottom"],
+        right=m["fab_right"],
+        style={"font": {"size": m["fab_icon"]},  # the design's 19px glyph
+               "borderRadius": m["fab"] / 2},    # circular
+        semantics="Start heartbeat" if not live else "Stop heartbeat",
+        on_click=_toggle,
+    )
+
+
+def heartbeat_screen(page):
+    """Build the Heartbeat screen into *page*.
+
+    Re-run on every animation frame: it samples the clock, builds the tree
+    at the current phase, and lets the diff engine decide what to send.
+    """
+    # The design is one carefully chosen palette. Pin it so a device in dark
+    # mode cannot swap it out from under the brand; call ``theme.use_dark()``
+    # (or set ``page.theme_mode = "system"``) to opt into the dark palette.
+    page.theme_mode = "light"
+    _anim["page"] = page
+
+    m = _layout()
+    motion = _motion(time.monotonic())
+
+    page.add(Stack(
+        key="heartbeat_root",
+        alignment="center",
+        children=[
+            Scaffold(
+                key="heartbeat_screen",
+                class_="heartbeat-screen",
+                floating_action_button=_transport(m),
+                body=Column(
+                    key="hb_body",
+                    class_="hb-body",
+                    expand=1,
+                    horizontal_alignment="center",
+                    style={"padding": {"left": m["pad"], "top": m["body_top"],
+                                       "right": m["pad"],
+                                       "bottom": m["body_bottom"]}},
+                    children=[
+                        _topbar(),
+                        _stage(m, motion),
+                        footnote(FOOTNOTE),
+                    ],
+                ),
+            ),
+            # The flash sits above everything, centred, and pulses once per
+            # beat. It never takes a touch — it has no click handler.
+            Container(
+                key="hb_flash",
+                class_="hb-flash",
+                style={"bg": theme.HEART_SOFT,
+                       "opacity": motion["flash_opacity"],
+                       "scale": motion["flash_scale"]},
+            ),
+        ],
+    ))

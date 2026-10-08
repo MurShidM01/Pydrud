@@ -1,9 +1,42 @@
-"""Application state for the starter counter.
+"""The starter's shared state.
 
-A :class:`~pydrud.State` is a named, reactive value that survives screen
-rebuilds and hot reload. Add more state here as your app grows.
+The whole screen is rebuilt on every animation frame, so anything that has
+to survive a rebuild lives here rather than inside the screen function.
+Each value is a :class:`~pydrud.State`: readable from any screen, and
+observable if you ever want a side effect on change.
+
+The animation clock itself lives next to the loop that drives it, in
+``app/screens/heartbeat.py``.
 """
 
 from pydrud import State
 
-counter = State(0, name="counter")
+from app.config import (
+    BPM_START, IDLE_MESSAGE, IDLE_STATUS, RUNNING_MESSAGE, RUNNING_STATUS,
+)
+
+#: Whether the rhythm is currently running.
+running = State(False, name="running")
+
+#: The current heart rate, in beats per minute.
+bpm = State(BPM_START, name="bpm")
+
+#: The one-word status in the top bar ("Ready" / "Active").
+status = State(IDLE_STATUS, name="status")
+
+#: The guidance line under the number.
+message = State(IDLE_MESSAGE, name="message")
+
+
+def start() -> None:
+    """Move the session into its running state (does not start the loop)."""
+    running.value = True
+    status.value = RUNNING_STATUS
+    message.value = RUNNING_MESSAGE
+
+
+def stop() -> None:
+    """Move the session back to its resting state."""
+    running.value = False
+    status.value = IDLE_STATUS
+    message.value = IDLE_MESSAGE

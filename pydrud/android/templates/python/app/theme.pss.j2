@@ -1,91 +1,86 @@
 /*
- * Starter Pydrud Style Sheet (PSS).
+ * Heartbeat — the starter stylesheet (PSS).
  *
- * The generated counter screen is styled here rather than with scattered
- * inline values. Edit this file and save to re-skin the app with hot reload.
+ * Colours use `$token` references, which resolve against the live theme at
+ * paint time — so this one stylesheet follows the palette in `app/theme.py`.
+ * Available colour tokens: $primary $secondary $background $surface
+ * $surface_variant $outline $error $text $text_secondary $on_primary.
+ * Metric tokens (radii, spacing, type) come from `Tokens`: $radius_card,
+ * $gutter, $text_title, …
+ *
+ * What lives here is everything *fixed*: colour, weight, radius, spacing,
+ * opacity. PSS can now express the design's `clamp()`/`vw`/`@media` rules
+ * directly — see `docs/examples/heartbeat-css-parity.pss` for the whole
+ * prototype written as a stylesheet. This starter keeps the window-proportional
+ * sizes in `app/screens/heartbeat.py` instead, because the frame loop rebuilds
+ * the tree every tick and the motion needs the same sampled metrics. The
+ * heart's translucent tints are derived from the brand colour in
+ * `app/theme.py`, so they too are applied from Python.
  */
 
-.counter-screen {
-    bg: #F7F8FA;
+.heartbeat-screen {
+    bg: $background;
 }
 
-.page-content {
-    spacing: 16;
+/* ── Top bar ─────────────────────────────────────────────────────────── */
+
+.hb-topbar {
+    min-height: 32;
 }
 
-.responsive-content {
-    alignment: topCenter;
+.hb-app-name {
+    font: { size: 14, weight: 800, color: $text, letterSpacing: -0.014 };
 }
 
-.counter-intro {
-    padding: { left: 2, right: 2, top: 0, bottom: 0 };
+.hb-session-text {
+    font: { size: 10, weight: 700, color: $text_secondary };
 }
 
-.counter-eyebrow {
-    font: { size: 12, weight: 700, color: {{ seed_color | default("#FF6366F1") }} };
+.hb-session-dot {
+    width: 6;
+    height: 6;
+    border-radius: 999;
+    bg: #FFD8D5CC;
 }
 
-.counter-heading {
-    font: { size: 32, weight: 700, color: #182230 };
-}
+/* ── The pulse field and the rings ───────────────────────────────────── */
+/*
+ * Only the shape is fixed; the diameter tracks the window (see
+ * `_layout()` in heartbeat.py), so it is set on each widget.
+ */
 
-.counter-subtitle {
-    font: { size: 15, weight: 400, color: #667085 };
-}
-
-.counter-panel {
-    bg: #FFFFFF;
-    border-radius: 28;
-    padding: { all: 28 };
-    elevation: 2;
-}
-
-.counter-icon-wrap {
-    bg: {{ seed_color | default("#FF6366F1") }};
-    border-radius: 18;
-    alignment: center;
-}
-
-.counter-caption {
-    font: { size: 12, weight: 700, color: #667085 };
-}
-
-.counter-value {
-    font: { size: 76, weight: 700, color: {{ seed_color | default("#FF6366F1") }} };
-    text-align: center;
-}
-
-.counter-unit {
-    font: { size: 15, weight: 500, color: #667085 };
-}
-
-.counter-accent-rule {
-    bg: {{ seed_color | default("#FF6366F1") }};
+.hb-glow {
     border-radius: 999;
 }
 
-.counter-hint {
-    font: { size: 13, weight: 400, color: #667085 };
+.hb-ring-one {
+    border-radius: 999;
 }
 
-.counter-actions {
-    spacing: 8;
+.hb-ring-two {
+    border-radius: 999;
 }
 
-.counter-decrement {
-    bg: #EEF0FF;
-    border-radius: 16;
-    padding: { horizontal: 18, vertical: 10 };
-    font: { size: 14, weight: 700, color: {{ seed_color | default("#FF6366F1") }} };
+/* The flash sits on top of everything, centred, and pulses once per beat. */
+.hb-flash {
+    width: 180;
+    height: 180;
+    border-radius: 999;
 }
 
-.counter-reset {
-    border-radius: 16;
-    padding: { horizontal: 18, vertical: 10 };
-    font: { size: 14, weight: 600, color: #667085 };
+/* ── ECG trace ───────────────────────────────────────────────────────── */
+
+.hb-ecg {
+    opacity: 0.45;
 }
 
-.counter-fab {
-    bg: {{ seed_color | default("#FF6366F1") }};
-    elevation: 6;
+/* ── Footnote ────────────────────────────────────────────────────────── */
+
+.hb-bottom {
+    min-height: 22;
+    margin: { top: 10 };
+}
+
+.hb-footnote {
+    font: { size: 9, weight: 600, color: #FFB5B1A9 };
 }

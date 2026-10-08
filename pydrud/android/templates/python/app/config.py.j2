@@ -1,13 +1,25 @@
-"""App-wide constants. Change a value, save, and hot reload does the rest."""
+"""App-wide constants. Change a value, save, and hot reload does the rest.
 
-#: Display name, used in the app bar and the hero card.
+The colours live in :mod:`app.theme`; this module holds the numbers and
+the words — the parts of the app you are most likely to want to tweak.
+"""
+
+#: The name shown in the top-left of the screen.
 APP_NAME = "{{ project_name }}"
 APP_VERSION = "1.0.0"
 
-#: The app's subtitle — replace it with your own tagline.
-APP_TAGLINE = "A little progress, one tap at a time."
+#: The resting heart rate the demo simulates, and the band it drifts in.
+BPM_START = 72
+BPM_MIN = 68
+BPM_MAX = 78
 
-#: The brand colour the whole design system is generated from. It matches
-#: the seed in ``pydrud.toml``; call ``page.set_theme(...)`` to re-theme
-#: the running app at any time.
-ACCENT = "{{ seed_color | default("#FF6366F1") }}"
+#: The top-bar chip: a word and a dot colour for each session state.
+IDLE_STATUS = "Ready"
+RUNNING_STATUS = "Active"
+
+#: The guidance line under the number.
+IDLE_MESSAGE = "Tap Start to begin"
+RUNNING_MESSAGE = "Rhythm is running"
+
+#: The small, quiet label at the very bottom.
+FOOTNOTE = "Visual rhythm"

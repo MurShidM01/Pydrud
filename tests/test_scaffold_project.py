@@ -231,11 +231,11 @@ class TestGeneratedProject(unittest.TestCase):
                 for w in widgets
                 if w._widget_type == "Text"
             ]
-            self.assertIn("Count the things that matter.", texts)
-            self.assertIn("A little progress, one tap at a time.", texts)
-            self.assertIn("0", texts)
-            self.assertIsNotNone(tree.find_by_key("inc_btn"))
-            self.assertIsNotNone(tree.find_by_key("counter_panel"))
+            self.assertIn("Tap Start to begin", texts)
+            self.assertIn("Visual rhythm", texts)
+            self.assertIn("72", texts)
+            self.assertIsNotNone(tree.find_by_key("hb_transport"))
+            self.assertIsNotNone(tree.find_by_key("hb_glow"))
         finally:
             sys.path.remove(self.path("src"))
             for mod in [m for m in list(sys.modules) if m.startswith("app")]:
@@ -266,13 +266,14 @@ class TestGeneratedProject(unittest.TestCase):
         #
         # The budget is a tripwire for *accidental* bloat — bundling the CLI,
         # templates or launcher icons adds megabytes. The complete Python-side
-        # PSS parser, resolver and transactional loader bring the measured
-        # runtime to 770.4 KB; keep about 50 KB of headroom for small runtime
-        # additions while retaining a tight ceiling.
+        # PSS engine — parser, resolver, the CSS value evaluator and the fold
+        # pass — plus the transactional loader bring the measured runtime to
+        # 866.2 KB; keep about 50 KB of headroom for small runtime additions
+        # while retaining a tight ceiling.
         size_kb = bundled_runtime_size_kb(bundle)
         heaviest = "".join(f"\n  {s / 1024:6.1f} KB  {p}"
                            for s, p in bundle_files(bundle)[:5])
-        self.assertLess(size_kb, 820,
+        self.assertLess(size_kb, 920,
                         f"bundled runtime is unexpectedly large "
                         f"({size_kb:.1f} KB); heaviest modules:{heaviest}")
 
@@ -304,7 +305,7 @@ class TestGeneratedProject(unittest.TestCase):
             from app.main import main
 
             tester = AppTester(main, title="demo_app").start()
-            print("RENDERS:", tester.shows("Count the things that matter."))
+            print("RENDERS:", tester.shows("Tap Start to begin"))
             tester.stop()
         """)
         env = dict(os.environ, PYTHONPATH=src, PYTHONDONTWRITEBYTECODE="1")

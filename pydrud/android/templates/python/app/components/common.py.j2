@@ -1,76 +1,43 @@
-"""Small reusable UI components shared by the starter screens.
+"""Small, reusable pieces of the Heartbeat screen.
 
-The generated counter uses the responsive page wrapper below. The remaining
-helpers are kept as ready-to-reuse building blocks for screens you add later.
+Anything that is not specific to one screen lives here, so a second screen
+can pick it up unchanged. The screen modules import from :mod:`app.components`
+rather than reaching into each other.
 """
 
-from pydrud import (
-    Button, Center, Column, Container, EdgeInsets, Responsive, Spacing, Text,
-    Theme,
-)
+from pydrud import Container, Row, Text
+
+from app import theme
 
 
-def section(title, key):
-    """A quiet, all-caps section label — the spine of a tidy screen."""
-    return Container(
-        key=key,
-        width="match",
-        padding=EdgeInsets(left=Spacing.XS, top=Spacing.SM,
-                           bottom=Spacing.XXS),
-        child=Text(title.upper(), key=f"{key}_label", size=12, weight=700,
-                   color=Theme.text_secondary,
-                   style={"font": {"letterSpacing": 0.08}}),
-    )
+def session_chip(label: str, *, live: bool) -> Row:
+    """The top-bar chip: a status dot and a word.
 
-
-def demo_button(label, icon, key, on_click):
-    """One reusable tonal action button."""
-    return Button(label, key=key, icon=icon, variant="tonal",
-                  full_width=True).on_click(on_click)
-
-
-def page_body(key, children):
-    """A padded, scrollable body with responsive gutters and a readable cap.
-
-    Phones use the available width. On tablets and desktops the body is
-    centred and capped, keeping the counter panel comfortable rather than
-    stretching it across the whole display. Extra room below the content
-    keeps the floating action button from covering the last control.
+    The dot is a quiet grey at rest and takes the heart's colour while the
+    rhythm is running.
     """
-    gutter = Responsive.value(
-        compact=Spacing.GUTTER,
-        medium=Spacing.XXL,
-        expanded=Spacing.XXL,
-        large=Spacing.HUGE,
+    return Row(
+        key="hb_session",
+        spacing=6,
+        main_axis_size="min",
+        vertical_alignment="center",
+        children=[
+            Container(
+                key="hb_session_dot",
+                class_="hb-session-dot",
+                style={"bg": theme.HEART} if live else {},
+            ),
+            Text(label, key="hb_session_text", class_="hb-session-text"),
+        ],
     )
-    content = Column(
-        key=f"{key}_scroll",
-        class_="page-content",
-        scroll=True,
-        spacing=Responsive.value(compact=Spacing.LG, medium=Spacing.XL,
-                                 expanded=Spacing.XXL),
-        style={"padding": EdgeInsets(
-            left=gutter,
-            right=gutter,
-            top=Responsive.value(compact=Spacing.XL, medium=Spacing.XXL),
-            bottom=112,
-        ).to_dict()},
-        children=children,
-    )
-    if not Responsive.is_tablet():
-        return content
 
-    max_width = Responsive.value(
-        medium=600, expanded=720, large=840, xlarge=960,
-    )
-    return Center(
-        key=f"{key}_center",
-        expand=1,
-        child=Container(
-            key=f"{key}_wrap",
-            width=max_width,
-            height="match",
-            class_="responsive-content",
-            child=content,
-        ),
+
+def footnote(label: str) -> Container:
+    """A quiet, centred label — the last line on the screen."""
+    return Container(
+        key="hb_bottom",
+        class_="hb-bottom",
+        width="match",
+        alignment="center",
+        child=Text(label, key="hb_footnote", class_="hb-footnote"),
     )

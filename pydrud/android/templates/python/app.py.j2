@@ -1,21 +1,23 @@
 """{{ project_name }} — application package.
 {% if runtime == "pydash" %}
 
-The generated starter is a focused, responsive counter app. Source remains
+The generated starter is a single, focused screen — Heartbeat. Source stays
 in Python and a connected renderer receives only snapshots and patches.
 {% else %}
 
-The generated starter is a polished counter app with a responsive layout,
-PSS styling, clear secondary controls, and a primary floating action button.
+The generated starter is a single, focused screen — Heartbeat: a softly
+pulsing heart, a live BPM reading, a tiny ECG trace and one transport
+button, with a PSS stylesheet and a hand-tuned palette.
 {% endif %}
 
 Layout:
 
-* ``config``   — app name, tagline and the accent colour
+* ``config``   — the numbers and the words (BPM band, status lines, name)
+* ``theme``    — the palette, generated from one brand colour
 * ``state``    — the shared :class:`~pydrud.State` objects
 * ``runtime``  — the router and the running app (``refresh()`` lives here)
 * ``components`` — reusable UI building blocks shared by screens
-* ``screens``    — one module per screen (``playground``, ``details``)
+* ``screens``    — one module per screen (``heartbeat``)
 {% if runtime == "chaquopy" %}
 * ``jobs``       — background work run by WorkManager
 {% endif %}

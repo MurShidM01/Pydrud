@@ -26,6 +26,7 @@ EXPECTED_FILES = (
     "src/app/__init__.py",
     "src/app/main.py",
     "src/app/config.py",
+    "src/app/theme.py",
     "src/app/state.py",
     "src/app/runtime.py",
     "src/app/jobs.py",
@@ -33,8 +34,7 @@ EXPECTED_FILES = (
     "src/app/components/__init__.py",
     "src/app/components/common.py",
     "src/app/screens/__init__.py",
-    "src/app/screens/playground.py",
-    "src/app/screens/details.py",
+    "src/app/screens/heartbeat.py",
     "src/app/theme.pss",
 )
 
@@ -121,11 +121,11 @@ class TestGeneratedAppStructure(unittest.TestCase):
     def test_routes_match_the_registered_screens(self):
         from app.main import router
 
-        for route in ("playground", "details"):
+        for route in ("heartbeat",):
             with self.subTest(route=route):
                 self.assertIn(route, router.routes)
-        # The playground is the start destination.
-        self.assertEqual(router.current_route, "playground")
+        # Heartbeat is the start destination.
+        self.assertEqual(router.current_route, "heartbeat")
 
     def test_runtime_exposes_the_app_handle(self):
         from app import runtime

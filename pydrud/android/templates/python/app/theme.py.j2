@@ -1,0 +1,86 @@
+"""The Heartbeat palette — one place that decides how the app looks.
+
+The whole design system is generated from a single brand colour,
+``ACCENT``: the heart, the rings, the ECG tint and the translucent pulse
+field all derive from it. ``app/theme.pss`` then refers to the *roles* by
+name (``bg: $background``, ``color: $text``) instead of to hex values, so
+the stylesheet follows the palette — including the dark one — without a
+second copy of every rule.
+
+``ACCENT`` is the colour you passed to ``pydrud create --accent``; it is
+recorded as ``[theme] seed`` in ``pydrud.toml``, so ``pydrud sync``
+regenerates the native theme resources to match.
+
+::
+
+    from app import theme
+    theme.use_dark()      # switch the whole app over at runtime
+"""
+
+from pydrud import Colors, Theme
+
+#: The brand colour — the one colour the app is designed around.
+ACCENT = "{{ seed_color }}"
+
+#: The heart. Every accent in the app is this colour.
+HEART = ACCENT
+#: The ECG trace — a washed-out tint of the heart.
+ECG_INK = Colors.lighten(ACCENT, 0.30)
+#: Translucent tints of the heart: the pulse field, the rings, the flash.
+HEART_SOFT = Colors.with_opacity(ACCENT, 0.08)     # the pulse field + button
+HEART_LINE = Colors.with_opacity(ACCENT, 0.18)     # the outer ring
+HEART_FAINT = Colors.with_opacity(ACCENT, 0.10)    # the trailing ring
+
+#: The session dot when the rhythm is stopped.
+DOT_IDLE = "#FFD8D5CC"
+#: The footnote ink.
+FOOTNOTE_INK = "#FFB5B1A9"
+
+#: The warm, paper-like light palette the app ships with.
+LIGHT = {
+    "primary": HEART,
+    "on_primary": "#FFFFFFFF",
+    "background": "#FFF8F7F3",
+    "surface": "#FFFFFFFF",
+    "text": "#FF26231F",
+    "text_secondary": "#FFA7A39B",
+    "secondary": "#FF26231F",
+    "surface_variant": "#FFF0EEE8",
+    "outline": "#FFE9E7E0",
+    "error": HEART,
+}
+
+#: The same rhythm after dark — a warm charcoal rather than a blue-grey one.
+DARK = {
+    "primary": Colors.lighten(ACCENT, 0.22),
+    "on_primary": "#FF2A1113",
+    "background": "#FF171614",
+    "surface": "#FF201E1B",
+    "text": "#FFF4F1EC",
+    "text_secondary": "#FF9A958C",
+    "secondary": "#FFF4F1EC",
+    "surface_variant": "#FF2C2A26",
+    "outline": "#FF3A3733",
+    "error": Colors.lighten(ACCENT, 0.22),
+}
+
+
+def _apply(palette: dict, *, dark: bool) -> None:
+    """Adopt *palette*, dropping any previously generated seed scheme.
+
+    ``Theme.payload()`` prefers a stored :class:`~pydrud.ColorScheme` over
+    the named roles, so clearing it is what makes these exact colours reach
+    the native widgets — buttons, ripples, the status bar — as well.
+    """
+    Theme.configure(dark_mode=dark, **palette)
+    Theme.scheme = None
+
+
+def use_light() -> None:
+    """Apply the light palette."""
+    _apply(LIGHT, dark=False)
+
+
+def use_dark() -> None:
+    """Apply the dark palette."""
+    _apply(DARK, dark=True)
