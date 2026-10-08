@@ -61,6 +61,22 @@ class TestManifestAndCliRegressions(unittest.TestCase):
         self.assertIn("Did you mean 'pydrud permissions add camera'?", result.output)
         self.assertNotIn("ValueError", result.output)
 
+    def test_style_patches_restore_the_safe_area_inset(self):
+        """A style patch rewrites ``padding`` from the style, which would drop
+        the status-bar inset the view was created with — the patcher has to put
+        it back, or a bar that only appears via a patch (a tab switch, a theme
+        change) slides under the system UI."""
+        java_root = os.path.join(self.project, "android", "app", "src",
+                                 "main", "java")
+        rendered = {}
+        for dirpath, _dirs, files in os.walk(java_root):
+            for name in ("TreePatcher.java", "LayoutEngine.java"):
+                if name in files:
+                    rendered[name] = open(os.path.join(dirpath, name),
+                                          encoding="utf-8").read()
+        self.assertIn("reapplySafeArea(v, merged)", rendered["TreePatcher.java"])
+        self.assertIn("void reapplySafeArea(", rendered["LayoutEngine.java"])
+
 
 class TestAsyncAndPermissionStatus(unittest.TestCase):
     def test_result_is_a_real_awaitable(self):

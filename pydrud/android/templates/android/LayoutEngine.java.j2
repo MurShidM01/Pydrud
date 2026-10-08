@@ -61,6 +61,39 @@ public class LayoutEngine {
         applySafeAreaPadding(view, spec);
     }
 
+    /**
+     * Re-apply the edge-to-edge inset after a style patch.
+     *
+     * {@code ViewStyler.applyStyle} rewrites {@code padding} straight from the
+     * style, which drops the status/navigation-bar inset the view received
+     * when it was created — so a bar that only appears via a patch (a tab
+     * switch, a theme change) would slide under the system bars. Recompute the
+     * base padding from the (already-merged) style and re-add the inset. The
+     * call is idempotent: when the patch left padding untouched the stored
+     * base is reused, so the inset is never stacked twice.
+     */
+    void reapplySafeArea(View view, JSONObject s) {
+        if (view == null) return;
+        int[] spec = vf.safeAreaViews.get(view);
+        if (spec == null) return;
+        if (s != null) {
+            if (s.has("safeAreaTop")) spec[0] = s.optBoolean("safeAreaTop", false) ? 1 : 0;
+            if (s.has("safeAreaBottom")) spec[1] = s.optBoolean("safeAreaBottom", false) ? 1 : 0;
+            JSONObject p = s.optJSONObject("padding");
+            if (p != null) {
+                if (p.has("all")) {
+                    int a = vf.mStyler.dp(p.optInt("all", 0));
+                    spec[2] = a;
+                    spec[3] = a;
+                } else {
+                    spec[2] = vf.mStyler.dp(p.optInt("top", 0));
+                    spec[3] = vf.mStyler.dp(p.optInt("bottom", 0));
+                }
+            }
+        }
+        applySafeAreaPadding(view, spec);
+    }
+
     View createLinear(JSONObject json, int orientation) throws JSONException {
         JSONObject s = json.optJSONObject("style");
         // justify-content: distribute leftover main-axis space between the

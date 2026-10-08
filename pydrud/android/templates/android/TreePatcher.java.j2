@@ -84,6 +84,10 @@ public class TreePatcher {
                     if (style.has("animation")) {
                         vf.mAnimator.applyAnimation(v, merged);
                     }
+                    // applyStyle rewrites padding from the style, which would
+                    // drop the edge-to-edge inset this view was created with;
+                    // put it back so bars never slide under the system UI.
+                    vf.mLayout.reapplySafeArea(v, merged);
                 }
                 break;
             }

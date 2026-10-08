@@ -121,6 +121,17 @@ All notable changes to Pydrud are documented here.
   explicit `height`, every compact bar measures the same. Normal and
   comfortable densities are unchanged.
 
+### Fixed — an edge-to-edge bar lost its inset when its style was patched
+* **A view that carried `safeAreaTop`/`safeAreaBottom` slid under the system
+  bars whenever a style patch rewrote its padding.** `ViewStyler.applyStyle`
+  sets `padding` straight from the style, which overwrote the status-/
+  navigation-bar inset `LayoutEngine.applySafeArea` had added when the view was
+  created — and `TreePatcher` never re-applied it. A bar that only appeared
+  through a patch (an app bar swapped in on a tab switch, any safe-area widget
+  after a theme change) therefore drew under the status bar. The new
+  `LayoutEngine.reapplySafeArea` recomputes the base padding from the merged
+  style and re-adds the inset after every style patch; it is idempotent, so a
+  patch that leaves padding untouched never stacks the inset twice.
 
 ### Changed — the Heartbeat screen is responsive, and the transport button is a real FAB
 * **The screen now reproduces the design's CSS `clamp()` rules from the live
