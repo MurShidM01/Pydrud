@@ -6,6 +6,7 @@ All notable changes to Pydrud are documented here.
 
 | Version | Theme | Highlights |
 |---------|-------|------------|
+| [2.1.3](#213--2026-10-09) | Split-build fix | `pydrud build` discovers per-ABI APKs, prints them all and returns the universal one; `--output` copies every split |
 | [2.1.2](#212--2026-10-09) | Per-ABI builds | Opt-in `abi_splits` emits one APK per ABI plus a universal APK for smaller downloads |
 | [2.1.1](#211--2026-10-09) | CSS-style stylesheets | PSS gains CSS variables, pseudo-classes, `@media`, `@keyframes` and `transition`; pluggable runtime backends; Heartbeat starter; light/dark design system |
 | [2.1.0](#210--2026-10-07) | Platforms and stylesheets | `create`/`init android` CLI, Chaquopy-free Android preview shell, starter PSS theme, Pydash default with runtime-aware tooling |
@@ -25,6 +26,23 @@ All notable changes to Pydrud are documented here.
 
 ---
 
+## [2.1.3] — 2026-10-09
+
+### Fixed — `pydrud build` reports split APKs
+* **A per-ABI build no longer looks like a failed build.** With `abi_splits`
+  on, Gradle writes `app-<abi>-<variant>.apk` files plus
+  `app-universal-<variant>.apk` — never the single `app-<variant>.apk` the
+  builder looked for — so `pydrud build` printed *"APK not found at expected
+  path"* and exited non-zero. The builder now discovers every produced APK,
+  prints them all with their sizes, and returns the universal one (which
+  installs on any device) as the default artifact.
+* **`pydrud build --output` handles several APKs.** When a split build
+  produces more than one APK and `--output` is a directory (or ends with a
+  separator), every APK is copied there; a single-APK build keeps the
+  original copy-to-this-path behaviour.
+
+---
+
 ## [2.1.2] — 2026-10-09
 
 ### Added — opt-in per-ABI APK splits
@@ -32,8 +50,8 @@ All notable changes to Pydrud are documented here.
   single universal APK.** A split APK carries only its own ABI's native
   libraries — for a Chaquopy app that is roughly a third of the universal
   size — so a release can offer `arm64-v8a`, `armeabi-v7a` and `x86_64`
-  downloads next to the universal one. `pydrud build` then writes several
-  APKs into the output directory.
+  downloads next to the universal one. Gradle then writes several APKs into
+  the output directory.
 * **The Android Gradle template switches between the two strategies.** With
   `abi_splits` off (the default) the template sets `ndk { abiFilters }`; with
   it on it emits a `splits { abi { … isUniversalApk = true } }` block instead.

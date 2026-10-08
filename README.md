@@ -379,6 +379,7 @@ all without a device or emulator.
 
 | Version | Focus |
 |---------|-------|
+| **v2.1.3** | `pydrud build` discovers per-ABI APKs (prints them all, returns the universal one); `--output` copies every split |
 | **v2.1.2** | Opt-in per-ABI APK splits (`abi_splits`) — one APK per ABI plus a universal APK for smaller downloads |
 | **v2.1.1** | PSS as a full CSS-style language, declarative `@keyframes`/`transition`/`:active`, pluggable runtime backends, Heartbeat starter, content blur, animated theming |
 | **v2.1.0** | `create`/`init android` CLI, pluggable runtime backends, PSS engine, Heartbeat starter, runtime-aware tooling |
