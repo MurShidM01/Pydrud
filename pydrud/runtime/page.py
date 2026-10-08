@@ -30,7 +30,9 @@ class _Page:
         self.scroll: Optional[str] = None
         self.padding: Optional[Any] = None
         self._built = False
-        self.theme_mode: str = "light"
+        # Apps follow the device's light/dark setting by default; switch with
+        # ``page.set_theme_mode("light" | "dark" | "system")``.
+        self.theme_mode: str = "system"
         self._services: Optional[Any] = None
         self._http: Optional[Any] = None
         self._cache: Optional[Any] = None
@@ -415,8 +417,13 @@ class _Page:
                                    runner=self._app.tasks,
                                    on_ui=self._app.run_on_ui)
 
-    def set_theme_mode(self, mode: str) -> None:
-        """Switch between ``"light"``, ``"dark"`` and ``"system"``."""
+    def set_theme_mode(self, mode: str, *, animate: bool = False,
+                       duration: int = 220) -> None:
+        """Switch between ``"light"``, ``"dark"`` and ``"system"``.
+
+        Pass ``animate=True`` to tween the palette over *duration* ms instead
+        of snapping.
+        """
         if mode not in ("light", "dark", "system"):
             raise ValueError("theme mode must be light/dark/system")
         from pydrud.widgets.theme import Theme
@@ -430,15 +437,17 @@ class _Page:
         # Repaint natively-styled widgets *and* rebuild the tree, so colours
         # resolved in Python (Colors.TEXT, Theme.surface, …) change with the
         # same call instead of waiting for the next unrelated refresh.
-        self._app.apply_theme()
+        self._app.apply_theme(animate=animate, duration=duration)
 
-    def set_theme(self, seed: str, *, dark: Optional[bool] = None) -> None:
+    def set_theme(self, seed: str, *, dark: Optional[bool] = None,
+                  animate: bool = False, duration: int = 220) -> None:
         """Rebuild the palette from a brand colour and repaint.
 
         ::
 
             page.set_theme(Colors.TEAL)
             page.set_theme("#FFEF4444", dark=True)
+            page.set_theme(Colors.TEAL, animate=True)   # glide to the new brand
         """
         from pydrud.widgets.theme import Theme
 
@@ -446,7 +455,7 @@ class _Page:
             self.theme_mode = "dark" if dark else "light"
             Theme.dark_mode = bool(dark)
         Theme.seed(seed)
-        self._app.apply_theme()
+        self._app.apply_theme(animate=animate, duration=duration)
 
     def configure(self, **values) -> None:
         """Restyle the running app from Python — colours *and* metrics.

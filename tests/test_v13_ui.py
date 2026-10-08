@@ -413,5 +413,56 @@ class TestNavigationV13(unittest.TestCase):
             route.build_path({})
 
 
+class TestRouteTransitionOrdering(unittest.TestCase):
+    """The router must announce a transition *before* it renders the screen.
+
+    The Android side queues the animation on that command and plays it once
+    the incoming tree has been built, so the ordering here is a real contract,
+    not an implementation detail.
+    """
+
+    def _app_with(self, transition: str):
+        router = Router()
+        router.define("home",
+                      lambda page: page.add(Text("Home", key="home")))
+        router.define("details",
+                      lambda page: page.add(Text("Details", key="details")),
+                      transition=transition)
+        router.initial("home")
+        app = App(target=router.build_root(), title="nav", dev_server=False)
+        app.attach_router(router)
+        return app, router
+
+    def _run(self, transition: str):
+        from tests.fake_device import FakeDevice, run_app
+
+        app, router = self._app_with(transition)
+        device = FakeDevice().start()
+        try:
+            run_app(app, device)
+            before = len(device.commands)
+            router.push("details")
+            self.assertTrue(device.wait_for(
+                lambda d: d.root is not None
+                and d.root.find("details") is not None))
+            commands = [c.get("cmd") for c in device.commands[before:]]
+        finally:
+            app.stop()
+            device.stop()
+        return commands
+
+    def test_the_transition_precedes_the_render(self):
+        commands = self._run("slide_left")
+        self.assertIn("route_transition", commands)
+        render_at = next(
+            index for index, cmd in enumerate(commands)
+            if cmd in ("render_transaction", "full_render", "render"))
+        self.assertLess(commands.index("route_transition"), render_at)
+
+    def test_a_none_transition_sends_no_animation(self):
+        commands = self._run("none")
+        self.assertNotIn("route_transition", commands)
+
+
 if __name__ == "__main__":
     unittest.main()

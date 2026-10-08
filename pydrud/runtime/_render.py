@@ -254,6 +254,9 @@ class RenderMixin:
             from pydrud.widgets.theme import Theme as _Theme
 
             payload = _Theme.payload()
+            # Remember what the device last saw, so a later animated theme
+            # change can tween *from* it rather than from an unknown palette.
+            self._pushed_scheme = getattr(_Theme, "scheme", None)
         except Exception:  # pragma: no cover - defensive
             return
         self._send(json.dumps({"cmd": "theme", **payload}) + "\n")
@@ -277,17 +280,94 @@ class RenderMixin:
         except Exception as exc:
             self._report_error(exc)
 
-    def apply_theme(self) -> None:
+    def apply_theme(self, *, animate: bool = False,
+                    duration: int = 220) -> None:
         """Re-send the palette and repaint after changing :class:`Theme`.
 
         ::
 
             Theme.dark()
             app.apply_theme()
+
+        With ``animate=True`` the palette tweens from what the device last
+        received to the new one over *duration* milliseconds, so a light/dark
+        switch or a re-seed glides instead of snapping.
         """
-        self._send_theme()
+        from pydrud.widgets.theme import Theme as _Theme
+        from pydrud.widgets.theme.colors import ColorScheme as _Scheme
+
+        # Adopt the device's dark setting first (a no-op unless the page is on
+        # ``system``), so the tween targets the right palette.
+        self._sync_system_theme()
         self._request_system_theme()
-        self.render()
+
+        start = getattr(self, "_pushed_scheme", None)
+        target = getattr(_Theme, "scheme", None)
+        if (not animate or not self._connected or start is None
+                or target is None or start is target or duration <= 0):
+            self._send_theme()
+            self.render()
+            return
+
+        # A bounded number of frames keeps the bridge cheap while still
+        # reading as a smooth fade (≈60 fps, capped so a slow link cannot
+        # flood the socket).
+        frames = max(1, min(20, int(duration / 1000 * 60) or 1))
+        interval = (duration / 1000.0) / frames
+        state = {"frame": 0}
+        # A token identifies this tween: starting another one supersedes it,
+        # so two quick theme changes cannot fight over the palette.
+        token = object()
+        self._theme_tween = token
+
+        def _tick() -> None:
+            if self._theme_tween is not token:
+                return
+            state["frame"] += 1
+            fraction = state["frame"] / frames
+            _Theme.use(_Scheme.lerp(start, target, fraction))
+            self._send_theme()
+            self.render()
+            if state["frame"] < frames:
+                self.tasks.after(interval, lambda: self.run_on_ui(_tick))
+            else:
+                # Land exactly on the target so nothing is left mid-blend.
+                _Theme.use(target)
+                self._send_theme()
+                self.render()
+                self._theme_tween = None
+
+        self.run_on_ui(_tick)
+
+    def _sync_system_theme(self) -> bool:
+        """Follow the device's dark-mode setting while the page is on ``system``.
+
+        The renderer reports ``dark`` in its window metrics. When the page is
+        in ``"system"`` mode we adopt the matching palette, so PSS ``$token``
+        references and Python-resolved colours flip together instead of the
+        Python side staying light while the native side goes dark.
+
+        A page that opted into the device's wallpaper palette via
+        :meth:`Theme.system` is left alone: that palette is authoritative.
+
+        :returns: True when the palette changed.
+        """
+        from pydrud.core.responsive import MediaQuery as _MQ
+        from pydrud.widgets.theme import Theme as _Theme
+
+        if getattr(self._page, "theme_mode", "light") != "system":
+            return False
+        if _Theme._uses_system():
+            return False
+        want_dark = bool(_MQ.is_dark())
+        if want_dark == bool(_Theme.dark_mode):
+            return False
+        if want_dark:
+            _Theme.dark()
+        else:
+            _Theme.light()
+        self._send_theme()
+        return True
 
 
     def _handle_render_confirmation(self, event_type: str, data: dict) -> None:
@@ -351,6 +431,13 @@ class RenderMixin:
         # apply real metrics and send a follow-up snapshot for responsive layout.
         self.render()
         self._apply_metrics(d)
+        # A page in "system" mode adopts the device's dark setting before the
+        # metrics-driven re-render, so the very first painted frame is right.
+        self._sync_system_theme()
+        # Let the native side follow the same mode (system bars, night mode).
+        self._send(json.dumps({"cmd": "theme_mode",
+                               "mode": getattr(self._page, "theme_mode",
+                                               "system")}) + "\n")
         self.render()
 
     def _handle_metrics(self, d: dict) -> None:
@@ -361,6 +448,7 @@ class RenderMixin:
         """
         if not self._apply_metrics(d):
             return
+        self._sync_system_theme()
         for cb in list(self._metrics_handlers):
             try:
                 cb(_MQ_INFO())

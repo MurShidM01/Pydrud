@@ -104,6 +104,11 @@ class App(RenderMixin, BridgeMixin, LifecycleMixin, HotReloadMixin):
         self._confirmed_revision = 0
         self._inflight: dict[str, RenderTransaction] = {}
         self._inflight_trees: dict[str, Widget] = {}
+        #: The palette the device last received, so an animated theme change
+        #: can tween from it.
+        self._pushed_scheme = None
+        #: Token identifying the running theme tween, if any.
+        self._theme_tween = None
         #: Remaining frames of a chunked snapshot, sent one ACK at a time.
         self._outbox: list[tuple[dict, str]] = []
         #: The full tree a chunked snapshot is rebuilding, applied on the
