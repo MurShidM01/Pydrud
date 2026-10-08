@@ -32,10 +32,11 @@ android {
         targetSdk = {{ target_sdk }}
         versionCode = {{ version_code | default(1) }}
         versionName = "{{ version_name | default('1.0.0') }}"
-{% if (runtime_backend | default('chaquopy')) == 'chaquopy' %}
+{% if (runtime_backend | default('chaquopy')) == 'chaquopy' and not (abi_splits | default(false)) %}
 
         // The embedded CPython interpreter ships one native library per ABI;
-        // a host/none build has no interpreter, so it lists none.
+        // a host/none build has no interpreter, so it lists none. With
+        // `abi_splits` on, the split block below picks the ABIs instead.
         ndk {
             abiFilters += listOf({{ abi_filters | default('"arm64-v8a", "armeabi-v7a", "x86_64"') }})
         }
@@ -73,6 +74,22 @@ android {
             isMinifyEnabled = false
         }
     }
+{% if abi_splits | default(false) %}
+
+    // One APK per ABI plus a universal APK (`abi_splits: true` in pydrud.yaml).
+    // A split APK carries only its own ABI's native libraries — for a Chaquopy
+    // app that is roughly a third of the universal size — so a release can
+    // offer arm64-v8a, armeabi-v7a and x86_64 downloads next to the universal
+    // one. `reset()` drops the default filter list before `include()` sets it.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include({{ abi_filters | default('"arm64-v8a", "armeabi-v7a", "x86_64"') }})
+            isUniversalApk = true
+        }
+    }
+{% endif %}
 
     bundle {
         language { enableSplit = false }   // one APK with every locale

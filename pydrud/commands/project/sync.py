@@ -132,6 +132,10 @@ def _sync_context(project_dir: str, found: dict) -> dict:
     if not abi_filters_list:
         raise ProjectConfigError("'abi_filters' must contain at least one ABI")
 
+    # Per-ABI APK splits are opt-in: with them on, `pydrud build` writes one
+    # APK per ABI (a fraction of the universal size) plus a universal APK.
+    abi_splits = _config_bool(config, "abi_splits", False)
+
     assets_dir = _config_string(config, "assets_dir", "assets") or "assets"
     assets_dir = assets_dir.replace("\\", "/").strip("/")
     if not assets_dir or any(part == ".." for part in assets_dir.split("/")):
@@ -184,6 +188,7 @@ def _sync_context(project_dir: str, found: dict) -> dict:
         "cleartext_traffic": _config_bool(config, "cleartext_traffic", True),
         "abi_filters_list": abi_filters_list,
         "abi_filters": ", ".join(f'"{abi}"' for abi in abi_filters_list),
+        "abi_splits": abi_splits,
         "permissions": permissions,
         "capabilities_list": sorted(capability_names),
         "capabilities": {name: name in capability_names

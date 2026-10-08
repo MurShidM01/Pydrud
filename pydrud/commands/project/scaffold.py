@@ -138,6 +138,9 @@ def create_project(
         "abi_filters_list": ["arm64-v8a", "armeabi-v7a", "x86_64"],
         "abi_filters": ", ".join(
             f'"{abi}"' for abi in ("arm64-v8a", "armeabi-v7a", "x86_64")),
+        # Off by default: a split build writes one APK per ABI plus a universal
+        # APK, which is what you want to distribute but noisy for a quick run.
+        "abi_splits": False,
         "scheme": pydrud_app_name.replace("_", ""),
         "app_links_host": "",
         "cleartext_traffic": True,

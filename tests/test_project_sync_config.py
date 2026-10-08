@@ -151,6 +151,20 @@ pydrud_version: "1.0.0"
         self.assertIn('package = "com.pydrud.taskflow"', toml)
         self.assertIn('requests = ">=2.31"', toml)
 
+    def test_abi_splits_emit_per_abi_apks_instead_of_abi_filters(self):
+        # `abi_splits: true` switches from a single universal APK to one APK
+        # per ABI plus a universal APK.
+        yaml = self.read("pydrud.yaml").replace(
+            "abi_splits: false", "abi_splits: true")
+        self.write("pydrud.yaml", yaml)
+        self.assertTrue(sync_project(self.project, update_runtime=False))
+        gradle = self.read("android/app/build.gradle.kts")
+        self.assertIn("splits {", gradle)
+        self.assertIn("isUniversalApk = true", gradle)
+        self.assertIn('include("arm64-v8a", "armeabi-v7a", "x86_64")', gradle)
+        # abiFilters and splits.abi must not be set together — AGP rejects it.
+        self.assertNotIn("abiFilters", gradle)
+
     def test_old_manifest_shape_uses_toml_scheme_and_yaml_identity(self):
         # Matches projects generated before the expanded YAML schema.
         self.write("pydrud.yaml", """\

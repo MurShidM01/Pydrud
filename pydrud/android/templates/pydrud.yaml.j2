@@ -16,6 +16,11 @@ abi_filters:
   - "{{ abi }}"
 {% endfor %}
 
+# Emit one APK per ABI (plus a universal APK) instead of a single universal
+# APK. Split APKs are a fraction of the size, so users download only their
+# device's ABI. `pydrud build` then writes several APKs into the output dir.
+abi_splits: {{ "true" if abi_splits | default(false) else "false" }}
+
 # Android application behavior
 assets_dir: "{{ assets_dir | default("assets") }}"
 scheme: "{{ scheme | default(pydrud_app_name) }}"
@@ -51,6 +56,6 @@ assets_dir: "{{ assets_dir | default("assets") }}"
 {% endif %}
 
 # Framework and renderer protocol metadata
-framework_version: "{{ pydrud_runtime_version | default("2.1.1") }}"
+framework_version: "{{ pydrud_runtime_version | default("2.1.2") }}"
 protocol_version: {{ protocol_version | default(2) }}
 pydrud_version: "{{ pydrud_version }}"
