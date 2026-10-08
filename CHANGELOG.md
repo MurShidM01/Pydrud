@@ -110,6 +110,18 @@ All notable changes to Pydrud are documented here.
   applied by `theme.use_light()` in `app.main`, which it imports for exactly
   that side effect.
 
+### Fixed — a compact app bar was stretched back to full height by its own controls
+* **`AppBar(density="compact")` had no effect on the bar height whenever it
+  carried a leading control or an action.** Each control is wrapped in a
+  ripple-backed slot padded by 12dp, and an icon button already meets the 48dp
+  touch-target guideline — so the slot, not the density, decided the bar height
+  (a leading icon plus one action rendered an ~88dp bar next to a 56dp
+  title-only bar). A compact bar now wraps its controls in a 2dp slot, leaving
+  the control's own size to stand; combined with `size="sm"` controls and an
+  explicit `height`, every compact bar measures the same. Normal and
+  comfortable densities are unchanged.
+
+
 ### Changed — the Heartbeat screen is responsive, and the transport button is a real FAB
 * **The screen now reproduces the design's CSS `clamp()` rules from the live
   window.** `heartbeat._layout()` samples `MediaQuery` (dp) and applies the

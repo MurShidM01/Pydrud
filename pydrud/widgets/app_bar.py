@@ -161,10 +161,18 @@ class AppBar(Widget):
         )
 
     def _action_slot(self, child: Widget, suffix: str) -> Container:
-        """Wrap an icon/button in a 48dp circular, ripple-backed target."""
+        """Wrap an icon/button in a circular, ripple-backed target.
+
+        The control keeps its own size (and a ``size="sm"`` button already
+        carries a comfortable touch target); the slot only adds breathing
+        room. A compact bar drops that halo from 12dp to 2dp, which is what
+        lets its controls stop dictating the bar height — otherwise an icon
+        button would stretch a compact bar back to full height.
+        """
+        pad = 2 if self.density == "compact" else 12
         return Container(
             key=f"{self.key}.{suffix}",
-            padding=EdgeInsets.all(12),
+            padding=EdgeInsets.all(pad),
             style={"borderRadius": 24, "feedback": True},
             child=child,
         )

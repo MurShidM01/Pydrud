@@ -136,6 +136,25 @@ class TestWidgetQualityOfLife(unittest.TestCase):
         with self.assertRaises(ValueError):
             AppBar("Bad", density="huge")
 
+    def test_compact_density_shrinks_the_action_slot_halo(self):
+        """A compact bar's controls must not stretch it back to full height.
+
+        An icon button keeps its own (tall) touch target, so a compact bar has
+        to stop adding the 12dp halo a normal bar wraps around each control —
+        otherwise the slot, not the density, decides the bar height.
+        """
+        from pydrud import IconButton, Icons
+
+        def slot_pad(density):
+            bar = AppBar("Bar", density=density,
+                         actions=[IconButton(Icons.QR_CODE)]).to_dict()
+            slots = [child for child in bar["children"][0]["children"]
+                     if child["key"].endswith("_action0")]
+            return slots[0]["style"]["padding"]
+
+        self.assertEqual(slot_pad("compact")["top"], 2)
+        self.assertEqual(slot_pad("normal")["top"], 12)
+
     def test_svg_api_and_plain_image_share_the_native_image_type(self):
         self.assertEqual(Image("art.svg").to_dict()["type"], "Image")
         self.assertEqual(SvgPicture("art.svg").to_dict()["type"], "Image")
