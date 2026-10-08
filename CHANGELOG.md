@@ -6,6 +6,7 @@ All notable changes to Pydrud are documented here.
 
 | Version | Theme | Highlights |
 |---------|-------|------------|
+| [2.1.1](#211--2026-10-09) | CSS-style stylesheets | PSS gains CSS variables, pseudo-classes, `@media`, `@keyframes` and `transition`; pluggable runtime backends; Heartbeat starter; light/dark design system |
 | [2.1.0](#210--2026-10-07) | Platforms and stylesheets | `create`/`init android` CLI, Chaquopy-free Android preview shell, starter PSS theme, Pydash default with runtime-aware tooling |
 | [2.0.3](#203--2026-10-06) | Production readiness | All QA findings closed, renderer hardening, accessibility, modular structure (no file > 1,000 lines) |
 | [2.0.2](#202--reliable-haptics-and-expanded-widget-catalogue) | Reliability & widgets | Clean logs, reliable haptics, expanded widget catalogue |
@@ -23,7 +24,7 @@ All notable changes to Pydrud are documented here.
 
 ---
 
-## [Unreleased]
+## [2.1.1] — 2026-10-09
 
 ### Added — PSS is now a full CSS-style styling language
 * **PSS speaks the CSS authoring surface.** The stylesheet format now supports

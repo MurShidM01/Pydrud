@@ -374,8 +374,9 @@ all without a device or emulator.
 
 | Version | Focus |
 |---------|-------|
+| **v2.1.1** | PSS as a full CSS-style language, declarative `@keyframes`/`transition`/`:active`, pluggable runtime backends, Heartbeat starter, content blur, animated theming |
 | **v2.1.0** | `create`/`init android` CLI, pluggable runtime backends, PSS engine, Heartbeat starter, runtime-aware tooling |
-| **Next** | PSS as a full CSS-style language, declarative `@keyframes`/`transition`/`:active`, declarative overlays, content blur, animated theming |
+| **Next** | Declarative overlays, deeper Material coverage |
 | **Later** | iOS (SwiftUI), Web (WASM) and macOS desktop backends |
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete itemised history.
