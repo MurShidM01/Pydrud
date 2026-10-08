@@ -6,6 +6,7 @@ All notable changes to Pydrud are documented here.
 
 | Version | Theme | Highlights |
 |---------|-------|------------|
+| [2.1.4](#214--2026-10-09) | Per-ABI via flavors | Rebuilds `abi_splits` with a product flavor dimension (Chaquopy rejects `splits.abi`); `pydrud build` collects the flavor APKs |
 | [2.1.3](#213--2026-10-09) | Split-build fix | `pydrud build` discovers per-ABI APKs, prints them all and returns the universal one; `--output` copies every split |
 | [2.1.2](#212--2026-10-09) | Per-ABI builds | Opt-in `abi_splits` emits one APK per ABI plus a universal APK for smaller downloads |
 | [2.1.1](#211--2026-10-09) | CSS-style stylesheets | PSS gains CSS variables, pseudo-classes, `@media`, `@keyframes` and `transition`; pluggable runtime backends; Heartbeat starter; light/dark design system |
@@ -23,6 +24,26 @@ All notable changes to Pydrud are documented here.
 | [1.2.0](#120--the-full-android-toolkit) | Full Android toolkit | Material components, camera, push, background work |
 | [1.1.0](#110) / [1.0.1](#101) | Foundation | Stack/Positioned, ListView, GridView, Card, system UI |
 | [1.0.0](#100) | First release | Declarative Python → native Android over a TCP bridge |
+
+---
+
+## [2.1.4] — 2026-10-09
+
+### Fixed — per-ABI APKs are built with product flavors, not APK splits
+* **The 2.1.2/2.1.3 `splits.abi` approach could not build a Chaquopy app.**
+  Chaquopy requires `ndk.abiFilters`, and AGP rejects setting it alongside
+  `splits.abi` (*"Conflicting configuration … cannot be present when splits
+  abi filters are set"*), so a project with `abi_splits: true` failed at
+  configuration time. Per-ABI APKs are now produced with a **product flavor
+  dimension** — one flavor per ABI plus a `universal` flavor — which is the
+  route Chaquopy's own FAQ recommends and works with the embedded
+  interpreter.
+* **`pydrud build` finds the flavor APKs.** A flavored build writes
+  `apk/<flavor>/<variant>/app-<flavor>-<variant>.apk`, so the builder reads
+  `abi_splits` from `pydrud.yaml` and collects that layout (universal first),
+  which also ignores a stale `app-<variant>.apk` left over from before the
+  flavors were added.
+* `abi_splits` stays off by default; existing projects are unaffected.
 
 ---
 

@@ -259,7 +259,7 @@ public class BridgeService {
         try {
             JSONObject data = collectMetrics();
             data.put("protocol_version", PROTOCOL_VERSION);
-            data.put("renderer_version", "{{ pydrud_runtime_version | default('2.1.3') }}");
+            data.put("renderer_version", "{{ pydrud_runtime_version | default('2.1.4') }}");
             JSONObject capabilities = new JSONObject();
             capabilities.put("transactional_render", true);
             capabilities.put("revisioned_render", true);

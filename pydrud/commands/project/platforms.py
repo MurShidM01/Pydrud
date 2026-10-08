@@ -8,7 +8,7 @@ the project directory::
     cd my_app
     pydrud init android   # standalone APK with embedded Python
 
-``android`` is the only platform in 2.1.3. It embeds CPython with Chaquopy
+``android`` is the only platform in 2.1.4. It embeds CPython with Chaquopy
 so the APK runs the app fully offline; ``pydrud dev`` remains the desktop
 development loop. iOS, Linux, Windows, web and macOS are reserved names for
 future platforms.
