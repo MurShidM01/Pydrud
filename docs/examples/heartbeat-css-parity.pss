@@ -1,0 +1,418 @@
+/*
+ * Heartbeat — the reference prototype's stylesheet, expressed in PSS.
+ *
+ * This file is the web `<style>` block from the design, translated to PSS
+ * with as little change as possible. It exists to show that PSS now speaks the
+ * CSS *authoring surface*: custom properties, the universal selector,
+ * pseudo-classes, `@media`, `@keyframes`, `transition`, and the
+ * `clamp()`/`calc()`/`env()` value language all work the way a CSS author
+ * expects.
+ *
+ * What changed, and why
+ * ---------------------
+ * Pydrud renders a native widget tree, not a browser box model, so a few
+ * declarations have no native meaning. They are written here exactly as in
+ * the prototype and are accepted-then-ignored (with one warning): `box-sizing`,
+ * `display`, `place-items`, `fill`, `pointer-events`. Pydrud expresses those
+ * with widgets — `Row`/`Column`/`Stack` instead of `display:flex`, a `Stack`
+ * instead of `position:absolute` children.
+ *
+ * Element selectors (`html`, `body`, `button`) are lowercase and match no
+ * Pydrud widget; the classes below are what the starter app attaches. Colours
+ * use `$token` for the live palette and `var(--name)` for the design's own
+ * custom properties — both resolve at paint time.
+ */
+
+:root {
+    --bg: #F8F7F3;
+    --ink: #26231F;
+    --muted: #A7A39B;
+    --heart: #E85D68;
+    --heart-soft: rgba(232, 93, 104, .08);
+    --heart-line: rgba(232, 93, 104, .18);
+    --button: #26231F;
+    --white: #FFFFFF;
+}
+
+/* Accepted and ignored: Pydrud has no box model or tap-highlight. */
+* {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+    width: 100%;
+    min-height: 100%;
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: Inter, ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+}
+
+button {
+    font: inherit;
+    -webkit-appearance: none;
+    appearance: none;
+    border: 0;
+    outline: 0;
+}
+
+.app {
+    width: 100%;
+    max-width: 430px;
+    min-height: 100dvh;
+    position: relative;
+    padding: max(16px, calc(18px + env(safe-area-inset-top)))
+             clamp(16px, 5vw, 24px)
+             max(16px, calc(18px + env(safe-area-inset-bottom)));
+    display: flex;
+    flex-direction: column;
+}
+
+/* Top area — intentionally tiny and native-like. */
+.topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    min-height: 32px;
+}
+
+.app-name {
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: -.2px;
+}
+
+.session {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.session-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #D8D5CC;
+    transition: background .2s ease;
+}
+
+.running .session-dot {
+    background: var(--heart);
+}
+
+/* Main canvas */
+.stage {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+    position: relative;
+    padding: clamp(18px, 7vh, 64px) 0 clamp(14px, 4vh, 30px);
+}
+
+.visual {
+    width: clamp(150px, 50vw, 230px);
+    aspect-ratio: 1;
+    position: relative;
+    display: grid;
+    place-items: center;
+    flex: none;
+}
+
+/* Soft pulse field */
+.glow {
+    position: absolute;
+    width: clamp(78px, 25vw, 112px);
+    height: clamp(78px, 25vw, 112px);
+    border-radius: 50%;
+    background: var(--heart-soft);
+    opacity: 0;
+    transform: scale(.8);
+}
+
+.running .glow {
+    animation: glow 1.12s ease-out infinite;
+}
+
+@keyframes glow {
+    0%   { opacity: .18; transform: scale(.78) }
+    45%  { opacity: .10; transform: scale(1.22) }
+    100% { opacity: 0;   transform: scale(1.7) }
+}
+
+.ring {
+    position: absolute;
+    width: clamp(112px, 38vw, 156px);
+    height: clamp(112px, 38vw, 156px);
+    border: 1px solid transparent;
+    border-radius: 50%;
+    opacity: 0;
+}
+
+.ring.one {
+    border-color: var(--heart-line);
+}
+
+.ring.two {
+    border-color: rgba(232, 93, 104, .10);
+}
+
+.running .ring.one {
+    animation: ring 1.12s ease-out infinite;
+}
+
+.running .ring.two {
+    animation: ring 1.12s .37s ease-out infinite;
+}
+
+@keyframes ring {
+    0%   { opacity: .42; transform: scale(.68) }
+    100% { opacity: 0;   transform: scale(1.65) }
+}
+
+.heart {
+    width: clamp(48px, 16vw, 62px);
+    height: clamp(48px, 16vw, 62px);
+    color: var(--heart);
+    z-index: 3;
+    transform-origin: center;
+}
+
+.running .heart {
+    animation: beat .84s infinite;
+}
+
+@keyframes beat {
+    0%, 100% { transform: scale(1) }
+    9%       { transform: scale(1.10) }
+    16%      { transform: scale(1) }
+    24%      { transform: scale(1.055) }
+    34%      { transform: scale(1) }
+}
+
+.number {
+    margin-top: clamp(-12px, -2.5vw, -18px);
+    font-size: clamp(78px, 24vw, 108px);
+    line-height: .86;
+    letter-spacing: clamp(-6px, -1.8vw, -9px);
+    font-weight: 870;
+    font-variant-numeric: tabular-nums;
+    position: relative;
+    z-index: 4;
+}
+
+.unit {
+    margin-top: 12px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 750;
+    letter-spacing: .25px;
+}
+
+.message {
+    min-height: 17px;
+    margin-top: 11px;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 650;
+    text-align: center;
+}
+
+/* Tiny ECG trace — decorative interaction feedback, not a separate screen. */
+.ecg-wrap {
+    width: clamp(130px, 42vw, 160px);
+    height: 22px;
+    margin-top: clamp(12px, 3vw, 18px);
+    overflow: hidden;
+    opacity: .45;
+}
+
+.ecg {
+    width: 320px;
+    height: 22px;
+    transform: translateX(0);
+}
+
+.running .ecg {
+    animation: ecgMove 1.68s linear infinite;
+}
+
+@keyframes ecgMove {
+    from { transform: translateX(0) }
+    to   { transform: translateX(-160px) }
+}
+
+/* Compact mobile action: icon-only, no oversized FAB. */
+.fab {
+    width: 56px;
+    height: 56px;
+    position: absolute;
+    right: clamp(16px, 5vw, 24px);
+    bottom: max(20px, env(safe-area-inset-bottom));
+    z-index: 5;
+    border-radius: 50%;
+    background: var(--button);
+    color: #fff;
+    display: grid;
+    place-items: center;
+    touch-action: manipulation;
+    transition: transform .12s ease, background .18s ease, color .18s ease;
+}
+
+.fab:active {
+    transform: scale(.92);
+}
+
+.running .fab {
+    background: var(--heart-soft);
+    color: var(--heart);
+}
+
+.bottom {
+    min-height: 22px;
+    margin-top: 10px;
+    padding-right: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.footnote {
+    color: #B5B1A9;
+    font-size: 9px;
+    font-weight: 600;
+}
+
+/* Short feedback; no snackbar-style web UI. */
+.flash {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    width: 180px;
+    height: 180px;
+    border-radius: 50%;
+    transform: translate(-50%, -50%) scale(.55);
+    background: var(--heart-soft);
+    opacity: 0;
+    pointer-events: none;
+}
+
+.flash.show {
+    animation: flash .55s ease-out;
+}
+
+@keyframes flash {
+    0%   { opacity: .75; transform: translate(-50%, -50%) scale(.55) }
+    100% { opacity: 0;   transform: translate(-50%, -50%) scale(1.35) }
+}
+
+/* Real phone widths: FAB stays inside the visible viewport. */
+@media (max-width: 699px) {
+    .fab {
+        position: fixed;
+        right: clamp(14px, 5vw, 20px);
+        bottom: max(16px, env(safe-area-inset-bottom));
+    }
+}
+
+/* Small phones */
+@media (max-width: 360px) {
+    .app {
+        padding-top: max(14px, env(safe-area-inset-top));
+        padding-bottom: max(14px, env(safe-area-inset-bottom));
+    }
+
+    .stage {
+        padding-top: 12px;
+        padding-bottom: 8px;
+    }
+
+    .number {
+        margin-top: -8px;
+    }
+
+    .unit {
+        margin-top: 8px;
+        font-size: 10px;
+    }
+
+    .message {
+        margin-top: 8px;
+        font-size: 9px;
+    }
+
+    .ecg-wrap {
+        margin-top: 11px;
+        height: 20px;
+    }
+
+    .fab {
+        width: 52px;
+        height: 52px;
+        right: 14px;
+        bottom: max(14px, env(safe-area-inset-bottom));
+        border-radius: 50%;
+    }
+}
+
+/* Short phones / landscape */
+@media (max-height: 700px) {
+    .app {
+        padding-top: max(12px, env(safe-area-inset-top));
+        padding-bottom: max(12px, env(safe-area-inset-bottom));
+    }
+
+    .stage {
+        padding-top: 6px;
+        padding-bottom: 6px;
+    }
+
+    .visual {
+        width: 150px;
+    }
+
+    .number {
+        font-size: 78px;
+        margin-top: -6px;
+    }
+
+    .unit {
+        margin-top: 6px;
+    }
+
+    .message {
+        margin-top: 6px;
+    }
+
+    .ecg-wrap {
+        margin-top: 8px;
+    }
+}
+
+/* Very narrow screens */
+@media (max-width: 320px) {
+    .app {
+        padding-left: 14px;
+        padding-right: 14px;
+    }
+
+    .message {
+        max-width: 240px;
+    }
+}
+
+/* Desktop preview */
+@media (min-width: 700px) {
+    .app {
+        min-height: 820px;
+        height: auto;
+        border: 1px solid #E9E7E0;
+        border-radius: 30px;
+    }
+}

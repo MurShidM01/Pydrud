@@ -20,6 +20,10 @@ class Text(Widget):
     _widget_type = "Text"
 
 
+class Column(Widget):
+    _widget_type = "Column"
+
+
 class TestPSSLexer(unittest.TestCase):
     """Test the PSS lexer produces correct tokens."""
 
@@ -258,6 +262,452 @@ class TestWidgetClassIntegration(unittest.TestCase):
         result, warnings = resolve_styles(sheet, [btn])
         self.assertIn("myid", result)
         self.assertEqual(result["myid"].get("color"), "red")
+
+
+class TestNewStyleKeys(unittest.TestCase):
+    """The per-corner radius, ripple, shadow and blur keys added for the
+    design system are recognised and normalise from their CSS spellings."""
+
+    def test_new_keys_are_known(self):
+        from pydrud.core.styles.schema import VALID_STYLE_KEYS
+
+        for key in ("borderTopLeftRadius", "borderTopRightRadius",
+                    "borderBottomLeftRadius", "borderBottomRightRadius",
+                    "ripple"):
+            self.assertIn(key, VALID_STYLE_KEYS)
+
+    def test_kebab_spellings_normalise(self):
+        from pydrud.core.styles.schema import normalize_key
+
+        self.assertEqual(normalize_key("border-top-left-radius"),
+                         "borderTopLeftRadius")
+        self.assertEqual(normalize_key("border-bottom-right-radius"),
+                         "borderBottomRightRadius")
+
+    def test_blur_is_a_known_number_key(self):
+        from pydrud.core.styles.schema import KEY_KIND, VALID_STYLE_KEYS
+
+        self.assertIn("blur", VALID_STYLE_KEYS)
+        self.assertEqual(KEY_KIND["blur"], "number")
+
+    def test_blur_resolves_without_warnings(self):
+        sheet = parse_pss("Container { blur: 12; }")
+        result, warnings = resolve_styles(sheet, [Container(key="glass")])
+        self.assertEqual(result["glass"].get("blur"), 12)
+        self.assertEqual(warnings, [])
+
+    def test_blur_is_declared_by_the_android_profile(self):
+        sheet = parse_pss("Container { blur: 12; }")
+        _, warnings = resolve_styles(
+            sheet, [Container(key="glass")], AndroidRendererProfile())
+        self.assertEqual(
+            [w for w in warnings if "blur" in str(w)], [],
+            "the Android renderer implements blur, so it must declare it")
+
+    def test_shadow_accepts_number_and_composite(self):
+        # A plain number and the full dict must both pass without a kind
+        # warning, because ``shadow`` is intentionally dual-kind.
+        for value in ("4", "{ offsetX: 0, offsetY: 2, blur: 8, color: #00000040 }"):
+            source = f"Button {{ shadow: {value}; }}"
+            sheet = parse_pss(source)
+            _, warnings = resolve_styles(sheet, [Button(key="b")])
+            kind_warnings = [w for w in warnings if "shadow" in str(w)]
+            self.assertEqual(kind_warnings, [], f"unexpected warning for {value}")
+
+    def test_space_between_alignment_resolves(self):
+        source = "Container { mainAxisAlignment: space_between; }"
+        sheet = parse_pss(source)
+        result, _ = resolve_styles(sheet, [Container(key="row")])
+        self.assertEqual(result["row"].get("mainAxisAlignment"),
+                         "space_between")
+
+    def test_composite_blocks_accept_semicolon_separators(self):
+        # Inside a composite block the natural PSS separator is ';' (as in a
+        # declaration block) as well as ','. Both must produce a real object
+        # rather than one collapsed string value.
+        source = (
+            ".card {\n"
+            "    shadow: {\n"
+            "        color: #40000000;\n"
+            "        offsetX: 0;\n"
+            "        offsetY: 10;\n"
+            "        blur: 24;\n"
+            "        spread: 0;\n"
+            "    };\n"
+            "    gradient: { angle: 135; colors: [#FFFFFFFF, #FFF1F3FF]; stops: [0, 1] };\n"
+            "}\n"
+        )
+        sheet = parse_pss(source)
+        self.assertEqual(sheet.diagnostics, [])
+        decls = dict(sheet.rules[0].body.declarations)
+        self.assertEqual(decls["shadow"], {
+            "color": "#40000000", "offsetX": 0, "offsetY": 10,
+            "blur": 24, "spread": 0,
+        })
+        self.assertEqual(decls["gradient"], {
+            "angle": 135, "colors": ["#FFFFFFFF", "#FFF1F3FF"], "stops": [0, 1],
+        })
+
+
+class TestPSSValueExpressions(unittest.TestCase):
+    """The CSS numeric value language: calc/min/max/clamp/env and viewport units."""
+
+    def setUp(self):
+        from pydrud.core.styles.values import ValueContext
+
+        self.context = ValueContext(
+            width=360, height=640, safe_top=24, safe_bottom=34)
+
+    def _eval(self, text, **overrides):
+        from pydrud.core.styles.values import ValueContext, evaluate_expression
+
+        context = ValueContext(
+            width=overrides.get("width", self.context.width),
+            height=overrides.get("height", self.context.height),
+            safe_top=overrides.get("safe_top", self.context.safe_top),
+            safe_bottom=overrides.get("safe_bottom", self.context.safe_bottom),
+        )
+        return evaluate_expression(text, context)
+
+    def test_clamp_picks_the_viewport_proportional_ideal(self):
+        self.assertAlmostEqual(self._eval("clamp(16px, 5vw, 24px)"), 18.0)
+
+    def test_clamp_floor(self):
+        self.assertAlmostEqual(self._eval("clamp(16px, 5vw, 24px)", width=200),
+                               16.0)
+
+    def test_clamp_ceiling(self):
+        self.assertAlmostEqual(self._eval("clamp(16px, 5vw, 24px)", width=600),
+                               24.0)
+
+    def test_negative_clamp_matches_the_design(self):
+        # `clamp(-12px, -2.5vw, -18px)` — CSS returns the min when max < min.
+        self.assertAlmostEqual(self._eval("clamp(-12px, -2.5vw, -18px)"), -12.0)
+
+    def test_max_with_calc_and_env(self):
+        self.assertAlmostEqual(
+            self._eval("max(16px, calc(18px + env(safe-area-inset-bottom)))"),
+            52.0)
+
+    def test_env_reports_a_defined_zero_inset(self):
+        # A device that reports no inset still *defines* the variable, so the
+        # value is 0 — the fallback only applies to an unknown name.
+        self.assertAlmostEqual(
+            self._eval("env(safe-area-inset-top, 4px)", safe_top=0), 0.0)
+
+    def test_env_fallback_for_an_unknown_name(self):
+        self.assertAlmostEqual(self._eval("env(viewport-foo, 4px)"), 4.0)
+
+    def test_viewport_height_units(self):
+        self.assertAlmostEqual(self._eval("100dvh"), 640.0)
+        self.assertAlmostEqual(self._eval("50vh"), 320.0)
+
+    def test_calc_arithmetic(self):
+        self.assertAlmostEqual(self._eval("calc(18px + 6px * 2)"), 30.0)
+
+    def test_vmin_uses_the_shorter_side(self):
+        self.assertAlmostEqual(self._eval("10vmin"), 36.0)
+
+    def test_unresolvable_fragments_are_left_alone(self):
+        for text in ("100%", "50%", "430px", "#FF00AA", "red", "1.12s",
+                     "calc(100% - 20px)", "sans-serif", "none"):
+            self.assertIsNone(self._eval(text), f"{text!r} should not resolve")
+
+    def test_evaluate_recurses_into_composites(self):
+        from pydrud.core.styles.values import evaluate
+
+        result = evaluate({"top": "clamp(18px, 7vh, 64px)", "color": "#FF0000"},
+                          self.context)
+        self.assertAlmostEqual(result["top"], 44.8)
+        self.assertEqual(result["color"], "#FF0000")
+
+    def test_decompose_transform(self):
+        from pydrud.core.styles.values import decompose_transform
+
+        self.assertEqual(decompose_transform("scale(.92)", self.context),
+                         {"scale": 0.92})
+        self.assertEqual(
+            decompose_transform("translate(-50%,-50%) scale(.55)", self.context),
+            {"scale": 0.55})
+        self.assertEqual(decompose_transform("rotate(45deg)", self.context),
+                         {"rotation": 45.0})
+
+    def test_from_media_query_uses_live_metrics(self):
+        from pydrud.core.responsive import MediaQuery
+        from pydrud.core.styles.values import ValueContext
+
+        previous = MediaQuery.width
+        try:
+            MediaQuery.update(width=411, height=891)
+            context = ValueContext.from_media_query()
+            self.assertAlmostEqual(context.width, 411.0)
+            self.assertAlmostEqual(context.height, 891.0)
+        finally:
+            MediaQuery.update(width=previous)
+
+
+class TestPSSAtRulesAndPseudo(unittest.TestCase):
+    """Universal selector, pseudo-classes, @media and @keyframes parse."""
+
+    def test_universal_and_pseudo_tokens(self):
+        from pydrud.core.styles.lexer import TokenKind
+
+        tokens = lex("* { a: 1; } .fab:active { b: 2; }")
+        kinds = [t.kind for t in tokens]
+        self.assertIn(TokenKind.UNIVERSAL_SEL, kinds)
+        self.assertIn(TokenKind.PSEUDO, kinds)
+        pseudos = [t.value for t in tokens if t.kind == TokenKind.PSEUDO]
+        self.assertEqual(pseudos, [":active"])
+
+    def test_at_rule_and_keyframe_tokens(self):
+        from pydrud.core.styles.lexer import TokenKind
+
+        tokens = lex("@media (max-width: 699px) { .a { b: 1 } }"
+                     "@keyframes glow { 0% { opacity: 0 } to { opacity: 1 } }")
+        self.assertIn(TokenKind.AT, [t.kind for t in tokens])
+        self.assertIn(TokenKind.PRELUDE, [t.kind for t in tokens])
+        keyframe_selectors = [t.value for t in tokens
+                              if t.kind == TokenKind.KEYFRAME_SEL]
+        self.assertEqual(keyframe_selectors, ["0%", "to"])
+
+    def test_parse_root_variables(self):
+        sheet = parse_pss(":root { --bg: #FFF; --heart: #E85D68; }")
+        self.assertEqual(sheet.variables,
+                         {"--bg": "#FFF", "--heart": "#E85D68"})
+
+    def test_parse_media_condition(self):
+        from pydrud.core.styles.parser import parse_media_condition
+
+        sheet = parse_pss(
+            "@media (max-width: 360px) and (min-height: 500px) { .a { b: 1 } }")
+        condition = sheet.rules[0].media
+        self.assertIsNotNone(condition)
+        features = condition.alternatives[0]
+        self.assertEqual([(f.name, f.op, f.value) for f in features],
+                         [("width", "max", 360.0), ("height", "min", 500.0)])
+        # A comma list is an OR of alternatives.
+        self.assertEqual(
+            len(parse_media_condition("(max-width: 1px), (min-width: 2px)"
+                                      ).alternatives), 2)
+
+    def test_parse_keyframes(self):
+        sheet = parse_pss(
+            "@keyframes glow { 0% { opacity: .18; transform: scale(.78) }"
+            " 100% { opacity: 0 } }")
+        glow = sheet.keyframes["glow"]
+        self.assertEqual([f.offset for f in glow.frames], [0.0, 1.0])
+        self.assertEqual(glow.frames[0].declarations,
+                         [("opacity", 0.18), ("transform", "scale(.78)")])
+
+    def test_parse_pseudo_on_compound(self):
+        sheet = parse_pss(".fab:active { a: 1; }")
+        compound = sheet.rules[0].selector.compounds[0]
+        self.assertEqual(compound.classes, ("fab",))
+        self.assertEqual([p.name for p in compound.pseudos], [":active"])
+
+    def test_parse_box_and_border_shorthands(self):
+        sheet = parse_pss(
+            ".a { padding: 1px 2px 3px 4px; margin: 10px 0;"
+            " border: 1px solid transparent; }")
+        decls = dict(sheet.rules[0].body.declarations)
+        self.assertEqual(decls["padding"],
+                         {"top": "1px", "right": "2px",
+                          "bottom": "3px", "left": "4px"})
+        self.assertEqual(decls["margin"],
+                         {"top": "10px", "bottom": "10px",
+                          "left": 0, "right": 0})
+        self.assertEqual(decls["border"],
+                         {"width": "1px", "color": "transparent"})
+
+    def test_single_value_box_shorthand_becomes_all_sides(self):
+        # CSS `padding: 24` / `margin: 8px` is the uniform shorthand; the
+        # renderer reads a composite, so a bare scalar must be wrapped.
+        sheet = parse_pss(
+            ".a { padding: 24; margin: 8px; padding-right: 4; }")
+        decls = dict(sheet.rules[0].body.declarations)
+        self.assertEqual(decls["padding"], {"all": 24})
+        self.assertEqual(decls["margin"], {"all": "8px"})
+
+    def test_animation_shorthand(self):
+        from pydrud.core.styles.parser import parse_animation_shorthand
+
+        self.assertEqual(
+            parse_animation_shorthand("ring 1.12s .37s ease-out infinite"),
+            {"name": "ring", "curve": "ease_out", "iterations": "infinite",
+             "duration": 1120.0, "delay": 370.0})
+
+    def test_transition_shorthand(self):
+        from pydrud.core.styles.parser import parse_transition_shorthand
+
+        self.assertEqual(
+            parse_transition_shorthand("transform .12s ease, background .18s"),
+            [{"property": "transform", "curve": "ease_in_out",
+              "duration": 120.0},
+             {"property": "background", "duration": 180.0}])
+
+
+class TestPSSResolverCSSParity(unittest.TestCase):
+    """The CSS authoring surface resolves against the widget tree."""
+
+    def setUp(self):
+        from pydrud.core.styles.values import ValueContext
+
+        self.context = ValueContext(width=360, height=640, safe_bottom=34)
+
+    def _resolve(self, source, root):
+        sheet = parse_pss(source)
+        return resolve_styles(sheet, root, context=self.context)
+
+    def test_root_variable_resolves(self):
+        root = Container(key="a", class_="app")
+        result, _ = self._resolve(
+            ":root { --bg: #F8F7F3; } .app { bg: var(--bg); }", root)
+        self.assertEqual(result["a"]["bg"], "#F8F7F3")
+
+    def test_variable_inherits_from_an_ancestor(self):
+        child = Container(key="child", class_="tinted")
+        root = Container(key="root", class_="running", children=[child])
+        result, _ = self._resolve(
+            ".running { --tint: #E85D68; } .tinted { bg: var(--tint); }", root)
+        self.assertEqual(result["child"]["bg"], "#E85D68")
+
+    def test_variable_fallback_and_unknown_warning(self):
+        root = Container(key="a", class_="app")
+        result, warnings = self._resolve(
+            ".app { bg: var(--missing, #123456); }", root)
+        self.assertEqual(result["a"]["bg"], "#123456")
+        _, warnings = self._resolve(".app { bg: var(--nope); }", root)
+        self.assertTrue(any("--nope" in w for w in warnings))
+
+    def test_clamp_and_env_resolve_to_dp(self):
+        root = Container(key="a", class_="app")
+        result, _ = self._resolve(
+            ".app { padding-top: max(16px, calc(18px + env(safe-area-inset-bottom)));"
+            " width: clamp(150px, 50vw, 230px); }", root)
+        self.assertAlmostEqual(result["a"]["padding"]["top"], 52.0)
+        self.assertAlmostEqual(result["a"]["width"], 180.0)
+
+    def test_media_max_width_applies_and_min_width_is_skipped(self):
+        root = Container(key="a", class_="fab")
+        result, _ = self._resolve(
+            "@media (max-width: 699px) { .fab { right: 14px; } }"
+            "@media (min-width: 700px) { .fab { right: 40px; } }", root)
+        self.assertAlmostEqual(result["a"]["right"], 14.0)
+
+    def test_active_becomes_a_press_subspec(self):
+        root = Container(key="a", class_="fab")
+        result, _ = self._resolve(
+            ".fab:active { transform: scale(.92); }", root)
+        self.assertEqual(result["a"]["press"], {"scale": 0.92})
+
+    def test_structural_pseudo_classes(self):
+        rows = [Container(key=f"r{i}", class_="row") for i in range(3)]
+        root = Column(key="list", class_="list", children=rows)
+        result, _ = self._resolve(
+            ".list .row:first-child { bg: #111; }"
+            ".list .row:last-child { bg: #333; }"
+            ".list .row:nth-child(2) { bg: #222; }", root)
+        self.assertEqual(result["r0"]["bg"], "#111")
+        self.assertEqual(result["r1"]["bg"], "#222")
+        self.assertEqual(result["r2"]["bg"], "#333")
+
+    def test_not_pseudo_class(self):
+        root = Column(key="root", children=[
+            Container(key="a", class_="item special"),
+            Container(key="b", class_="item"),
+        ])
+        result, _ = self._resolve(".item:not(.special) { bg: #0F0; }", root)
+        self.assertNotIn("bg", result.get("a", {}))
+        self.assertEqual(result["b"]["bg"], "#0F0")
+
+    def test_universal_selector_applies_to_every_widget(self):
+        root = Column(key="root", children=[Container(key="a"),
+                                            Container(key="b")])
+        result, _ = self._resolve("* { opacity: .5; }", root)
+        self.assertEqual(result["a"]["opacity"], 0.5)
+        self.assertEqual(result["b"]["opacity"], 0.5)
+
+    def test_keyframes_animation_attaches(self):
+        glow = Container(key="glow", class_="glow")
+        root = Container(key="root", class_="running", children=[glow])
+        result, _ = self._resolve(
+            ".running .glow { animation: glow 1.12s ease-out infinite; }"
+            "@keyframes glow { 0% { opacity: .18; transform: scale(.78) }"
+            " 100% { opacity: 0; transform: scale(1.7) } }", root)
+        spec = result["glow"]["animation"]
+        self.assertEqual(spec["duration"], 1120.0)
+        self.assertEqual(spec["iterations"], "infinite")
+        self.assertEqual(spec["keyframes"][0][1],
+                         {"opacity": 0.18, "scale": 0.78})
+
+    def test_transition_attaches_a_spec(self):
+        root = Container(key="a", class_="dot")
+        result, _ = self._resolve(
+            ".dot { transition: background .2s ease; }", root)
+        self.assertEqual(result["a"]["transition"],
+                         [{"property": "background", "curve": "ease_in_out",
+                           "duration": 200.0}])
+
+    def test_font_longhands_fold_into_the_composite(self):
+        root = Text(key="a", class_="title")
+        result, _ = self._resolve(
+            ".title { font-size: 24px; font-weight: 700; color: #111; }", root)
+        self.assertEqual(result["a"]["font"],
+                         {"size": 24.0, "weight": 700, "color": "#111"})
+
+    def test_box_longhands_fold_and_expand_all(self):
+        root = Container(key="a", class_="card")
+        result, _ = self._resolve(
+            ".card { padding: { all: 5 }; padding-top: 12px; }", root)
+        self.assertEqual(result["a"]["padding"],
+                         {"left": 5.0, "top": 12.0, "right": 5.0, "bottom": 5.0})
+
+    def test_border_longhands_fold(self):
+        root = Container(key="a", class_="ring")
+        result, _ = self._resolve(
+            ".ring { border: 1px solid transparent; border-color: #E85D68; }",
+            root)
+        self.assertEqual(result["a"]["border"],
+                         {"width": 1.0, "color": "#E85D68"})
+
+    def test_percentage_radius_becomes_a_circle(self):
+        root = Container(key="a", class_="dot")
+        result, _ = self._resolve(".dot { border-radius: 50%; }", root)
+        self.assertEqual(result["a"]["borderRadius"], 999)
+
+    def test_web_only_declarations_are_dropped_with_one_warning(self):
+        root = Container(key="a", class_="app")
+        result, warnings = self._resolve(
+            "* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }"
+            ".app { display: flex; }", root)
+        self.assertNotIn("boxSizing", result["a"])
+        self.assertNotIn("display", result["a"])
+        ignored = [w for w in warnings if "web-only" in w]
+        self.assertEqual(len(ignored), 1)
+
+
+class TestPSSSchemaParity(unittest.TestCase):
+    """The schema recognises the CSS spellings the fold relies on."""
+
+    def test_css_aliases_normalise(self):
+        from pydrud.core.styles.schema import normalize_key
+
+        self.assertEqual(normalize_key("font-size"), "fontSize")
+        self.assertEqual(normalize_key("padding-top"), "paddingTop")
+        self.assertEqual(normalize_key("border-color"), "borderColor")
+        self.assertEqual(normalize_key("background-color"), "bg")
+        self.assertEqual(normalize_key("background"), "bg")
+        self.assertEqual(normalize_key("z-index"), "zIndex")
+        self.assertEqual(normalize_key("gap"), "spacing")
+        self.assertEqual(normalize_key("-webkit-appearance"), "appearance")
+
+    def test_web_only_keys_are_recognised(self):
+        from pydrud.core.styles.schema import (
+            VALID_STYLE_KEYS, WEB_ONLY_STYLE_KEYS)
+
+        for key in ("display", "boxSizing", "pointerEvents", "flexDirection"):
+            self.assertIn(key, WEB_ONLY_STYLE_KEYS)
+            self.assertIn(key, VALID_STYLE_KEYS)
 
 
 if __name__ == "__main__":

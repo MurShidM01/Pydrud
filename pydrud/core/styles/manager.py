@@ -183,9 +183,13 @@ class StyleSheetManager:
     def _combine(self) -> StyleSheet:
         rules = []
         diagnostics: list[Diagnostic] = []
+        variables: dict[str, str] = {}
+        keyframes: dict = {}
         for path in sorted(self._loaded):
             sheet = self._loaded[path]
             rules.extend(sheet.rules)
+            variables.update(sheet.variables)
+            keyframes.update(sheet.keyframes)
             diagnostics.extend(d for d in sheet.diagnostics if d.kind == "warning")
         # In-memory overlays are ordered after disk files so development
         # payloads deterministically take precedence over stale device copies.
@@ -195,8 +199,16 @@ class StyleSheetManager:
                 diagnostics.extend(sheet.diagnostics)
                 continue
             rules.extend(sheet.rules)
+            variables.update(sheet.variables)
+            keyframes.update(sheet.keyframes)
             diagnostics.extend(sheet.diagnostics)
         for path in sorted(self._file_errors):
             diagnostics.extend(self._file_errors[path])
         self._diagnostics = diagnostics
-        return StyleSheet(rules=rules, diagnostics=diagnostics, filename="<project>")
+        return StyleSheet(
+            rules=rules,
+            diagnostics=diagnostics,
+            filename="<project>",
+            variables=variables,
+            keyframes=keyframes,
+        )
