@@ -151,19 +151,32 @@ pydrud_version: "1.0.0"
         self.assertIn('package = "com.pydrud.taskflow"', toml)
         self.assertIn('requests = ">=2.31"', toml)
 
-    def test_abi_splits_emit_per_abi_apks_instead_of_abi_filters(self):
+    def test_abi_splits_emit_per_abi_flavors_instead_of_abi_filters(self):
         # `abi_splits: true` switches from a single universal APK to one APK
-        # per ABI plus a universal APK.
+        # per ABI plus a universal APK. Chaquopy requires `ndk.abiFilters`
+        # and AGP rejects it alongside `splits.abi`, so a product flavor
+        # dimension is used instead.
         yaml = self.read("pydrud.yaml").replace(
             "abi_splits: false", "abi_splits: true")
         self.write("pydrud.yaml", yaml)
         self.assertTrue(sync_project(self.project, update_runtime=False))
         gradle = self.read("android/app/build.gradle.kts")
-        self.assertIn("splits {", gradle)
-        self.assertIn("isUniversalApk = true", gradle)
-        self.assertIn('include("arm64-v8a", "armeabi-v7a", "x86_64")', gradle)
-        # abiFilters and splits.abi must not be set together — AGP rejects it.
-        self.assertNotIn("abiFilters", gradle)
+        self.assertIn('flavorDimensions += "abi"', gradle)
+        self.assertIn("productFlavors {", gradle)
+        # One flavor per ABI plus a universal flavor.
+        self.assertIn('create("arm64")', gradle)
+        self.assertIn('create("armv7")', gradle)
+        self.assertIn('create("x86_64")', gradle)
+        self.assertIn('create("universal")', gradle)
+        self.assertIn('abiFilters += listOf("arm64-v8a")', gradle)
+        self.assertIn(
+            'abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")',
+            gradle)
+        # `splits.abi` is never used (AGP forbids it with `ndk.abiFilters`),
+        # and the defaultConfig `ndk` block is replaced by the flavors: one
+        # `ndk { … }` per flavor, none in defaultConfig.
+        self.assertNotIn("splits {", gradle)
+        self.assertEqual(gradle.count("ndk {"), 4)
 
     def test_old_manifest_shape_uses_toml_scheme_and_yaml_identity(self):
         # Matches projects generated before the expanded YAML schema.

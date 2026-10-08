@@ -43,6 +43,40 @@ def _camera_already_bundled(project_dir: str) -> bool:
         return False
 
 
+#: ABI name → a Gradle product-flavor name (a valid identifier without a
+#: hyphen). Anything not listed falls back to the ABI with its hyphens
+#: stripped, which keeps a custom ``abi_filters`` entry usable.
+_ABI_FLAVOR_NAMES = {
+    "arm64-v8a": "arm64",
+    "armeabi-v7a": "armv7",
+    "armeabi": "armeabi",
+    "x86_64": "x86_64",
+    "x86": "x86",
+    "riscv64": "riscv64",
+}
+
+
+def _abi_flavors(abi_filters: list[str]) -> list[dict[str, str]]:
+    """Build the product-flavor definitions for an ``abi_splits`` project.
+
+    Chaquopy requires ``ndk.abiFilters`` and AGP forbids setting it alongside
+    ``splits.abi``, so per-ABI APKs are produced with a product flavor
+    dimension instead — one flavor per ABI plus a ``universal`` flavor that
+    carries them all. ``abis`` is the pre-rendered Kotlin argument list.
+    """
+    flavors = [
+        {"name": _ABI_FLAVOR_NAMES.get(abi, abi.replace("-", "")),
+         "abis": f'"{abi}"'}
+        for abi in abi_filters
+    ]
+    flavors.append({
+        "name": "universal",
+        "abis": ", ".join(f'"{abi}"' for abi in abi_filters),
+    })
+    return flavors
+
+
+
 def _sync_context(project_dir: str, found: dict) -> dict:
     """Resolve the complete Android template context from ``pydrud.yaml``."""
     config = load_project_config(project_dir)
@@ -132,9 +166,13 @@ def _sync_context(project_dir: str, found: dict) -> dict:
     if not abi_filters_list:
         raise ProjectConfigError("'abi_filters' must contain at least one ABI")
 
-    # Per-ABI APK splits are opt-in: with them on, `pydrud build` writes one
+    # Per-ABI APK flavors are opt-in: with them on, `pydrud build` writes one
     # APK per ABI (a fraction of the universal size) plus a universal APK.
+    # Chaquopy requires `ndk.abiFilters` and AGP forbids it alongside
+    # `splits.abi`, so the split is done with a product flavor dimension (the
+    # approach Chaquopy's own FAQ recommends) rather than APK splits.
     abi_splits = _config_bool(config, "abi_splits", False)
+    abi_flavors = _abi_flavors(abi_filters_list) if abi_splits else []
 
     assets_dir = _config_string(config, "assets_dir", "assets") or "assets"
     assets_dir = assets_dir.replace("\\", "/").strip("/")
@@ -189,6 +227,7 @@ def _sync_context(project_dir: str, found: dict) -> dict:
         "abi_filters_list": abi_filters_list,
         "abi_filters": ", ".join(f'"{abi}"' for abi in abi_filters_list),
         "abi_splits": abi_splits,
+        "abi_flavors": abi_flavors,
         "permissions": permissions,
         "capabilities_list": sorted(capability_names),
         "capabilities": {name: name in capability_names

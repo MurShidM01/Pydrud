@@ -36,7 +36,7 @@ android {
 
         // The embedded CPython interpreter ships one native library per ABI;
         // a host/none build has no interpreter, so it lists none. With
-        // `abi_splits` on, the split block below picks the ABIs instead.
+        // `abi_splits` on, the flavor block below picks the ABIs instead.
         ndk {
             abiFilters += listOf({{ abi_filters | default('"arm64-v8a", "armeabi-v7a", "x86_64"') }})
         }
@@ -74,20 +74,26 @@ android {
             isMinifyEnabled = false
         }
     }
-{% if abi_splits | default(false) %}
+{% if abi_splits | default(false) and abi_flavors %}
 
     // One APK per ABI plus a universal APK (`abi_splits: true` in pydrud.yaml).
-    // A split APK carries only its own ABI's native libraries — for a Chaquopy
-    // app that is roughly a third of the universal size — so a release can
-    // offer arm64-v8a, armeabi-v7a and x86_64 downloads next to the universal
-    // one. `reset()` drops the default filter list before `include()` sets it.
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include({{ abi_filters | default('"arm64-v8a", "armeabi-v7a", "x86_64"') }})
-            isUniversalApk = true
+    // A single-ABI APK carries only its own ABI's native libraries — for a
+    // Chaquopy app that is roughly a third of the universal size — so a
+    // release can offer arm64-v8a, armeabi-v7a and x86_64 downloads next to
+    // the universal one.
+    //
+    // This uses a product flavor dimension rather than APK splits: Chaquopy
+    // requires `ndk.abiFilters`, and AGP rejects setting that alongside
+    // `splits.abi`, so flavors are the supported route (see the Chaquopy FAQ,
+    // "How can I make my app smaller?").
+    flavorDimensions += "abi"
+    productFlavors {
+{% for flavor in abi_flavors %}
+        create("{{ flavor.name }}") {
+            dimension = "abi"
+            ndk { abiFilters += listOf({{ flavor.abis }}) }
         }
+{% endfor %}
     }
 {% endif %}
 
