@@ -120,5 +120,57 @@ class TestBuildVariants(unittest.TestCase):
         self.assertTrue(run.call_args.kwargs["debug"])
 
 
+class TestCollectApks(unittest.TestCase):
+    """`_collect_apks` finds split outputs an `abi_splits` build produces."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.builder = Builder(self.root)
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def _touch(self, *names):
+        apk_dir = os.path.join(self.root, "apk")
+        os.makedirs(apk_dir, exist_ok=True)
+        for name in names:
+            with open(os.path.join(apk_dir, name), "wb") as handle:
+                handle.write(b"apk")
+        return apk_dir
+
+    def test_plain_build_returns_the_single_apk(self):
+        apk_dir = self._touch("app-release.apk")
+        self.assertEqual(self.builder._collect_apks(apk_dir, release=True),
+                         [os.path.join(apk_dir, "app-release.apk")])
+
+    def test_split_build_lists_universal_first_then_abis(self):
+        apk_dir = self._touch(
+            "app-arm64-v8a-release.apk",
+            "app-universal-release.apk",
+            "app-armeabi-v7a-release.apk",
+            "app-x86_64-release.apk",
+        )
+        names = [os.path.basename(p) for p in
+                 self.builder._collect_apks(apk_dir, release=True)]
+        self.assertEqual(names[0], "app-universal-release.apk")
+        self.assertEqual(
+            sorted(names),
+            sorted(["app-universal-release.apk", "app-arm64-v8a-release.apk",
+                    "app-armeabi-v7a-release.apk", "app-x86_64-release.apk"]),
+        )
+
+    def test_missing_directory_returns_empty(self):
+        self.assertEqual(
+            self.builder._collect_apks(os.path.join(self.root, "nope"),
+                                       release=True),
+            [],
+        )
+
+    def test_release_unsigned_fallback(self):
+        apk_dir = self._touch("app-release-unsigned.apk")
+        self.assertEqual(self.builder._collect_apks(apk_dir, release=True),
+                         [os.path.join(apk_dir, "app-release-unsigned.apk")])
+
+
 if __name__ == "__main__":
     unittest.main()

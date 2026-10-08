@@ -22,6 +22,9 @@ class Builder:
         self.root = project_root
         self.android_dir = os.path.join(project_root, "android")
         self.sdk_dir = self._detect_sdk()
+        # Every APK the most recent build produced. A plain build writes one;
+        # an `abi_splits` build writes one per ABI plus a universal APK.
+        self.last_apks: list[str] = []
 
     # ── public ────────────────────────────────────────────────────────────
 
@@ -85,34 +88,64 @@ class Builder:
             "release" if release else "debug",
         )
 
-        variant = "-release" if release else "-debug"
-        apk_name = f"app{variant}.apk"
-        apk_path = os.path.join(apk_dir, apk_name)
+        apks = self._collect_apks(apk_dir, release)
+        if not apks:
+            print(fail("APK not found at expected path."))
+            return None
 
-        if os.path.isfile(apk_path):
-            size = os.path.getsize(apk_path) / (1024 * 1024)
-            elapsed = time.perf_counter() - started
+        self.last_apks = apks
+        elapsed = time.perf_counter() - started
+
+        if len(apks) == 1:
+            size = os.path.getsize(apks[0]) / (1024 * 1024)
             print(tui.render_summary(
                 "APK generated",
-                (("Artifact", apk_path), ("Size", f"{size:.1f} MB"),
+                (("Artifact", apks[0]), ("Size", f"{size:.1f} MB"),
                  ("Variant", variant_name), ("Elapsed", f"{elapsed:.1f}s")),
             ))
-            return apk_path
+            return apks[0]
 
-        # Try unsigned variant.
+        # An `abi_splits` build: one APK per ABI plus a universal APK.
+        rows: list[tuple[str, str]] = [
+            (os.path.basename(path), f"{os.path.getsize(path) / (1024 * 1024):.1f} MB")
+            for path in apks
+        ]
+        rows.append(("Variant", variant_name))
+        rows.append(("Elapsed", f"{elapsed:.1f}s"))
+        print(tui.render_summary(f"{len(apks)} APKs generated", tuple(rows)))
+        # The universal APK (sorted first) installs on any device, so it is
+        # the safe default for `run` and for a single-path `--output`.
+        return apks[0]
+
+    def _collect_apks(self, apk_dir: str, release: bool) -> list[str]:
+        """Return every APK the last Gradle build produced.
+
+        A plain build writes a single ``app-<variant>.apk``. With
+        ``abi_splits`` enabled Gradle writes one ``app-<abi>-<variant>.apk``
+        per ABI plus an ``app-universal-<variant>.apk`` instead, so a lookup
+        for the single name would miss them all.
+        """
+        variant = "release" if release else "debug"
+
+        single = os.path.join(apk_dir, f"app-{variant}.apk")
+        if os.path.isfile(single):
+            return [single]
+
         if release:
-            alt = os.path.join(apk_dir, "app-release-unsigned.apk")
-            if os.path.isfile(alt):
-                elapsed = time.perf_counter() - started
-                print(tui.render_summary(
-                    "Unsigned APK generated",
-                    (("Artifact", alt), ("Variant", variant_name),
-                     ("Elapsed", f"{elapsed:.1f}s")),
-                ))
-                return alt
+            unsigned = os.path.join(apk_dir, "app-release-unsigned.apk")
+            if os.path.isfile(unsigned):
+                return [unsigned]
 
-        print(fail("APK not found at expected path."))
-        return None
+        if not os.path.isdir(apk_dir):
+            return []
+
+        import glob
+        matches = glob.glob(os.path.join(apk_dir, f"app-*-{variant}.apk"))
+        # Universal first (installs anywhere), then ABI splits by name, so
+        # the order — and therefore the default artifact — is stable.
+        matches.sort(key=lambda p: ("universal" not in os.path.basename(p),
+                                    os.path.basename(p)))
+        return matches
 
     def run(self, device: str | None = None, release: bool = False,
             watch: bool = False, interactive: bool = True, debug: bool = False):

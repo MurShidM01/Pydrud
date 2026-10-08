@@ -259,8 +259,18 @@ def build(debug, release, output):
 
     if output:
         import shutil
-        shutil.copy2(apk_path, output)
-        click.echo(tui.ok_badge(f"Copied artifact to {output}"))
+        apks = builder.last_apks or [apk_path]
+        # A split build produces several APKs. Treat `--output` as a
+        # directory in that case so nothing is silently dropped; a plain
+        # build keeps the original "copy to this path" behaviour.
+        if len(apks) > 1 and (output.endswith(("/", os.sep)) or os.path.isdir(output)):
+            os.makedirs(output, exist_ok=True)
+            for path in apks:
+                shutil.copy2(path, os.path.join(output, os.path.basename(path)))
+            click.echo(tui.ok_badge(f"Copied {len(apks)} artifacts to {output}"))
+        else:
+            shutil.copy2(apk_path, output)
+            click.echo(tui.ok_badge(f"Copied artifact to {output}"))
 
 
 @main.command()
