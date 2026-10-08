@@ -22,17 +22,25 @@ import zipfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIST = os.path.join(REPO, "dist")
+TEMPLATES = os.path.join(REPO, "pydrud", "android", "templates")
 
-#: Files without which a generated Android project cannot be produced.
-REQUIRED_TEMPLATES = (
-    "pydrud/android/templates/android/app/build.gradle.kts.j2",
-    "pydrud/android/templates/android/MainActivity.java.j2",
-    "pydrud/android/templates/android/ViewFactory.java.j2",
-    "pydrud/android/templates/pydrud.yaml.j2",
-    "pydrud/android/templates/python/app.py.j2",
-    "pydrud/android/templates/python/main.py.j2",
-    "pydrud/android/templates/python/app/screens/playground.py.j2",
-)
+
+def required_templates() -> list[str]:
+    """Every template in the source tree, as repo-relative POSIX paths.
+
+    Derived from the tree instead of hard-coded: ``pydrud create`` renders
+    whatever is on disk, so a fixed name list rots the moment a template is
+    added, renamed or removed. It once pinned a screen that had been deleted
+    and failed the release job; walking the tree keeps the check honest with
+    no maintenance.
+    """
+    found: list[str] = []
+    for root, dirs, files in os.walk(TEMPLATES):
+        dirs[:] = sorted(d for d in dirs if d != "__pycache__")
+        for name in sorted(files):
+            path = os.path.join(root, name)
+            found.append(os.path.relpath(path, REPO).replace(os.sep, "/"))
+    return found
 
 
 def find_artifacts() -> tuple[str, str]:
@@ -59,11 +67,12 @@ def names(artifact: str) -> set[str]:
 def main() -> int:
     wheel, sdist = find_artifacts()
     failures: list[str] = []
+    templates = required_templates()
 
     for artifact in (wheel, sdist):
         print(f"── {os.path.basename(artifact)} ──")
         contents = names(artifact)
-        for template in REQUIRED_TEMPLATES:
+        for template in templates:
             present = template in contents
             print(f"   {'OK  ' if present else 'FAIL'} {template}")
             if not present:
@@ -73,8 +82,9 @@ def main() -> int:
     venv = os.path.join(tempfile.mkdtemp(prefix="pydrud-wheel-"), "venv")
     print(f"── install {os.path.basename(wheel)} in a clean venv ──")
     subprocess.run([sys.executable, "-m", "venv", venv], check=True)
-    python = os.path.join(venv, "bin", "python")
-    pydrud = os.path.join(venv, "bin", "pydrud")
+    bindir = os.path.join(venv, "Scripts" if os.name == "nt" else "bin")
+    python = os.path.join(bindir, "python.exe" if os.name == "nt" else "python")
+    pydrud = os.path.join(bindir, "pydrud.exe" if os.name == "nt" else "pydrud")
     subprocess.run([python, "-m", "pip", "install", "-q", wheel], check=True)
     if not os.path.isfile(pydrud):  # pragma: no cover - guards the check
         raise SystemExit("the wheel installed no `pydrud` console script")
