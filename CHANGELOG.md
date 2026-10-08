@@ -6,6 +6,7 @@ All notable changes to Pydrud are documented here.
 
 | Version | Theme | Highlights |
 |---------|-------|------------|
+| [2.1.2](#212--2026-10-09) | Per-ABI builds | Opt-in `abi_splits` emits one APK per ABI plus a universal APK for smaller downloads |
 | [2.1.1](#211--2026-10-09) | CSS-style stylesheets | PSS gains CSS variables, pseudo-classes, `@media`, `@keyframes` and `transition`; pluggable runtime backends; Heartbeat starter; light/dark design system |
 | [2.1.0](#210--2026-10-07) | Platforms and stylesheets | `create`/`init android` CLI, Chaquopy-free Android preview shell, starter PSS theme, Pydash default with runtime-aware tooling |
 | [2.0.3](#203--2026-10-06) | Production readiness | All QA findings closed, renderer hardening, accessibility, modular structure (no file > 1,000 lines) |
@@ -21,6 +22,26 @@ All notable changes to Pydrud are documented here.
 | [1.2.0](#120--the-full-android-toolkit) | Full Android toolkit | Material components, camera, push, background work |
 | [1.1.0](#110) / [1.0.1](#101) | Foundation | Stack/Positioned, ListView, GridView, Card, system UI |
 | [1.0.0](#100) | First release | Declarative Python → native Android over a TCP bridge |
+
+---
+
+## [2.1.2] — 2026-10-09
+
+### Added — opt-in per-ABI APK splits
+* **`abi_splits: true` in `pydrud.yaml` emits one APK per ABI instead of a
+  single universal APK.** A split APK carries only its own ABI's native
+  libraries — for a Chaquopy app that is roughly a third of the universal
+  size — so a release can offer `arm64-v8a`, `armeabi-v7a` and `x86_64`
+  downloads next to the universal one. `pydrud build` then writes several
+  APKs into the output directory.
+* **The Android Gradle template switches between the two strategies.** With
+  `abi_splits` off (the default) the template sets `ndk { abiFilters }`; with
+  it on it emits a `splits { abi { … isUniversalApk = true } }` block instead.
+  The two are mutually exclusive — AGP rejects setting both at once — so the
+  template never emits them together.
+* **`sync` reads the key through the same bool helper as every other flag**,
+  and `create`/`init` scaffold it as `false`, so existing projects keep the
+  universal APK they already build.
 
 ---
 

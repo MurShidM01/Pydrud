@@ -13,6 +13,11 @@
   Run host-side with the toolchain-free <em>Pydash</em> preview, or compile a real Android APK with <em>Chaquopy</em>.
 </p>
 
+<p align="center">
+  <strong>Congratulations, Android users — Pydash is officially live!</strong><br>
+  Download the preview client from the <a href="https://github.com/MurShidM01/Pydash/releases">Pydash releases page</a>. iOS is coming soon.
+</p>
+
 ---
 
 Pydrud is a declarative UI framework for Python with a platform-neutral widget
@@ -374,6 +379,7 @@ all without a device or emulator.
 
 | Version | Focus |
 |---------|-------|
+| **v2.1.2** | Opt-in per-ABI APK splits (`abi_splits`) — one APK per ABI plus a universal APK for smaller downloads |
 | **v2.1.1** | PSS as a full CSS-style language, declarative `@keyframes`/`transition`/`:active`, pluggable runtime backends, Heartbeat starter, content blur, animated theming |
 | **v2.1.0** | `create`/`init android` CLI, pluggable runtime backends, PSS engine, Heartbeat starter, runtime-aware tooling |
 | **Next** | Declarative overlays, deeper Material coverage |
