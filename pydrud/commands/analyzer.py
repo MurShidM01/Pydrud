@@ -43,6 +43,7 @@ _WIDGET_CLASSES = {
     "SegmentedButton", "SearchBar", "Rating", "CircularProgress", "Skeleton",
     "RefreshIndicator", "Stepper", "WebView", "VideoPlayer", "Chart",
     "PopupMenu", "DropdownMenu", "PopupMenuButton",
+    "AlertDialog", "Dialog", "ModalBottomSheet",
     # v1.2 — gestures, animation and forms
     "GestureDetector", "InkWell", "Dismissible", "Draggable",
     # v1.3 — painting, hardware, maps, rich text, big lists
@@ -94,8 +95,9 @@ def _analysis_runtime(path: str, runtime: str | None) -> str:
                 or os.path.isfile(os.path.join(candidate, "pydrud.yml"))):
             resolved = resolve_runtime(candidate).runtime.value
             if resolved == Runtime.CHAQUOPY.value:
-                # A preview shell runs Python on the host, exactly like
-                # Pydash; only standalone targets bundle source into an APK.
+                # A legacy Chaquopy-free shell runs Python on the host,
+                # exactly like Pydash; only the standalone target bundles
+                # source into an APK.
                 from pydrud.commands.project import android_is_standalone
                 if not android_is_standalone(candidate):
                     return Runtime.PYDASH.value

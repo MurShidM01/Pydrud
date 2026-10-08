@@ -467,9 +467,9 @@ class TestBuildPython(unittest.TestCase):
             os.chdir(cwd)
             shutil.rmtree(tmp, ignore_errors=True)
 
-    def test_preview_shells_never_probe_build_python(self):
-        """A preview shell ships no interpreter, so a ``buildPython`` note
-        ("using Python 3.12, the app ships Python 3.11 …") is pure noise."""
+    def test_standalone_target_probes_build_python(self):
+        """The standalone (Chaquopy) target resolves a matching ``buildPython``
+        so Chaquopy can pre-compile the bundled sources to ``.pyc``."""
         from pydrud.commands.builder import Builder
         from pydrud.commands.project import init_platform
 
@@ -482,11 +482,12 @@ class TestBuildPython(unittest.TestCase):
             init_platform(root, "android")
             builder = Builder(root)
             with mock.patch("pydrud.commands.project._detect_build_python",
-                            return_value="/opt/py311") as detect:
+                            return_value="/opt/py311") as detect, \
+                    mock.patch("pydrud.commands.project._python_version_of",
+                               return_value="3.11"):
                 env = builder._build_env()
-            detect.assert_not_called()
-            self.assertNotIn("PYDRUD_PYTHON", env)
-            self.assertNotIn("PYDRUD_COMPILE_PYC", env)
+            detect.assert_called_once()
+            self.assertEqual(env["PYDRUD_PYTHON"], "/opt/py311")
         finally:
             os.chdir(cwd)
             shutil.rmtree(tmp, ignore_errors=True)
