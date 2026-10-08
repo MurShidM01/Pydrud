@@ -31,11 +31,13 @@ public class ViewStyler {
     }
 static final java.util.Set<String> KNOWN_KEYS =
 new java.util.HashSet<>(java.util.Arrays.asList(
-("accent action active activeColor activeIcon address align alignment all "
-+ "allowNativeBridge allow_credential alpha animate animate_layout animation aspectRatio "
+("accent action actions active activeColor activeIcon address align alignment all "
++ "allowNativeBridge allow_credential alpha angle animate animate_layout animation aspectRatio "
 + "audio autoRequestPermission autofocus autoplay axis badge battery_not_low bg bgImage "
-+ "blocks body boldSelected border borderBottom borderLeft borderRadius borderRight "
-+ "borderTop bottom breakpoint buttonSize c1x c1y c2x c2y callback_id camera cancel "
++ "blocks blur body boldSelected border borderBottom borderBottomLeftRadius borderBottomRightRadius "
++ "borderLeft borderRadius borderRight "
++ "borderTop borderTopLeftRadius borderTopRightRadius bottom breakpoint buttonSize c1x c1y c2x c2y "
++ "callback_id camera cancel "
 + "cancellable cap channel characteristic charging checkable checked children circular cmd codeBg "
 + "color colors columns content controls count crossAxis crossAxisAlignment current curve "
 + "customTrigger cx cy dark danger dash default deg delay deletable dense density description direction disabled "
@@ -43,30 +45,32 @@ new java.util.HashSet<>(java.util.Arrays.asList(
 + "errorColor error_image events every expand expanded extended fabPosition facing family "
 + "feedback filename fill fit floating font font_family format gestures gradient h handled "
 + "haptic haptics has_events height heightFactor helper highAccuracy hint html icon "
-+ "iconPosition icon_brightness id idle ime importance indeterminate index indicator "
-+ "indicatorSize initial initialPage initials inputs interval italic itemIcons items javascript join key keyboard "
-+ "keyboard_height kind label labelBehavior lat leadingColor leadingIcon left letterSpacing "
++ "iconPosition icon_brightness icons id idle ime importance indeterminate index indicator "
++ "indicatorSize initial initialPage initials inputs interval italic itemIcons items iterations javascript join key keyboard "
++ "keyboard_height keyframes kind label labelBehavior lat leadingColor leadingIcon left letterSpacing "
 + "level lights lineHeight lines link locale lon long loop mainAxis mainAxisAlignment "
 + "margin markers max maxColumns maxHeight maxLabelLines maxLines maxWidth max_seconds "
 + "message mime min minHeight minItemWidth minWidth mode mono multi multiline multiple "
-+ "muted name native navigation_bar_color network new_key obscure ok on_primary ongoing op "
++ "muted name native navigation_bar_color network new_key obscure offsetX offsetY ok on_primary ongoing op "
 + "opacity open ops options ordered orientation overflow overscroll_glow padding "
 + "padding_bottom padding_left padding_right padding_top paint parent_key password path "
-+ "pattern peek permission permissions pie pill pitch placeholder position primary_container "
-+ "progress prompt props protocol_version r radius rate ratio readOnly readonly records "
++ "pattern peek permission permissions pie pill pitch placeholder position positions press primary_container "
++ "progress prompt property props protocol_version r radius rate ratio readOnly readonly records "
 + "refreshing repeat replace request_id resizeForKeyboard response right ripple role rotate "
 + "rotation route safeArea safeAreaBottom safeAreaTop sample_rate scale scan scanFormats "
 + "scanOverlay scroll scrollable seconds selectable selected semantics sensor service services shadow "
-+ "shortcuts show showGrid showLabels side size source spacing spans src start "
++ "shadow_color shortcuts show showGrid showLabels side size source spacing spans spread src start "
 + "status_bar_color stepSize steps strike strikethrough style subject submenu subtitle surface_variant sweep "
 + "swipeThreshold swipeToRemove sx sy tabHeight tabletColumns tabs text textAlign textColor "
 + "textScale text_scale thickness threeLine threshold timeout title tokens tooltip top "
-+ "topDivider topic trailingColor trailingIcon transaction_id transition tristate type "
++ "topDivider topic trailingColor trailingIcon transaction_id transition translateX translateY tristate type "
 + "underline units uppercase url use24h v value values variant vibrate viewClass "
 + "virtualized visible "
 + "volume w weight width widthFactor x x1 x2 y y1 y2 zIndex zoom ").trim().split(" ")));
 static final java.util.Set<String> WARNED_STYLE_KEYS =
 java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
+static final java.util.concurrent.atomic.AtomicBoolean BLUR_WARNED =
+new java.util.concurrent.atomic.AtomicBoolean(false);
 static final java.util.Map<String, android.graphics.Typeface> FONT_CACHE =
 new java.util.HashMap<>();
 
@@ -83,11 +87,15 @@ new java.util.HashMap<>();
         float elevation = s != null
             ? (float) s.optDouble("elevation", PydrudTheme.elevationFab)
             : PydrudTheme.elevationFab;
-        float radius = s != null && s.has("borderRadius")
-            ? dp(s.optInt("borderRadius", (int) PydrudTheme.radiusFab))
-            : dp(PydrudTheme.radiusFab);
-        boolean circle = s == null || !s.has("width") || !s.has("height")
-            || s.optDouble("width", 56) == s.optDouble("height", 56);
+        float radiusDp = s != null && s.has("borderRadius")
+            ? (float) s.optDouble("borderRadius", PydrudTheme.radiusFab)
+            : PydrudTheme.radiusFab;
+        float w = s != null ? (float) s.optDouble("width", 56) : 56f;
+        float h = s != null ? (float) s.optDouble("height", 56) : 56f;
+        float radius = dp(radiusDp);
+        // A FAB is circular only when its radius reaches half the shorter
+        // side (Material 3 squares use a smaller corner radius).
+        boolean circle = radiusDp >= Math.min(w, h) / 2f - 0.5f;
 
         android.graphics.drawable.Drawable base = PydrudTheme.shape(fill, radius);
         int ripple = PydrudTheme.rippleOn(fill);
@@ -96,7 +104,12 @@ new java.util.HashMap<>();
             : PydrudTheme.ripple(base, ripple, radius));
         view.setClipToOutline(true);
         PydrudTheme.elevate(view, elevation);
-        PydrudTheme.pressFeedback(view, PydrudTheme.pressScale - 0.04f, 0f, 4f);
+        // A `:active` rule (`transform: scale(.92)`) wins over the default.
+        JSONObject press = s != null ? s.optJSONObject("press") : null;
+        float pressScale = press != null && press.has("scale")
+            ? (float) press.optDouble("scale", PydrudTheme.pressScale)
+            : PydrudTheme.pressScale - 0.04f;
+        PydrudTheme.pressFeedback(view, pressScale, 0f, 4f);
     }
 
     void styleCard(View view, JSONObject s) {
@@ -334,6 +347,13 @@ new java.util.HashMap<>();
             boolean hasBorder = s.has("border");
             boolean hasBg = s.has("bg");
             boolean hasGradient = s.has("gradient");
+            // Per-corner radii override the uniform radius on the sides given.
+            boolean hasCorners = s.has("borderTopLeftRadius")
+                || s.has("borderTopRightRadius")
+                || s.has("borderBottomLeftRadius")
+                || s.has("borderBottomRightRadius");
+            float[] corners = hasCorners ? cornerRadii(s, radius) : null;
+            boolean rounded = radius > 0 || hasCorners;
             boolean skipBackground = view instanceof Button || view instanceof EditText
                 || view instanceof CompoundButton || view instanceof SeekBar
                 || view instanceof Spinner;
@@ -343,21 +363,21 @@ new java.util.HashMap<>();
                 // overwriting it here would undo the Material styling.
             } else if (hasGradient) {
                 GradientDrawable gd = gradientDrawable(s.optJSONObject("gradient"));
-                gd.setCornerRadius(radius);
+                setCorners(gd, corners, radius);
                 applyBorder(gd, s);
                 view.setBackground(withSideBorders(gd, s));
-                if (radius > 0) view.setClipToOutline(true);
-            } else if (hasBg && radius == 0 && !hasBorder) {
+                if (rounded) view.setClipToOutline(true);
+            } else if (hasBg && !rounded && !hasBorder) {
                 int c = parseColor(s.optString("bg", ""), Color.TRANSPARENT);
                 view.setBackgroundColor(c);
-            } else if (hasBg || radius > 0 || hasBorder) {
+            } else if (hasBg || rounded || hasBorder) {
                 GradientDrawable gd = new GradientDrawable();
-                gd.setCornerRadius(radius);
+                setCorners(gd, corners, radius);
                 gd.setColor(hasBg ? parseColor(s.optString("bg", ""), Color.TRANSPARENT)
                                   : Color.TRANSPARENT);
                 applyBorder(gd, s);
                 view.setBackground(withSideBorders(gd, s));
-                if (radius > 0) view.setClipToOutline(true);
+                if (rounded) view.setClipToOutline(true);
             }
 
             // Minimum sizes keep rows on the 48dp touch grid even when
@@ -456,16 +476,32 @@ new java.util.HashMap<>();
                     boolean italic = f.optBoolean("italic", false);
                     String family = f.optString("family", "");
                     tv.setTypeface(resolveTypeface(family, weight, italic));
-                    if (f.has("size") || f.has("weight")) {
-                        tv.setLetterSpacing(PydrudTheme.letterSpacingFor(size, weight));
-                        tv.setLineSpacing(0f, size >= PydrudTheme.textHeadline
-                            ? PydrudTheme.lineHeight * 0.82f : PydrudTheme.lineHeight);
+
+                    // Tracking and leading are each applied **once**: an
+                    // explicit value wins, otherwise one is derived from the
+                    // type scale. Applying both — the derived value and then
+                    // the explicit one — left the two disagreeing on every
+                    // call, so a widget re-styled on each animation frame
+                    // (the Heartbeat reading) re-laid-out every frame, and a
+                    // single-line TextView would flash a stale glyph while
+                    // it did. Skipping the no-op keeps the layout intact.
+                    boolean derived = f.has("size") || f.has("weight");
+                    float tracking = f.has("letterSpacing")
+                        ? (float) f.optDouble("letterSpacing", 0)
+                        : (derived ? PydrudTheme.letterSpacingFor(size, weight)
+                                   : Float.NaN);
+                    if (!Float.isNaN(tracking) && tv.getLetterSpacing() != tracking) {
+                        tv.setLetterSpacing(tracking);
                     }
-                    if (f.has("lineHeight")) {
-                        tv.setLineSpacing(0f, (float) f.optDouble("lineHeight", 1.22));
-                    }
-                    if (f.has("letterSpacing")) {
-                        tv.setLetterSpacing((float) f.optDouble("letterSpacing", 0));
+                    float leading = f.has("lineHeight")
+                        ? (float) f.optDouble("lineHeight", 1.22)
+                        : (derived ? (size >= PydrudTheme.textHeadline
+                                      ? PydrudTheme.lineHeight * 0.82f
+                                      : PydrudTheme.lineHeight) : Float.NaN);
+                    if (!Float.isNaN(leading)
+                            && (tv.getLineSpacingMultiplier() != leading
+                                || tv.getLineSpacingExtra() != 0f)) {
+                        tv.setLineSpacing(0f, leading);
                     }
                     if (f.optBoolean("underline", false)) {
                         tv.setPaintFlags(tv.getPaintFlags()
@@ -490,6 +526,16 @@ new java.util.HashMap<>();
 
             if (s.has("opacity")) view.setAlpha((float) s.optDouble("opacity", 1.0));
             if (s.has("rotate")) view.setRotation((float) s.optDouble("rotate", 0));
+            // `scale` is also applied in applyTransforms() on the create path;
+            // re-apply it here so a *patch* that changes scale is not dropped
+            // (applyTransforms only runs when the view is first built).
+            if (s.has("scale")) {
+                float scale = (float) s.optDouble("scale", 1.0);
+                view.setScaleX(scale);
+                view.setScaleY(scale);
+            }
+            // CSS `filter: blur()` — a RenderEffect on Android 12+ (API 31).
+            if (s.has("blur")) applyBlur(view, s);
             if (s.has("elevation")) {
                 PydrudTheme.elevate(view, (float) s.optDouble("elevation", 0));
             }
@@ -502,9 +548,91 @@ new java.util.HashMap<>();
             if (s.has("fit") && view instanceof ImageView) {
                 ((ImageView) view).setScaleType(scaleType(s.optString("fit", "contain")));
             }
+            // Custom drop shadow ({offsetX, offsetY, blur, spread, color} or a
+            // plain number) and an opt-in bounded ripple.
+            if (s.has("shadow")) applyShadow(view, s);
+            if (s.has("ripple") && !skipBackground) applyRipple(view, s, radius);
+            if (s.has("aspectRatio")) applyAspectRatio(view, s);
         } catch (Exception e) {
             Log.w(ViewFactory.TAG, "Style error", e);
         }
+    }
+
+    /** Size one axis from the other so the view keeps ``width / height``. */
+    void applyAspectRatio(View view, JSONObject s) {
+        final float ratio = (float) s.optDouble("aspectRatio", 0);
+        if (ratio <= 0) return;
+        view.getViewTreeObserver().addOnGlobalLayoutListener(
+            new android.view.ViewTreeObserver.OnGlobalLayoutListener() {
+                @Override public void onGlobalLayout() {
+                    ViewGroup.LayoutParams lp = view.getLayoutParams();
+                    int w = view.getWidth();
+                    if (lp == null || w <= 0) return;
+                    int target = Math.max(1, (int) (w / ratio));
+                    view.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+                    if (lp.height != target) {
+                        lp.height = target;
+                        view.setLayoutParams(lp);
+                    }
+                }
+            });
+    }
+
+    float[] cornerRadii(JSONObject s, int uniform) {
+        int tl = s.has("borderTopLeftRadius") ? dp(s.optInt("borderTopLeftRadius", 0)) : uniform;
+        int tr = s.has("borderTopRightRadius") ? dp(s.optInt("borderTopRightRadius", 0)) : uniform;
+        int br = s.has("borderBottomRightRadius") ? dp(s.optInt("borderBottomRightRadius", 0)) : uniform;
+        int bl = s.has("borderBottomLeftRadius") ? dp(s.optInt("borderBottomLeftRadius", 0)) : uniform;
+        return new float[]{ tl, tl, tr, tr, br, br, bl, bl };
+    }
+
+    void setCorners(GradientDrawable gd, float[] corners, int uniform) {
+        if (corners != null) gd.setCornerRadii(corners);
+        else gd.setCornerRadius(uniform);
+    }
+
+    /** A soft drop shadow: text uses a paint shadow, views use elevation. */
+    void applyShadow(View view, JSONObject s) {
+        float ox, oy, blur, spread;
+        int color;
+        JSONObject sh = s.optJSONObject("shadow");
+        if (sh != null) {
+            ox = (float) sh.optDouble("offsetX", PydrudTheme.shadowOffsetX);
+            oy = (float) sh.optDouble("offsetY", PydrudTheme.shadowOffsetY);
+            blur = (float) sh.optDouble("blur", PydrudTheme.shadowBlur);
+            spread = (float) sh.optDouble("spread", PydrudTheme.shadowSpread);
+            color = parseColor(sh.optString("color", PydrudTheme.shadowColor), 0);
+        } else {
+            // A plain number is a quick elevation-style shadow.
+            float n = (float) s.optDouble("shadow", 0);
+            ox = PydrudTheme.shadowOffsetX;
+            oy = n > 0 ? Math.max(1f, n * 0.5f) : PydrudTheme.shadowOffsetY;
+            blur = n > 0 ? n : PydrudTheme.shadowBlur;
+            spread = PydrudTheme.shadowSpread;
+            color = parseColor(PydrudTheme.shadowColor, 0);
+        }
+        int tint = color != 0 ? color : 0x40000000;
+        if (view instanceof TextView) {
+            ((TextView) view).setShadowLayer(dp(Math.max(0f, blur)), dp(ox), dp(oy), tint);
+        } else if (android.os.Build.VERSION.SDK_INT >= 28) {
+            view.setElevation(dp(Math.max(0f, blur + spread)));
+            view.setOutlineSpotShadowColor(tint);
+            view.setOutlineAmbientShadowColor(tint);
+            if (view.getBackground() != null) {
+                view.setOutlineProvider(android.view.ViewOutlineProvider.BACKGROUND);
+            }
+        } else {
+            PydrudTheme.elevate(view, Math.max(0f, blur));
+        }
+    }
+
+    /** An opt-in bounded ripple; ``ripple: none`` disables it. */
+    void applyRipple(View view, JSONObject s, int radius) {
+        String spec = s.optString("ripple", "");
+        if (spec.isEmpty() || "none".equalsIgnoreCase(spec)
+                || "false".equalsIgnoreCase(spec)) return;
+        int color = parseColor(spec, 0x1F000000);
+        PydrudTheme.addRipple(view, color, radius);
     }
 
     android.graphics.Typeface resolveTypeface(String family, int weight,
@@ -562,8 +690,18 @@ new java.util.HashMap<>();
             colors = new int[]{PydrudTheme.primary,
                                PydrudTheme.lighten(PydrudTheme.primary, 0.3f)};
         }
-        gd.setColors(colors);
-        gd.setOrientation(gradientOrientation(g.optString("direction", "vertical")));
+        // Optional colour stops: positions in [0,1], one per colour.
+        JSONArray posJson = g.optJSONArray("positions");
+        float[] positions = null;
+        if (posJson != null && posJson.length() == colors.length) {
+            positions = new float[posJson.length()];
+            for (int i = 0; i < posJson.length(); i++) {
+                positions[i] = (float) posJson.optDouble(i, 0);
+            }
+        }
+        if (positions != null) gd.setColors(colors, positions);
+        else gd.setColors(colors);
+        gd.setOrientation(gradientOrientation(g));
         String kind = g.optString("kind", "linear");
         if ("radial".equals(kind)) {
             gd.setGradientType(GradientDrawable.RADIAL_GRADIENT);
@@ -572,6 +710,22 @@ new java.util.HashMap<>();
             gd.setGradientType(GradientDrawable.SWEEP_GRADIENT);
         }
         return gd;
+    }
+
+    /** Orientation from a CSS-style ``angle`` (0=up, 90=right) or a name. */
+    GradientDrawable.Orientation gradientOrientation(JSONObject g) {
+        if (g.has("angle")) {
+            double a = ((g.optDouble("angle", 180) % 360) + 360) % 360;
+            if (a < 22.5 || a >= 337.5)  return GradientDrawable.Orientation.BOTTOM_TOP;
+            if (a < 67.5)                return GradientDrawable.Orientation.BL_TR;
+            if (a < 112.5)               return GradientDrawable.Orientation.LEFT_RIGHT;
+            if (a < 157.5)               return GradientDrawable.Orientation.TL_BR;
+            if (a < 202.5)               return GradientDrawable.Orientation.TOP_BOTTOM;
+            if (a < 247.5)               return GradientDrawable.Orientation.TR_BL;
+            if (a < 292.5)               return GradientDrawable.Orientation.RIGHT_LEFT;
+            return GradientDrawable.Orientation.BR_TL;
+        }
+        return gradientOrientation(g.optString("direction", "vertical"));
     }
 
     GradientDrawable.Orientation gradientOrientation(String direction) {
@@ -686,10 +840,39 @@ new java.util.HashMap<>();
         }
     }
 
+    /**
+     * Gaussian blur of the view's own rendering, like CSS {@code filter:
+     * blur()} — use it to soften a background image or a whole panel's
+     * content. {@code blur} is a radius in dp; the view is drawn through a
+     * hardware layer with a RenderEffect (Android 12 / API 31 and newer).
+     * Older devices have no cheap equivalent, so the view renders unblurred
+     * and we say so once. Blurring what is *behind* a view is window-level
+     * only ({@code Window.setBackgroundBlurRadius}) and not offered here.
+     */
+    void applyBlur(View view, JSONObject s) {
+        float radius = (float) s.optDouble("blur", 0);
+        if (radius <= 0) {
+            if (android.os.Build.VERSION.SDK_INT >= 31) view.setRenderEffect(null);
+            return;
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            float px = dp(radius);
+            view.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+            view.setRenderEffect(
+                android.graphics.RenderEffect.createBlurEffect(
+                    px, px, android.graphics.Shader.TileMode.CLAMP));
+        } else if (BLUR_WARNED.compareAndSet(false, true)) {
+            Log.w(ViewFactory.TAG, "style 'blur' needs Android 12 (API 31+); "
+                + "the view renders unblurred on this device.");
+        }
+    }
+
     android.view.animation.Interpolator interpolator(JSONObject spec) {
         String curve = spec != null ? spec.optString("curve", "ease_in_out") : "ease_in_out";
         switch (curve) {
             case "linear":      return new android.view.animation.LinearInterpolator();
+            case "ease":        case "ease_in_out":
+                return new android.view.animation.AccelerateDecelerateInterpolator();
             case "ease_in":     case "accelerate":
                 return new android.view.animation.AccelerateInterpolator();
             case "ease_out":    case "decelerate":
@@ -697,7 +880,29 @@ new java.util.HashMap<>();
             case "bounce":      return new android.view.animation.BounceInterpolator();
             case "overshoot":   return new android.view.animation.OvershootInterpolator();
             case "anticipate":  return new android.view.animation.AnticipateInterpolator();
-            default:            return new android.view.animation.AccelerateDecelerateInterpolator();
+            default:
+                if (curve.startsWith("cubic-bezier(")) return cubicBezier(curve);
+                return new android.view.animation.AccelerateDecelerateInterpolator();
+        }
+    }
+
+    /** Parse a CSS ``cubic-bezier(x1, y1, x2, y2)`` timing function. */
+    android.view.animation.Interpolator cubicBezier(String text) {
+        String inner = text.substring(text.indexOf('(') + 1);
+        int close = inner.indexOf(')');
+        if (close >= 0) inner = inner.substring(0, close);
+        String[] parts = inner.split(",");
+        if (parts.length != 4) {
+            return new android.view.animation.AccelerateDecelerateInterpolator();
+        }
+        try {
+            float x1 = Float.parseFloat(parts[0].trim());
+            float y1 = Float.parseFloat(parts[1].trim());
+            float x2 = Float.parseFloat(parts[2].trim());
+            float y2 = Float.parseFloat(parts[3].trim());
+            return new android.view.animation.PathInterpolator(x1, y1, x2, y2);
+        } catch (NumberFormatException e) {
+            return new android.view.animation.AccelerateDecelerateInterpolator();
         }
     }
 

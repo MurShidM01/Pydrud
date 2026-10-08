@@ -98,6 +98,8 @@ public class MaterialViews {
             case "FadeIn":
             case "SlideIn":
             case "ScaleIn":
+            case "AlertDialog":
+            case "ModalBottomSheet":
                 return true;
             default:
                 return false;
@@ -131,6 +133,9 @@ public class MaterialViews {
                 case "VideoPlayer":         return createVideo(key, props);
                 case "Chart":               return new ChartView(activity, props);
                 case "PopupMenu":           return createPopupMenu(key, props);
+                case "AnimatedSwitcher":    return createAnimatedSwitcher(key, props);
+                case "AlertDialog":
+                case "ModalBottomSheet":    return createOverlay(key, props, type);
                 default:
                     // Transparent wrappers: Drawer, Tooltip, gestures,
                     // animations and form containers are plain hosts whose
@@ -303,6 +308,19 @@ public class MaterialViews {
         chip.setChipCornerRadius(dp(12));
         chip.setCloseIconTint(
             android.content.res.ColorStateList.valueOf(PydrudTheme.onSurfaceVariant));
+
+        // Leading icon (declared in Python as Chip(icon=...)).
+        String chipIcon = p.optString("icon", "");
+        if (!chipIcon.isEmpty()) {
+            chip.setChipIcon(factory.icon(chipIcon, PydrudTheme.onSurfaceVariant, dp(18)));
+            chip.setChipIconVisible(true);
+            chip.setChipIconTint(new android.content.res.ColorStateList(
+                new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}},
+                new int[]{PydrudTheme.dark ? PydrudTheme.lighten(accent, 0.35f)
+                                           : PydrudTheme.darken(accent, 0.25f),
+                          PydrudTheme.onSurfaceVariant}));
+        }
+
         chip.setOnCheckedChangeListener(
             new android.widget.CompoundButton.OnCheckedChangeListener() {
                 @Override public void onCheckedChanged(
@@ -799,6 +817,255 @@ public class MaterialViews {
         host.setMinimumWidth(PydrudTheme.touchTarget());
         host.setMinimumHeight(PydrudTheme.touchTarget());
         return host;
+    }
+
+    // ── overlays ─────────────────────────────────────────────────────────
+
+    /**
+     * Declarative modal overlays ({@code AlertDialog}, {@code ModalBottomSheet}).
+     *
+     * <p>The widget is a zero-size host: showing it in the tree shows the
+     * native dialog, removing it dismisses the dialog. Buttons dispatch a
+     * {@code click} event on the widget's key carrying the chosen value
+     * (``{"action": "delete"}`` for a dialog, ``{"index": 2}`` for a sheet),
+     * and an outside/back dismissal dispatches {@code dismiss}.
+     */
+    private View createOverlay(final String key, final JSONObject p, final String type) {
+        final FrameLayout host = new FrameLayout(activity);
+        host.setMinimumWidth(0);
+        host.setMinimumHeight(0);
+        host.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            android.app.Dialog dialog;
+            boolean selfClosing;
+
+            @Override public void onViewAttachedToWindow(View v) {
+                if (dialog != null) return;
+                dialog = "ModalBottomSheet".equals(type)
+                    ? buildBottomSheet(key, p)
+                    : buildAlertDialog(key, p);
+                dialog.setOnDismissListener(d -> {
+                    dialog = null;
+                    if (!selfClosing && events != null) {
+                        events.dispatch("dismiss", key, null);
+                    }
+                });
+                dialog.show();
+            }
+
+            @Override public void onViewDetachedFromWindow(View v) {
+                if (dialog == null) return;
+                selfClosing = true;
+                dialog.dismiss();
+                selfClosing = false;
+                dialog = null;
+            }
+        });
+        return host;
+    }
+
+    private android.app.Dialog buildAlertDialog(final String key, JSONObject p) {
+        com.google.android.material.dialog.MaterialAlertDialogBuilder builder =
+            new com.google.android.material.dialog.MaterialAlertDialogBuilder(activity);
+        String title = p.optString("title", "");
+        String message = p.optString("message", "");
+        if (!title.isEmpty()) builder.setTitle(title);
+        if (!message.isEmpty()) builder.setMessage(message);
+        String icon = p.optString("icon", "");
+        if (!icon.isEmpty()) {
+            builder.setIcon(factory.icon(icon, PydrudTheme.primary, dp(24)));
+        }
+        boolean dismissible = p.optBoolean("dismissible", true);
+        builder.setCancelable(dismissible);
+
+        // Actions render left→right in the order Python declared them, so the
+        // last one is the affirmative (right-most) button — matching Flutter's
+        // AlertDialog.actions.
+        JSONArray actions = p.optJSONArray("actions");
+        int n = actions != null ? actions.length() : 0;
+        if (n >= 3) {
+            JSONObject a = actions.optJSONObject(n - 3);
+            builder.setNeutralButton(a != null ? a.optString("label", "") : "",
+                (d, w) -> fireAction(key, a != null ? a.optString("value", "") : ""));
+        }
+        if (n >= 2) {
+            JSONObject a = actions.optJSONObject(n - 2);
+            builder.setNegativeButton(a != null ? a.optString("label", "") : "",
+                (d, w) -> fireAction(key, a != null ? a.optString("value", "") : ""));
+        }
+        if (n >= 1) {
+            JSONObject a = actions.optJSONObject(n - 1);
+            builder.setPositiveButton(a != null ? a.optString("label", "") : "",
+                (d, w) -> fireAction(key, a != null ? a.optString("value", "") : ""));
+        }
+        return builder.create();
+    }
+
+    private android.app.Dialog buildBottomSheet(final String key, JSONObject p) {
+        final com.google.android.material.bottomsheet.BottomSheetDialog dialog =
+            new com.google.android.material.bottomsheet.BottomSheetDialog(activity);
+        boolean dismissible = p.optBoolean("dismissible", true);
+        dialog.setCancelable(dismissible);
+        dialog.setCanceledOnTouchOutside(dismissible);
+
+        LinearLayout column = new LinearLayout(activity);
+        column.setOrientation(LinearLayout.VERTICAL);
+        column.setBackgroundColor(PydrudTheme.surface);
+        column.setPadding(0, dp(12), 0, dp(12));
+
+        View handle = new View(activity);
+        GradientDrawable handleBg = new GradientDrawable();
+        handleBg.setColor(PydrudTheme.onSurfaceVariant);
+        handleBg.setCornerRadius(dp(2));
+        handle.setBackground(handleBg);
+        LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(dp(32), dp(4));
+        hlp.gravity = Gravity.CENTER_HORIZONTAL;
+        hlp.bottomMargin = dp(8);
+        column.addView(handle, hlp);
+
+        String title = p.optString("title", "");
+        if (!title.isEmpty()) {
+            TextView heading = new TextView(activity);
+            heading.setText(title);
+            PydrudTheme.applyTextDefaults(heading, 16f, 600, PydrudTheme.onSurface);
+            heading.setPadding(dp(20), dp(8), dp(20), dp(12));
+            column.addView(heading);
+        }
+
+        JSONArray options = p.optJSONArray("options");
+        JSONArray icons = p.optJSONArray("icons");
+        for (int i = 0; options != null && i < options.length(); i++) {
+            final String label = options.optString(i, "");
+            final int index = i;
+            String icon = icons != null ? icons.optString(i, "") : "";
+
+            LinearLayout row = new LinearLayout(activity);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(20), dp(14), dp(20), dp(14));
+            row.setBackground(PydrudTheme.ripple(
+                PydrudTheme.shape(Color.TRANSPARENT, 0),
+                PydrudTheme.alpha(PydrudTheme.primary, PydrudTheme.rippleOpacity), 0));
+            if (!icon.isEmpty()) {
+                ImageView iv = new ImageView(activity);
+                iv.setImageDrawable(factory.icon(
+                    icon, PydrudTheme.onSurfaceVariant, dp(22)));
+                LinearLayout.LayoutParams ilp =
+                    new LinearLayout.LayoutParams(dp(22), dp(22));
+                ilp.rightMargin = dp(16);
+                row.addView(iv, ilp);
+            }
+            TextView text = new TextView(activity);
+            text.setText(label);
+            PydrudTheme.applyTextDefaults(text, 15f, 500, PydrudTheme.onSurface);
+            row.addView(text, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+            row.setOnClickListener(v -> {
+                fireSheetAction(key, index, label);
+                dialog.dismiss();
+            });
+            column.addView(row, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
+
+        android.widget.ScrollView scroll = new android.widget.ScrollView(activity);
+        scroll.addView(column);
+        dialog.setContentView(scroll);
+        return dialog;
+    }
+
+    private void fireAction(String key, String value) {
+        if (events == null) return;
+        JSONObject data = new JSONObject();
+        try { data.put("action", value); } catch (Exception ignored) { }
+        events.dispatch("click", key, data);
+    }
+
+    private void fireSheetAction(String key, int index, String label) {
+        if (events == null) return;
+        JSONObject data = new JSONObject();
+        try {
+            data.put("index", index);
+            data.put("label", label);
+        } catch (Exception ignored) { }
+        events.dispatch("click", key, data);
+    }
+
+    // ── AnimatedSwitcher ─────────────────────────────────────────────────
+
+    /**
+     * A cross-fading container. When its child is replaced, the outgoing
+     * view fades out (and is removed once invisible) while the incoming view
+     * fades in, so "loading → content" swaps read as a transition rather
+     * than a flicker.
+     */
+    private View createAnimatedSwitcher(String key, JSONObject p) {
+        return new SwitcherView(activity, p.optString("transition", "fade"),
+                                p.optInt("duration", 250));
+    }
+
+    static class SwitcherView extends FrameLayout {
+        private final String transition;
+        private final int duration;
+
+        SwitcherView(Context context, String transition, int duration) {
+            super(context);
+            this.transition = transition;
+            this.duration = Math.max(60, duration);
+        }
+
+        @Override public void removeView(View view) {
+            if (view == null || view.getParent() != this) {
+                super.removeView(view);
+                return;
+            }
+            // Keep the outgoing view for the length of the fade so the
+            // incoming view can fade over the top of it.
+            view.animate().cancel();
+            view.animate().alpha(0f).setDuration(duration)
+                .withEndAction(() -> {
+                    if (view.getParent() == this) SwitcherView.super.removeView(view);
+                }).start();
+        }
+
+        @Override public void addView(View child, int index, ViewGroup.LayoutParams params) {
+            child.animate().cancel();
+            if (child.getParent() == this) {
+                // A "move" patch removes and re-adds the *same* view: cancel
+                // the pending fade-out and reposition instead of cross-fading.
+                child.setAlpha(1f);
+                resetTransform(child);
+                SwitcherView.super.removeView(child);
+                SwitcherView.super.addView(child, index, params);
+                return;
+            }
+            child.setAlpha(0f);
+            float dx = 0f, dy = 0f, scale = 1f;
+            if ("slide_up".equals(transition))         dy = dpf(24);
+            else if ("slide_down".equals(transition))  dy = -dpf(24);
+            else if ("slide_left".equals(transition))  dx = dpf(24);
+            else if ("slide_right".equals(transition)) dx = -dpf(24);
+            else if ("scale".equals(transition))       scale = 0.9f;
+            child.setTranslationX(dx);
+            child.setTranslationY(dy);
+            child.setScaleX(scale);
+            child.setScaleY(scale);
+            SwitcherView.super.addView(child, index, params);
+            child.animate().alpha(1f).translationX(0f).translationY(0f)
+                .scaleX(1f).scaleY(1f).setDuration(duration).start();
+        }
+
+        private void resetTransform(View child) {
+            child.setTranslationX(0f);
+            child.setTranslationY(0f);
+            child.setScaleX(1f);
+            child.setScaleY(1f);
+        }
+
+        private float dpf(float value) {
+            return value * getResources().getDisplayMetrics().density;
+        }
     }
 
     // ── helpers ──────────────────────────────────────────────────────────

@@ -570,6 +570,13 @@ public final class PydrudTheme {
     public static float elevationSheet  = 12f;
     public static float elevationDialog = 16f;
 
+    // depth — generic ``shadow`` style defaults
+    public static String shadowColor  = "";
+    public static float shadowOffsetX = 0f;
+    public static float shadowOffsetY = 2f;
+    public static float shadowBlur    = 8f;
+    public static float shadowSpread  = 0f;
+
     // motion
     public static int durationFast   = 140;
     public static int durationNormal = 220;
@@ -641,6 +648,12 @@ public final class PydrudTheme {
         elevationAppBar = num(t, "elevation_app_bar", elevationAppBar);
         elevationSheet  = num(t, "elevation_sheet", elevationSheet);
         elevationDialog = num(t, "elevation_dialog", elevationDialog);
+
+        shadowColor   = t.optString("shadow_color", shadowColor);
+        shadowOffsetX = num(t, "shadow_offset_x", shadowOffsetX);
+        shadowOffsetY = num(t, "shadow_offset_y", shadowOffsetY);
+        shadowBlur    = num(t, "shadow_blur", shadowBlur);
+        shadowSpread  = num(t, "shadow_spread", shadowSpread);
 
         durationFast   = (int) num(t, "duration_fast", durationFast);
         durationNormal = (int) num(t, "duration_normal", durationNormal);

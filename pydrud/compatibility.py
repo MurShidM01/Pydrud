@@ -96,5 +96,4 @@ NATIVE_IGNORED_PROPS: dict[str, tuple[str, ...]] = {
     "Markdown": ("linkColor",),
     "Rating": ("half",),
     "ReorderableList": ("handle", "longPress"),
-    "VideoPlayer": ("aspectRatio",),
 }

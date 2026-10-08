@@ -62,10 +62,17 @@ public class LayoutEngine {
     }
 
     View createLinear(JSONObject json, int orientation) throws JSONException {
-        LinearLayout ll = new LinearLayout(vf.activity);
+        JSONObject s = json.optJSONObject("style");
+        // justify-content: distribute leftover main-axis space between the
+        // children without inserting Space views (which would shift the
+        // native child indices that patches address).
+        String mainAlign = s != null ? s.optString("mainAxisAlignment", "") : "";
+        boolean justified = mainAlign.startsWith("space_");
+        LinearLayout ll = justified
+            ? new JustifiedLinearLayout(vf.activity, orientation, mainAlign)
+            : new LinearLayout(vf.activity);
         ll.setOrientation(orientation);
 
-        JSONObject s = json.optJSONObject("style");
         boolean scroll = s != null && s.optBoolean("scroll", false);
         if (s != null && "horizontal".equals(s.optString("mainAxis", "")) &&
             "ListView".equals(json.optString("type", ""))) {
@@ -143,6 +150,55 @@ public class LayoutEngine {
         int mask = horizontal ? Gravity.HORIZONTAL_GRAVITY_MASK
                               : Gravity.VERTICAL_GRAVITY_MASK;
         return grav & mask;
+    }
+
+    /**
+     * A LinearLayout that distributes leftover main-axis space between its
+     * children — the Flutter/CSS {@code space-between} / {@code space-around}
+     * / {@code space-evenly} behaviours. Implemented by overriding
+     * {@link #onLayout} so the native child count stays 1:1 with the logical
+     * tree (inserting {@code Space} views would break patch indexing).
+     */
+    static class JustifiedLinearLayout extends LinearLayout {
+
+        private final String justify;
+
+        JustifiedLinearLayout(android.content.Context context, int orientation,
+                              String justify) {
+            super(context);
+            setOrientation(orientation);
+            this.justify = justify;
+        }
+
+        @Override
+        protected void onLayout(boolean changed, int l, int t, int r, int b) {
+            int count = getChildCount();
+            if (count == 0) { super.onLayout(changed, l, t, r, b); return; }
+            boolean vertical = getOrientation() == VERTICAL;
+            int total = vertical ? (b - t) : (r - l);
+            int used = 0;
+            for (int i = 0; i < count; i++) {
+                View c = getChildAt(i);
+                used += vertical ? c.getMeasuredHeight() : c.getMeasuredWidth();
+            }
+            int free = Math.max(0, total - used);
+            int gaps = "space_between".equals(justify) ? Math.max(1, count - 1) : count;
+            int gap = free / gaps;
+            int cursor = "space_between".equals(justify) ? 0
+                : "space_around".equals(justify) ? gap / 2 : gap;
+            for (int i = 0; i < count; i++) {
+                View c = getChildAt(i);
+                int w = c.getMeasuredWidth();
+                int h = c.getMeasuredHeight();
+                if (vertical) {
+                    c.layout(0, cursor, w, cursor + h);
+                    cursor += h + gap;
+                } else {
+                    c.layout(cursor, 0, cursor + w, h);
+                    cursor += w + gap;
+                }
+            }
+        }
     }
 
     View createGrid(JSONObject json) throws JSONException {
