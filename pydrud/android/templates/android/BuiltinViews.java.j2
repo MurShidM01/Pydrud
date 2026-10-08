@@ -42,6 +42,15 @@ static final int VIRTUALIZE_THRESHOLD = 24;
             if (reusable != null && reusable.type.equals(type) && vf.mStyler.isReusableType(type)) {
                 view = reusable.view;
                 if (view.getParent() instanceof ViewGroup) ((ViewGroup) view.getParent()).removeView(view);
+                // Re-register the reused view. buildTree() clears viewMap before
+                // rebuilding, and recreateInPlace() drops the key via
+                // removeViewTree(); without this the widget would be live in the
+                // layout but invisible to every later patch — which is exactly
+                // how a Canvas (the one reusable type in the starter) started
+                // reporting "update: unknown key" after the second snapshot.
+                vf.viewMap.put(key, view);
+                vf.elementMap.put(key, new ViewFactory.ViewElement(key, type, view));
+                view.setTag(key);
                 vf.nodeMap.put(key, json);
                 vf.mPatcher.updateProps(view, vf.props(json), json);
                 vf.mStyler.applyStyle(view, json.optJSONObject("style"));
