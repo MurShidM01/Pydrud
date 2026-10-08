@@ -123,6 +123,7 @@ def _matches_pseudo(
     widget: Widget,
     parents: dict[int, Optional[Widget]],
     sibling_info: dict[int, tuple[int, int]],
+    states: Optional[set[str]] = None,
 ) -> bool:
     name = pseudo.name
     if pseudo.is_element:
@@ -152,7 +153,7 @@ def _matches_pseudo(
         # Captured as a press/hover/focus sub-spec; the renderer times it.
         return True
     if name in _PERSISTENT_STATES:
-        states = _widget_states(widget)
+        states = _widget_states(widget) if states is None else states
         key = name[1:]
         return key in states or (key == "enabled" and "disabled" not in states)
     return False
@@ -165,6 +166,8 @@ def _matches_compound(
     allow_id: bool = True,
     parents: Optional[dict[int, Optional[Widget]]] = None,
     sibling_info: Optional[dict[int, tuple[int, int]]] = None,
+    classes: Optional[set[str]] = None,
+    states: Optional[set[str]] = None,
 ) -> bool:
     if compound.widget_type and widget._widget_type != compound.widget_type:
         return False
@@ -173,14 +176,16 @@ def _matches_compound(
             or getattr(widget, "_auto_key", True)
             or widget.key != compound.id):
         return False
-    classes = _widget_classes(widget)
+    if classes is None:
+        classes = _widget_classes(widget)
     if not all(name in classes for name in compound.classes):
         return False
     if compound.pseudos:
         parents = parents or {}
         sibling_info = sibling_info or {}
         for pseudo in compound.pseudos:
-            if not _matches_pseudo(pseudo, widget, parents, sibling_info):
+            if not _matches_pseudo(pseudo, widget, parents, sibling_info,
+                                   states):
                 return False
     return True
 
@@ -190,16 +195,25 @@ def _match_selector(
     widget: Widget,
     parents: dict[int, Optional[Widget]] | None = None,
     sibling_info: dict[int, tuple[int, int]] | None = None,
+    classes: Optional[set[str]] = None,
+    states: Optional[set[str]] = None,
 ) -> bool:
     """Match a selector right-to-left against *widget* and its ancestors."""
     if not selector.compounds:
         return False
     parents = parents or {}
     sibling_info = sibling_info or {}
+    last = len(selector.compounds) - 1
 
     def match_at(index: int, current: Widget) -> bool:
+        # ``classes``/``states`` describe *widget*, the subject of the
+        # selector. An ancestor compound must recompute them for itself, so
+        # they are only threaded in for the rightmost (subject) compound.
+        is_subject = index == last
         if not _matches_compound(selector.compounds[index], current,
-                                 parents=parents, sibling_info=sibling_info):
+                                 parents=parents, sibling_info=sibling_info,
+                                 classes=classes if is_subject else None,
+                                 states=states if is_subject else None):
             return False
         if index == 0:
             return True
@@ -215,7 +229,7 @@ def _match_selector(
             return False
         return False
 
-    return match_at(len(selector.compounds) - 1, widget)
+    return match_at(last, widget)
 
 
 def _flatten_widgets(
@@ -558,11 +572,20 @@ def resolve_styles(
     globals_ = dict(stylesheet.variables)
     keyframes = stylesheet.keyframes
 
-    active_rules = [
-        (order, rule)
-        for order, rule in enumerate(stylesheet.rules)
-        if rule.media is None or _media_matches(rule.media, context)
-    ]
+    # Specificity and the state sub-spec depend only on the rule, so compute
+    # them once here rather than for every (rule, widget) pair below.
+    active_rules = []
+    for order, rule in enumerate(stylesheet.rules):
+        if rule.media is not None and not _media_matches(rule.media, context):
+            continue
+        compounds = rule.selector.compounds
+        subject = compounds[-1] if compounds else None
+        active_rules.append((
+            order,
+            rule,
+            _specificity(rule.selector),
+            _state_subject(subject) if subject is not None else None,
+        ))
 
     def resolve_value(value, env: dict):
         if _contains_variable(value):
@@ -580,15 +603,19 @@ def resolve_styles(
                                           DeclarationBlock]]] = {}
         custom: dict = {}
 
-        for source_order, rule in active_rules:
-            if not _match_selector(rule.selector, widget, parents, sibling_info):
+        # Class and state membership depend only on the widget, not on the
+        # rule, so compute them once instead of inside every selector match.
+        widget_classes = _widget_classes(widget)
+        widget_states = _widget_states(widget)
+
+        for source_order, rule, specificity, sub in active_rules:
+            if not _match_selector(rule.selector, widget, parents, sibling_info,
+                                   widget_classes, widget_states):
                 continue
             for key, value in rule.body.declarations:
                 if isinstance(key, str) and key.startswith("--"):
                     custom[key] = value
-            subject = rule.selector.compounds[-1]
-            sub = _state_subject(subject)
-            entry = (_specificity(rule.selector), source_order, rule.body)
+            entry = (specificity, source_order, rule.body)
             if sub is None:
                 matched.append(entry)
             else:

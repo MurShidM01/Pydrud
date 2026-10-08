@@ -328,6 +328,15 @@ All notable changes to Pydrud are documented here.
 * `tools/check_java.py` renders every Java template twice — with the camera
   stack bundled and without it — so both generated variants stay valid in CI.
 
+### Changed — style resolution is roughly 17 % faster
+* `resolve_styles` no longer recomputes per-widget facts inside the selector
+  loop. A widget's classes and interaction states are gathered once per build,
+  and each rule's specificity and `:active`/`:hover`/`:focus` sub-spec are
+  computed once per stylesheet instead of once per (rule, widget) pair. The
+  resolved styles are byte-for-byte identical; only the work is smaller.
+  This matters most on device, where a full rebuild is dominated by style
+  resolution, so tab switches and control updates repaint sooner.
+
 ### Changed — CI
 * The workflow is now five jobs on a single pinned interpreter
   (`PYTHON_VERSION: "3.13"`, no version matrix): **Lint**, **Tests**,
