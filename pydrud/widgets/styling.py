@@ -354,6 +354,11 @@ class Style:
         self._data["rotate"] = degrees
         return self
 
+    def blur(self, radius: float) -> "Style":
+        """Frosted-glass blur radius in dp (Android 12 / API 31+)."""
+        self._data["blur"] = radius
+        return self
+
     # --- image ---
 
     def fit(self, value: str) -> "Style":

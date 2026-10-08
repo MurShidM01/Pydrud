@@ -39,6 +39,10 @@ class TestStyleBuilder(unittest.TestCase):
         s = Style().margin(8).build()
         self.assertEqual(s["margin"], {"all": 8})
 
+    def test_blur(self):
+        s = Style().blur(16).build()
+        self.assertEqual(s["blur"], 16)
+
 
 class TestEdgeInsets(unittest.TestCase):
     def test_all(self):
