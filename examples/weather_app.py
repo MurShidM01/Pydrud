@@ -22,6 +22,11 @@ forecast = State([])          # list[dict(day, temp)]
 app: App | None = None
 
 
+def _inset() -> dict:
+    """A comfortable page inset so content never touches the screen edges."""
+    return {"padding": {"left": 16, "right": 16, "top": 12, "bottom": 12}}
+
+
 def main(page):
     page.bgcolor = Colors.BACKGROUND
 
@@ -62,13 +67,13 @@ def main(page):
     # ── screens ─────────────────────────────────────────────────────────
     def today_screen():
         if loading.value:
-            return Column(key="loading", spacing=12, children=[
+            return Column(key="loading", spacing=12, style=_inset(), children=[
                 Skeleton(key="sk_title", height=28, lines=1),
                 Skeleton(key="sk_chart", height=120, lines=1),
                 Skeleton(key="sk_rows", height=16, lines=4),
             ])
         temps = [item["temp"] for item in forecast.value]
-        return Column(key="today", spacing=16, children=[
+        return Column(key="today", spacing=16, style=_inset(), children=[
             Row(key="place_row", spacing=12, children=[
                 Avatar(icon=Icons.LOCATION, key="place_avatar",
                        bg=Colors.SECONDARY),
@@ -90,7 +95,7 @@ def main(page):
         ])
 
     def places_screen():
-        return Column(key="places", children=[
+        return Column(key="places", style=_inset(), children=[
             ListTile(name, key=f"place_{name}", leading=Icons.LOCATION,
                      trailing=Icons.CHEVRON_RIGHT,
                      on_click=lambda _e, n=name: _pick(n))
@@ -103,7 +108,7 @@ def main(page):
         load()
 
     def settings_screen():
-        return Column(key="settings", children=[
+        return Column(key="settings", style=_inset(), children=[
             ListTile("Use my location", key="gps", leading=Icons.LOCATION,
                      on_click=locate),
             ListTile("Share forecast", key="share", leading=Icons.SHARE,

@@ -99,24 +99,29 @@ def main(page):
     page.add(Scaffold(
         key="todo",
         app_bar=AppBar(title="Todo", key="bar", bg_color=Colors.PRIMARY),
-        body=Column(spacing=12, children=[
-            SearchBar(store["query"], key="search", hint="Filter tasks",
-                      on_change=lambda e: store.set("query", e.value or "")),
-            SegmentedButton(list(FILTERS), key="filter",
-                            selected=store["filter"],
-                            on_change=lambda e: store.set("filter", e.value)),
-            Row(key="composer", spacing=8, children=[
-                TextField(store["draft"], key="draft", hint="What's next?",
-                          expand=1, on_change=on_draft, on_submit=submit),
-                Button("Add", key="add", on_click=submit),
-            ]),
-            ListView(key="rows", expand=1, spacing=4, children=rows)
-            if rows else
-            Text("Nothing here yet.", key="empty",
-                 color=Colors.TEXT_SECONDARY),
-            Button("Clear completed", key="clear", variant="text",
-                   on_click=clear_done),
-        ]),
+        body=Column(
+            spacing=12,
+            style={"padding": {"left": 16, "right": 16,
+                               "top": 12, "bottom": 12}},
+            children=[
+                SearchBar(store["query"], key="search", hint="Filter tasks",
+                          on_change=lambda e: store.set("query", e.value or "")),
+                SegmentedButton(list(FILTERS), key="filter",
+                                selected=store["filter"],
+                                on_change=lambda e: store.set("filter", e.value)),
+                Row(key="composer", spacing=8, children=[
+                    TextField(store["draft"], key="draft", hint="What's next?",
+                              expand=1, on_change=on_draft, on_submit=submit),
+                    Button("Add", key="add", on_click=submit),
+                ]),
+                ListView(key="rows", expand=1, spacing=4, children=rows)
+                if rows else
+                Text("Nothing here yet.", key="empty",
+                     color=Colors.TEXT_SECONDARY),
+                Button("Clear completed", key="clear", variant="text",
+                       on_click=clear_done),
+            ],
+        ),
     ))
 
 

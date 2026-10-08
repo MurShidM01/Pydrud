@@ -93,6 +93,18 @@ the values are forwarded to Gradle automatically.
 | Async by default | Thread pool, timers and a non-blocking HTTP client, so the UI never freezes |
 | Testable | `pydrud.testing.AppTester` runs your whole app in CI without a device or emulator |
 
+## Examples
+
+Two complete apps live in [`examples/`](examples):
+
+| Example | Demonstrates |
+|---------|--------------|
+| [`todo_app.py`](examples/todo_app.py) | `Store` state, keyed lists, swipe-to-delete, search + segmented filtering, persistence, a confirm dialog |
+| [`weather_app.py`](examples/weather_app.py) | The non-blocking HTTP client, pull-to-refresh, permissions + GPS, a `Chart`, skeleton loading states, bottom navigation |
+
+Run either headless with `python examples/todo_app.py --tree`, or drop it into
+a project as `src/app/main.py`.
+
 ## PSS stylesheets
 
 Pydrud Style Sheets (PSS) keep presentation out of Python while using the same
