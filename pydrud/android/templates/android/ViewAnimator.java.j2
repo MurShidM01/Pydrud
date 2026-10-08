@@ -21,10 +21,18 @@ import java.util.Map;
  * Holds a back-reference to the owning {@link ViewFactory} and owns one
  * cohesive slice of the rendering responsibility (styling, layout, events,
  * image loading, tree patching, native views or built-in widget factories).
+ *
+ * It also plays the declarative CSS-style animations a stylesheet may attach:
+ * an `animation` spec carrying `@keyframes` runs as an infinite (or counted)
+ * keyframe loop, and a `transition` spec tweens a property change.
  */
 public class ViewAnimator {
 
     final ViewFactory vf;
+
+    /** Running keyframe loops, keyed weakly so a removed view is not held. */
+    final java.util.WeakHashMap<View, android.animation.Animator> mKeyframes =
+        new java.util.WeakHashMap<>();
 
     ViewAnimator(ViewFactory vf) {
         this.vf = vf;
@@ -66,17 +74,125 @@ public class ViewAnimator {
         animator.start();
     }
 
+    // ── declarative @keyframes ──────────────────────────────────────────
+
+    /**
+     * Start (or restart) the keyframe loop a widget's `animation` spec names,
+     * or cancel the running loop when the spec is gone. A new spec always
+     * replaces the running one, matching CSS `animation` semantics.
+     */
+    void applyAnimation(View view, JSONObject style) {
+        if (view == null) return;
+        JSONObject spec = style != null ? style.optJSONObject("animation") : null;
+        JSONArray frames = spec != null ? spec.optJSONArray("keyframes") : null;
+        android.animation.Animator existing = mKeyframes.remove(view);
+        if (existing != null) existing.cancel();
+        if (spec == null || frames == null || frames.length() == 0) return;
+
+        android.animation.ValueAnimator animator =
+            android.animation.ValueAnimator.ofFloat(0f, 1f);
+        animator.setDuration(Math.max(1, (long) spec.optDouble("duration", 1000)));
+        animator.setStartDelay(Math.max(0, (long) spec.optDouble("delay", 0)));
+        animator.setInterpolator(vf.mStyler.interpolator(spec));
+
+        String iterations = spec.optString("iterations", "1");
+        if ("infinite".equals(iterations)) {
+            animator.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+        } else {
+            int count = (int) Math.round(spec.optDouble("iterations", 1));
+            animator.setRepeatCount(Math.max(0, count - 1));
+        }
+        String direction = spec.optString("direction", "normal");
+        boolean alternate = "alternate".equals(direction)
+            || "alternate-reverse".equals(direction);
+        animator.setRepeatMode(alternate
+            ? android.animation.ValueAnimator.REVERSE
+            : android.animation.ValueAnimator.RESTART);
+
+        final View target = view;
+        final JSONArray timeline = frames;
+        animator.addUpdateListener(
+            new android.animation.ValueAnimator.AnimatorUpdateListener() {
+                @Override public void onAnimationUpdate(
+                        android.animation.ValueAnimator value) {
+                    applyKeyframe(target, timeline,
+                                  (Float) value.getAnimatedValue());
+                }
+            });
+        mKeyframes.put(view, animator);
+        animator.start();
+    }
+
+    /** Cancel a view's keyframe loop — called when the view leaves the tree. */
+    void stopAnimation(View view) {
+        if (view == null) return;
+        android.animation.Animator animator = mKeyframes.remove(view);
+        if (animator != null) animator.cancel();
+    }
+
+    void applyKeyframe(View view, JSONArray frames, float t) {
+        if (frames == null || frames.length() == 0) return;
+        JSONObject from = null, to = null;
+        float fromAt = 0f, toAt = 1f;
+        for (int i = 0; i < frames.length(); i++) {
+            JSONArray entry = frames.optJSONArray(i);
+            if (entry == null) continue;
+            float at = (float) entry.optDouble(0);
+            JSONObject props = entry.optJSONObject(1);
+            if (props == null) continue;
+            if (at <= t) { from = props; fromAt = at; }
+            if (at >= t && to == null) { to = props; toAt = at; }
+        }
+        if (from == null) from = to;
+        if (to == null) to = from;
+        if (from == null) return;
+        float span = toAt - fromAt;
+        float f = span > 0f ? (t - fromAt) / span : 0f;
+        f = Math.max(0f, Math.min(1f, f));
+
+        view.setAlpha(lerp(from.optDouble("opacity", 1),
+                           to.optDouble("opacity", 1), f));
+        float scale = lerp(from.optDouble("scale", 1),
+                           to.optDouble("scale", 1), f);
+        view.setScaleX(scale);
+        view.setScaleY(scale);
+        if (from.has("rotation") || to.has("rotation")) {
+            view.setRotation(lerp(from.optDouble("rotation", 0),
+                                  to.optDouble("rotation", 0), f));
+        }
+        if (from.has("translateX") || to.has("translateX")) {
+            view.setTranslationX(vf.mStyler.dp(
+                (float) lerp(from.optDouble("translateX", 0),
+                             to.optDouble("translateX", 0), f)));
+        }
+        if (from.has("translateY") || to.has("translateY")) {
+            view.setTranslationY(vf.mStyler.dp(
+                (float) lerp(from.optDouble("translateY", 0),
+                             to.optDouble("translateY", 0), f)));
+        }
+    }
+
+    static float lerp(double a, double b, float f) {
+        return (float) (a + (b - a) * f);
+    }
+
+    // ── transitions ─────────────────────────────────────────────────────
+
     boolean animateStyleChange(View view, JSONObject node,
                                        JSONObject changed) {
+        if (changed == null) return false;
         JSONObject style = node != null ? node.optJSONObject("style") : null;
         JSONObject spec = style != null ? style.optJSONObject("animation") : null;
-        if (spec == null || changed == null) return false;
+        JSONObject transition = transitionFor(style, changed);
+        if (spec == null && transition == null) return false;
 
-        long duration = spec.optLong("duration", 250);
-        long delay = spec.optLong("delay", 0);
+        JSONObject timing = transition != null ? transition : spec;
+        long duration = (long) timing.optDouble("duration",
+            spec != null ? spec.optDouble("duration", 250) : 250);
+        long delay = (long) timing.optDouble("delay", 0);
         android.view.ViewPropertyAnimator animator = view.animate()
             .setDuration(duration).setStartDelay(delay)
-            .setInterpolator(vf.mStyler.interpolator(spec));
+            .setInterpolator(vf.mStyler.interpolator(timing));
         boolean animated = false;
 
         if (changed.has("opacity")) {
@@ -92,12 +208,81 @@ public class ViewAnimator {
             animator.rotation((float) changed.optDouble("rotation", 0));
             animated = true;
         }
+        if (changed.has("bg") && transition != null) {
+            animateBackground(view, changed.optString("bg", ""), duration);
+            animated = true;
+        }
         if (changed.has("width") || changed.has("height")) {
             animateSize(view, changed, duration);
             animated = true;
         }
         if (animated) animator.start();
         return animated;
+    }
+
+    /** The `transition` entry that names a property in *changed*, if any. */
+    JSONObject transitionFor(JSONObject style, JSONObject changed) {
+        if (style == null) return null;
+        JSONArray list = style.optJSONArray("transition");
+        if (list == null) return null;
+        for (int i = 0; i < list.length(); i++) {
+            JSONObject entry = list.optJSONObject(i);
+            if (entry == null) continue;
+            String property = entry.optString("property", "all");
+            if ("all".equals(property) || changed.has(styleKey(property))) {
+                return entry;
+            }
+            if ("transform".equals(property)
+                    && (changed.has("scale") || changed.has("rotation"))) {
+                return entry;
+            }
+        }
+        return null;
+    }
+
+    /** Map a CSS property name in a `transition` to its Pydrud style key. */
+    static String styleKey(String property) {
+        switch (property) {
+            case "background": case "background-color": return "bg";
+            case "transform":  return "scale";
+            default:           return property;
+        }
+    }
+
+    /** Tween a solid background colour (a ColorDrawable or GradientDrawable). */
+    void animateBackground(final View view, String target, long duration) {
+        final android.graphics.drawable.Drawable bg = view.getBackground();
+        if (bg == null) return;
+        final int to = vf.mStyler.parseColor(target, Color.TRANSPARENT);
+        Integer from = solidColor(bg);
+        if (from == null || from.intValue() == to) return;
+        android.animation.ValueAnimator animator =
+            android.animation.ValueAnimator.ofInt(from.intValue(), to);
+        animator.setDuration(duration);
+        animator.addUpdateListener(
+            new android.animation.ValueAnimator.AnimatorUpdateListener() {
+                @Override public void onAnimationUpdate(
+                        android.animation.ValueAnimator value) {
+                    setSolidColor(bg, (Integer) value.getAnimatedValue());
+                    view.invalidate();
+                }
+            });
+        animator.start();
+    }
+
+    static Integer solidColor(android.graphics.drawable.Drawable drawable) {
+        if (drawable instanceof android.graphics.drawable.ColorDrawable) {
+            return ((android.graphics.drawable.ColorDrawable) drawable).getColor();
+        }
+        return null;
+    }
+
+    static void setSolidColor(android.graphics.drawable.Drawable drawable, int color) {
+        if (drawable instanceof android.graphics.drawable.ColorDrawable) {
+            ((android.graphics.drawable.ColorDrawable) drawable).setColor(color);
+        } else if (drawable instanceof GradientDrawable) {
+            ((GradientDrawable) drawable).setColor(color);
+        }
     }
 
     void animateSize(final View view, JSONObject changed, long duration) {

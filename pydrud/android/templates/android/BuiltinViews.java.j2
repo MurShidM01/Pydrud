@@ -155,6 +155,7 @@ static final int VIRTUALIZE_THRESHOLD = 24;
             vf.gestures.bind(view, json);
             vf.mStyler.applyTransforms(view, style);
             vf.mAnimator.playEntrance(view, type, json);
+            vf.mAnimator.applyAnimation(view, style);
             vf.mStyler.applySemantics(view, json);
 
             if (!json.optBoolean("visible", true)) view.setVisibility(View.GONE);

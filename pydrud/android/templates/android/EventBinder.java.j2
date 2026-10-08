@@ -243,15 +243,33 @@ public class EventBinder {
 
     void addTouchFeedback(View view, JSONObject json) {
         if (view == null) return;
+        // A FAB owns its feedback: `styleFab` already applied the circular
+        // ripple, the press shrink and the elevation, so the generic
+        // rounded-rect path here would only override it.
+        if (vf.props(json).optBoolean("_fab", false)) return;
+        String type = json != null ? json.optString("type", "") : "";
+        JSONObject s = json != null ? json.optJSONObject("style") : null;
+        if (s != null && !s.optBoolean("feedback", true)) return;
+
+        // A `:active` rule becomes a press spec; its scale overrides the
+        // built-in feedback for this view.
+        JSONObject press = s != null ? s.optJSONObject("press") : null;
+        float pressScale = press != null && press.has("scale")
+            ? (float) press.optDouble("scale", 0f) : 0f;
+
+        // Material components draw their own ripple and state overlay, so the
+        // generic ripple below would double up. The declarative `:active`
+        // shrink, however, is the stylesheet's explicit intent — apply just
+        // that on top.
         if (view instanceof Button || view instanceof CompoundButton
             || view instanceof EditText || view instanceof SeekBar
             || view instanceof com.google.android.material.slider.RangeSlider
             || view instanceof Spinner) {
+            if (pressScale > 0f) {
+                PydrudTheme.pressFeedback(view, pressScale, 0f, 2f);
+            }
             return;
         }
-        String type = json != null ? json.optString("type", "") : "";
-        JSONObject s = json != null ? json.optJSONObject("style") : null;
-        if (s != null && !s.optBoolean("feedback", true)) return;
 
         int tint = PydrudTheme.rippleOn(vf.mStyler.parseColor(
             s != null ? s.optString("bg", "") : "", PydrudTheme.surface));
@@ -262,13 +280,15 @@ public class EventBinder {
 
         if (circular) {
             PydrudTheme.addCircleRipple(view, tint);
-            PydrudTheme.pressFeedback(view, 0.88f, 0f, 0f);
+            PydrudTheme.pressFeedback(view, pressScale > 0f ? pressScale : 0.88f, 0f, 0f);
             PydrudTheme.expandTouch(view, PydrudTheme.touchTarget());
         } else {
             float radius = s != null && s.has("borderRadius")
                 ? vf.mStyler.dp(s.optInt("borderRadius", 0)) : 0f;
             PydrudTheme.addRipple(view, tint, radius);
-            if ("Card".equals(type)) {
+            if (pressScale > 0f) {
+                PydrudTheme.pressFeedback(view, pressScale, 0f, 2f);
+            } else if ("Card".equals(type)) {
                 PydrudTheme.pressFeedback(view, 0.985f, 0f, 2f);
             }
         }

@@ -80,6 +80,10 @@ public class TreePatcher {
                     } else {
                         vf.mStyler.applyStyle(v, merged);
                     }
+                    // A changed `animation` spec restarts (or stops) the loop.
+                    if (style.has("animation")) {
+                        vf.mAnimator.applyAnimation(v, merged);
+                    }
                 }
                 break;
             }
@@ -106,6 +110,7 @@ public class TreePatcher {
             }
             case "delete": {
                 View old = vf.viewMap.get(key);
+                vf.mAnimator.stopAnimation(old);
                 ViewGroup parent = old != null && old.getParent() instanceof ViewGroup
                     ? (ViewGroup) old.getParent() : null;
                 forgetChild(vf.parentMap.get(key), key);
