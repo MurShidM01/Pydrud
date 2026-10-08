@@ -25,14 +25,283 @@ All notable changes to Pydrud are documented here.
 
 ## [Unreleased]
 
+### Added — PSS is now a full CSS-style styling language
+* **PSS speaks the CSS authoring surface.** The stylesheet format now supports
+  **custom properties** (`:root { --bg: … }`, `var(--x)` with a fallback,
+  inherited down the widget tree), the **universal selector** `*`, **pseudo-
+  classes** (`:first-child`/`:last-child`/`:nth-child()`/`:only-child`/
+  `:empty`/`:not()`, plus `:active`/`:hover`/`:focus`/`:disabled`/`:checked`),
+  **`@media`** queries (`min-`/`max-width`/`height`, `and`, comma lists,
+  nesting), **`@keyframes` + the `animation` shorthand**, and **`transition`**.
+  A stylesheet copied from the web now drops in almost verbatim.
+* **The CSS value language is evaluated against the live window.**
+  `clamp()`, `calc()`, `min()`, `max()`, `env(safe-area-inset-*)` and the
+  viewport units (`vw`, `dvh`, …) resolve to dp numbers using the same metrics
+  `MediaQuery` reports, so responsive sizing can finally live in the sheet
+  instead of Python.
+* **CSS long-hands fold into Pydrud composites.** `font-size`/`font-weight`/
+  `color` → `font.*`; `padding-top`/`margin-left` and the `padding: a b c d`
+  shorthands → the `padding`/`margin` objects; `border: 1px solid red` /
+  `border-color` → the `border` object; `background`/`background-color` → `bg`;
+  `gap` → `spacing`; `transform: scale(…) rotate(…)` → `scale`/`rotation`.
+  The uniform one-value form (`padding: 24`, `margin: 8px`) expands to all four
+  sides rather than a scalar the renderer would drop. Web-only declarations
+  (`display`, `box-sizing`, `pointer-events`, `flex-*`, `-webkit-*`, …) are
+  recognised and ignored with one aggregated warning.
+* **The Android renderer plays the declarative animations.** `@keyframes` run
+  as a `ValueAnimator` timeline (infinite/counted, with `ease`/`ease-in`/
+  `ease-out`/`ease-in-out`/`cubic-bezier()` timing), `transition` tweens a
+  property change (including a solid background), and a `:active` rule becomes
+  a native press sub-spec — `.fab:active { transform: scale(.92) }` shrinks the
+  button on touch-down.
+* **A worked parity example** lives at `docs/examples/heartbeat-css-parity.pss`
+  — the reference prototype's web stylesheet translated to PSS — with
+  `tests/test_pss_css_parity.py` asserting the numbers a browser would compute
+  at 360×640, 412×915 and 320×480.
+
+### Added — the starter is now the Heartbeat app
+* **`pydrud create` scaffolds a real, animated app instead of a counter.**
+  Heartbeat is a single calm screen: a softly pulsing heart, a live BPM
+  reading, a tiny scrolling ECG trace and one compact transport button.
+  Everything is an ordinary Pydrud widget, and every animation is a Python
+  frame loop driven by `page.every(...)`. The loop is cancelled when the
+  rhythm stops and when the app goes to the background, so a stopped screen
+  is completely still — no idle timer, no battery cost.
+* **The starter is designed around one brand colour.** `src/app/theme.py`
+  derives the heart, the rings, the ECG tint and the translucent pulse field
+  from a single `ACCENT`, and `pydrud create --accent` re-brands the whole
+  screen. The value is recorded as `[theme] seed` in `pydrud.toml`, so
+  `pydrud sync` regenerates the native theme resources to match; the default
+  accent is the design's coral red (`#FFE85D68`).
+* **New modules in the generated package:** `app/theme.py` (the palette) and
+  `app/screens/heartbeat.py` (the screen), replacing `playground.py` and
+  `details.py`. The generated `tests/test_app.py` exercises the new screen.
+
+### Fixed — a widget that reverted to its stylesheet value lost the property
+* **The diff engine now compares the *rendered* style, not just the inline
+  overlay.** `Widget` serialises its stylesheet-resolved declarations with the
+  inline ones on top, but the differ only looked at the inline dict — so a
+  widget that dropped an inline `bg` (a button leaving its pressed colour, for
+  instance) patched `bg: None` and the native view lost its background instead
+  of reverting to the stylesheet's colour. The diff now compares the same
+  serialised style the renderer receives, which also makes a stylesheet edit
+  propagate correctly through a patch.
+
+### Fixed — a reused native view fell out of the view map
+* **Reusable widgets (a `Canvas`, `MapView`, `RangeSlider`, `NativeView`, …)
+  stopped receiving patches after the second full render.** `ViewFactory.buildTree()`
+  clears `viewMap` before rebuilding, but `createView()`'s reusable fast path
+  returned the existing native view without putting it back — so the widget
+  kept drawing while every later patch logged `update: unknown key …` and was
+  dropped. The reusable branch now re-registers the view (and refreshes its
+  element index). In the Heartbeat starter this was the ECG `Canvas`: the
+  trace froze and the log filled with `unknown key hb_ecg`.
+* **The Heartbeat starter is now pixel-faithful to the reference design.**
+  The ECG trace draws its lead-in flat run instead of skipping it and is
+  clipped to its window (`overflow: hidden`), so the sliding strip no longer
+  spills across the reading.
+
+### Fixed — the standalone Android entry point imported a name that no longer exists
+* **`pydrud init android` produced a project that crashed on launch with
+  `ImportError: cannot import name 'ACCENT' from 'app.config'`.** The managed
+  `app/android_main.py` still imported `ACCENT` from `app.config` and called
+  `Theme.seed(ACCENT)`, but the Heartbeat rewrite moved the palette into
+  `app/theme.py`. The entry point now imports only `APP_NAME`; the palette is
+  applied by `theme.use_light()` in `app.main`, which it imports for exactly
+  that side effect.
+
+### Changed — the Heartbeat screen is responsive, and the transport button is a real FAB
+* **The screen now reproduces the design's CSS `clamp()` rules from the live
+  window.** `heartbeat._layout()` samples `MediaQuery` (dp) and applies the
+  design's media queries in stylesheet order — small phones (≤ 360 dp), short
+  or landscape windows (≤ 700 dp tall) and very narrow screens (≤ 320 dp) —
+  so the reading, the pulse field, the rings, the trace and the page padding
+  all follow the device with no second layout. PSS has no viewport unit, so
+  these window-proportional sizes are set from Python; everything fixed
+  (colour, weight, radius, opacity) still lives in `theme.pss`.
+* **The transport button is a genuine circular floating action button.** It
+  is a `FloatingActionButton` (56 dp, `border-radius: 50 %`, absolutely
+  positioned bottom-right, clearing the gesture bar), so it gets the Material
+  circular ripple and the design's press-and-shrink. The FAB's own
+  `styleFab` now owns that feedback — `EventBinder.addTouchFeedback` skips a
+  node flagged `_fab` instead of overriding it with a generic rounded ripple.
+* **`FloatingActionButton` honours an explicit `style={"font": {"size": …}}`**
+  for its icon/label instead of always forcing the Material default, so a
+  design can size the glyph (the reference uses 19 dp).
+
+### Fixed — three Heartbeat polish issues
+* **The footnote is centred again.** `.hb-bottom` carried a
+  `padding: { right: 64 }` meant to nudge the caption out of the floating
+  button's way, but it simply pushed the caption 32 dp left of the window
+  centre. The padding is gone; the caption centres like the rest of the
+  screen.
+* **The transport button no longer rests on the gesture bar.**
+  `heartbeat._layout()` computed `fab_bottom = max(margin, inset)`, which put
+  the button *exactly* on top of the home indicator whenever a gesture bar
+  was present. The design value is now treated as the margin *above* the safe
+  area: the Python layout keeps the plain design value and leaves
+  `safeAreaBottom` on, so the renderer adds the inset — the button ends up
+  16 dp clear of the bar (a real `frameParams`/`applyStyle` fix, since the
+  create and patch paths already added `PydrudTheme.insetBottom`).
+* **The BPM reading no longer flashes a `…` (or a stale glyph) while it
+  changes.** The reading is re-styled on every animation frame, and the
+  native font block applied *both* the derived and the explicit letter
+  spacing / line height on every call — so the two disagreed each frame and
+  the TextView nulled its layout and re-measured continuously. On the device
+  that surfaced as a frame of three large dots where the number should be
+  (`Text(max_lines=1)` → `setMaxLines(1)` + `setEllipsize(END)`), and, once
+  the ellipsis was clipped, as a one-frame partial digit. `applyStyle` now
+  applies tracking and leading **once**, guarded on a real change, so a
+  re-styled TextView keeps its layout; and the reading is
+  `max_lines=1, overflow="clip"`, so it can never show an ellipsis in any
+  case. Verified on-device: 437 consecutive frames of the running animation,
+  zero artifacts.
+
+### Added — a pluggable runtime backend (Chaquopy is now optional)
+* **The Python runtime is now a pluggable backend, so Chaquopy is one
+  implementation rather than a hard requirement.** The generated Android
+  target contains a `PythonRuntime` interface, a `PydrudRuntimeFactory` that
+  selects the backend at build time, and exactly one concrete backend. The
+  renderer never mentions a runtime, so a project can be built without
+  Chaquopy — or any embedded interpreter — and the same source still works.
+* **Three Android backends ship today:** `chaquopy` (embedded CPython, the
+  default), `host` (no on-device interpreter — Python runs on your machine),
+  and `none` (a pure renderer). Select one with
+  `pydrud init android --backend host|none|chaquopy`.
+* **`pydrud.toml` gains `runtime: host` / `runtime: none`**, and
+  `RuntimeDescriptor.backend` is the single value the templates key off.
+  A host/none APK carries no CPython, no Python source and no Chaquopy
+  dependency — a debug host build is ~7 MB versus ~49 MB with the embedded
+  interpreter.
+* Chaquopy is **MIT-licensed since 12.0.1** (all restrictions removed), so
+  keeping it as the default backend imposes no App Store / Play Store
+  limitation. The abstraction exists for cross-platform reach (iOS, desktop,
+  web), not licensing.
+* **The `host` backend now actually connects.** A host-backend APK embeds no
+  interpreter, so the app must dial the developer's machine — but the bridge
+  only ever *listened* on loopback, so the device sat on a blank screen. The
+  bridge now has a client mode: when the backend is `host` it dials
+  `PydrudRuntimeConfig.REMOTE_HOST:REMOTE_PORT` and reconnects with a bounded
+  backoff, so it is fine to launch the app before or after the host bridge.
+  The protocol is unchanged once the socket is up.
+* **`pydrud dev --bridge`** starts that host-side listener: it loads your
+  project Python, serves the plain NDJSON bridge (no QR, session or token) on
+  loopback, and runs `adb reverse tcp:<port> tcp:<port>` for you so a USB
+  device or emulator reaches the machine without a LAN address. `--device`
+  targets a specific serial and `--no-reverse` skips the forward. This is the
+  "fully functional without Chaquopy" path: your real app runs on the host and
+  the APK renders it.
+
+### Added — production styling and the missing Material widgets
+* **The stylesheet engine now honours every property it accepts.** Shadows
+  (`shadow`/`elevation` plus `shadowColor`, `shadowOffsetX/Y`, `shadowBlur`,
+  `shadowSpread` tokens), per-corner radii (`borderTopLeftRadius`,
+  `borderBottomRightRadius`, …), `ripple`, `aspectRatio`, CSS-style gradient
+  `angle` and multi-stop gradients (`stops`) all render, and
+  `mainAxisAlignment: space_between|space_around|space_evenly` distributes
+  free space without inserting spacer views (so patches keep their indices).
+  A FAB is now circular only when its radius reaches half its shorter side, so
+  Material 3 rounded-square buttons get the right ripple.
+* **`FloatingActionButton(variant=...)`** — `small` (40dp), `regular` (56dp),
+  `large` (96dp) and `extended` (icon + label side by side, hugging width).
+  The regular button is now a Material 3 square rather than a circle.
+* **`Chip(icon=...)`** now draws its leading icon (it was declared but
+  ignored).
+* **New declarative overlays** — `AlertDialog`, `Dialog` (alias) and
+  `ModalBottomSheet`. Include the widget in the tree to show the overlay, drop
+  it to dismiss; actions dispatch `click` (`{"action": …}` for dialogs,
+  `{"index": …, "label": …}` for sheets) and outside/back dismissal dispatches
+  `dismiss`. The imperative `page.dialog.*` API is unchanged.
+* **`AnimatedSwitcher` cross-fades for real** — the outgoing child fades out
+  while the incoming one fades/slides/scales in, following the declared
+  `transition` (`fade`, `slide_up|down|left|right`, `scale`) and `duration`.
+  Previously it rendered as a plain box.
+* **Composite PSS values may be separated with `;` as well as `,`.** A
+  multi-line block such as `shadow: { color: #40000000; offsetY: 10;
+  blur: 24 }` used to be swallowed as one opaque string (the parser only
+  split on commas), so the property silently did nothing. Both separators now
+  build a real object, and the same applies to arrays.
+
+### Added — the design system follows light and dark mode
+* **PSS `$token` references.** A stylesheet value may point at a live theme
+  value — `bg: $surface`, `color: $text`, `border-radius: $radius_card` — and
+  it is resolved against the active palette on every build. One stylesheet now
+  follows light/dark mode and re-tints after `Theme.seed()`, `Theme.dark()` or
+  `Theme.system()` with no duplicated rules. Colour roles come from `Theme`;
+  metrics (radii, spacing, the type ramp, motion) come from `Tokens`. A value
+  that is exactly one reference keeps the token's own type; an unknown name is
+  left untouched and reported as `Unknown style token reference(s): $x`.
+* **Pages follow the device's dark-mode setting by default.**
+  `page.theme_mode` now defaults to `"system"`: the renderer reports `dark` in
+  its `ready`/`metrics` payload, and a page on `"system"` adopts the matching
+  palette — Python-resolved colours, PSS `$tokens` and native night mode all
+  flip together, live, when the user toggles the system switch.
+  `page.set_theme_mode("light" | "dark" | "system")` still forces a mode.
+* **The generated starter follows the mode out of the box.** Its
+  `src/app/theme.pss` now uses `$token` references throughout, so a freshly
+  created app is light or dark with the system and re-skins from one
+  `Theme.seed(...)` call.
+* `FakeRenderer`/`AppTester` gained a `dark=` option and a `set_dark()` helper,
+  so a test can drive the simulated system setting and assert the palette
+  flips.
+
+### Added — animated theme changes and correct route transitions
+* **Theme changes can tween instead of snapping.** `page.set_theme_mode(mode,
+  animate=True)` and `page.set_theme(seed, animate=True)` glide the whole
+  palette from what the device last received to the new one over the duration
+  (`ColorScheme.lerp` blends every role through the same fraction), re-rendering
+  each frame. A bounded frame count keeps the bridge cheap; starting a second
+  change supersedes the first.
+* **Route transitions now animate the incoming screen.** The router announces
+  a transition just before it rebuilds the screen, but the animation used to
+  start immediately — so it played on the *outgoing* tree and the new screen
+  then swapped in un-animated. The Android side now queues the transition and
+  plays it once the new snapshot (or patch batch) is in place. `shared_axis`
+  is implemented (fade + settle) instead of falling through to a plain fade.
+
+### Added — content blur (`blur`)
+* **A new `blur` style property** softens a view's own rendering, like CSS
+  `filter: blur()` — a background image, or a whole panel's children. It is a
+  radius in dp and is available on every widget (`Style().blur(20)` or
+  `style={"blur": 20}`). The renderer draws the view through a hardware layer
+  with an Android `RenderEffect` and re-applies the effect on every patch, so a
+  blurred value animates with the rest of the style. Android 12 (API 31) and
+  newer; on older devices the view renders unblurred and the renderer logs the
+  reason once. Blurring what is *behind* a view is a window-level effect
+  (`Window.setBackgroundBlurRadius`) and is not offered per widget.
+
+### Changed — the Android target is always a standalone app
+* **The Chaquopy-free "preview shell" is gone; `pydrud init android` now
+  generates the standalone app.** Previously the default Android target was a
+  preview shell whose `MainActivity` showed a manual *connect screen* (paste a
+  `pydrud://` URI) and rendered `pydrud dev` over the LAN, so building and
+  installing an APK showed a connection form instead of the app. The Android
+  platform now always embeds CPython with Chaquopy: `pydrud build` and
+  `pydrud run` produce a real app that boots your screens on device, fully
+  offline — no connect screen.
+* **`--standalone` was removed** from `pydrud init android` (the standalone
+  target is now the only shape), and `standalone:` is no longer written to
+  `pydrud.yaml`. A project generated by an older release as a preview shell is
+  upgraded in place by `pydrud init android` / `pydrud sync`.
+
+### Fixed — composite widgets are no longer replaced by placeholders
+* **`Scaffold`, `AppBar`, `Flex`, `SafeArea` and the other composite widgets
+  now render on a real client.** The capability check compared each node's
+  Python `_widget_type` against the renderer's advertised `widget_types`, but a
+  composite serialises as an internal node (`Scaffold` → `Stack`, `AppBar` →
+  its built node, `FloatingActionButton` → `Container`). Those Python names
+  are never in the advertised catalogue, so a supported `Scaffold` was mistaken
+  for an unsupported widget and the **entire screen collapsed to a single
+  `Text` placeholder** (*"Unsupported widget: Scaffold"*). The check now uses
+  the type each node actually serialises to.
+
 ### Fixed — a quiet, lean `pydrud build`
-* **`buildPython` no longer reports a Python version for preview shells.**
-  Preview builds embed no interpreter, yet `pydrud build` still probed the
-  host and printed *"buildPython: using Python 3.12 (the app ships Python
-  3.11); Pydrud will disable .pyc pre-compilation automatically …"* before
-  every Gradle run. `PYDRUD_PYTHON` and `PYDRUD_COMPILE_PYC` are now only
-  resolved for standalone (Chaquopy) targets, where the note is real
-  information.
+* **`buildPython` is only probed for targets that actually embed an
+  interpreter.** A build that ships no CPython still probed the host and
+  printed *"buildPython: using Python 3.12 (the app ships Python 3.11);
+  Pydrud will disable .pyc pre-compilation automatically …"* before every
+  Gradle run. `PYDRUD_PYTHON` and `PYDRUD_COMPILE_PYC` are now resolved only
+  for standalone (Chaquopy) targets, where the note is real information.
 * **CameraX and ML Kit are opt-in, so the NDK strip warning is gone.**
   Every scaffolded app bundled `androidx.camera:*` and
   `com.google.mlkit:barcode-scanning` whether it used a camera or not —
