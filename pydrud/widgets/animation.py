@@ -222,6 +222,7 @@ class AnimatedSwitcher(_Animated):
 
     def _serialise_props(self) -> dict:
         return {**self._extra, "transition": self.transition,
+                "duration": self.duration or 250,
                 "childKey": self.child_key}
 
 

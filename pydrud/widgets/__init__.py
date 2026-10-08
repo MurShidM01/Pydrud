@@ -29,6 +29,7 @@ from pydrud.widgets.material import (
     SegmentedButton, SearchBar, Rating, CircularProgress, Skeleton,
     RefreshIndicator, Stepper, WebView, VideoPlayer, Chart,
     MenuItem, MenuDivider, PopupMenu, PopupMenuButton, DropdownMenu,
+    AlertDialog, Dialog, ModalBottomSheet,
 )
 from pydrud.widgets.gestures import GestureDetector, InkWell, Dismissible, Draggable
 from pydrud.widgets.animation import (
@@ -172,6 +173,10 @@ __all__ = [
     "WebView",
     "VideoPlayer",
     "Chart",
+    # overlays
+    "AlertDialog",
+    "Dialog",
+    "ModalBottomSheet",
     # menus
     "MenuItem",
     "MenuDivider",

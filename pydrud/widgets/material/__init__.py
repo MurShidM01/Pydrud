@@ -35,6 +35,7 @@ from pydrud.widgets.material.bottom_nav import (
 )
 from pydrud.widgets.material.rail import Drawer, NavigationRail, SegmentedButton
 from pydrud.widgets.material.media import Chart, VideoPlayer, WebView
+from pydrud.widgets.material.overlays import AlertDialog, Dialog, ModalBottomSheet
 
 __all__ = [
     # lists
@@ -53,4 +54,6 @@ __all__ = [
     "Stepper",
     # media
     "WebView", "VideoPlayer", "Chart",
+    # overlays
+    "AlertDialog", "Dialog", "ModalBottomSheet",
 ]

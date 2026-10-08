@@ -1,5 +1,5 @@
 """
-FloatingActionButton widget for Pydrud — a circular action button.
+FloatingActionButton widget for Pydrud — a Material 3 action button.
 
 Rendered as an absolutely positioned, rounded Container inside the root
 FrameLayout (bottom-right by default), exactly like Material's FAB.
@@ -25,20 +25,32 @@ from pydrud.widgets.theme import Colors, Theme
 
 
 class FloatingActionButton(Widget):
-    """A circular floating action button.
+    """A floating action button (Material 3).
 
-    Positioned via ``style.position = "absolute"`` plus ``bottom``/``right``
-    offsets, which the Android ``ViewFactory`` maps onto FrameLayout gravity
-    and margins.
+    ``variant`` is one of ``"small"``, ``"regular"``, ``"large"`` or
+    ``"extended"``. Extended buttons render their icon and label side by
+    side; the others are square. Positioned via
+    ``style.position = "absolute"`` plus ``bottom``/``right`` offsets, which
+    the Android ``ViewFactory`` maps onto FrameLayout gravity and margins.
     """
 
     _widget_type = "FAB"
+
+    VARIANTS = ("small", "regular", "large", "extended")
+    # Material 3 defaults: 40 / 56 / 96dp squares, extended is 56dp tall.
+    _SIZES = {"small": 40, "large": 96, "extended": 56}
+    _RADII = {"small": 12, "regular": 16, "large": 28, "extended": 16}
+
+    def render_type(self) -> str:
+        """The FAB serialises as a ``Container`` (see :meth:`_serialise_self`)."""
+        return "Container"
 
     def __init__(
         self,
         text: str = "",
         *,
         icon: Optional[str] = None,
+        variant: str = "regular",
         on_click: Optional[Callable] = None,
         bg_color: Optional[str] = None,
         text_color: Optional[str] = None,
@@ -56,8 +68,12 @@ class FloatingActionButton(Widget):
         super().__init__(key=key, style=style, visible=visible, **kwargs)
         from pydrud.widgets.tokens import Tokens
 
+        if variant not in self.VARIANTS:
+            raise ValueError(
+                f"FAB variant must be one of {self.VARIANTS}, got {variant!r}")
+        self._variant = variant
         if size is None:
-            size = Tokens.fab_size
+            size = Tokens.fab_size if variant == "regular" else self._SIZES[variant]
         if elevation is None:
             elevation = Tokens.elevation_fab
         self._text = text
@@ -67,13 +83,17 @@ class FloatingActionButton(Widget):
 
         base = {
             "bg": bg_color,
-            "width": size,
-            "height": size,
-            "borderRadius": size / 2,
+            "borderRadius": self._RADII[variant],
             "alignment": "center",
             "elevation": elevation,
             "position": "absolute",
         }
+        if variant == "extended":
+            base["height"] = size
+            base["padding"] = {"left": 20, "right": 20}
+        else:
+            base["width"] = size
+            base["height"] = size
         if left is not None:
             base["left"] = left
         else:
@@ -95,24 +115,50 @@ class FloatingActionButton(Widget):
         return self._icon or self._text
 
     def _serialise_props(self) -> dict:
-        return {"text": self._text, "icon": self._icon or ""}
+        return {"text": self._text, "icon": self._icon or "", "variant": self._variant}
 
     def rebuild(self) -> None:
-        """(Re)build the internal label/icon child widget."""
+        """(Re)build the internal label/icon child widget(s)."""
         from pydrud.widgets.basic import Icon, Text
 
-        label_font = dict(self.style.get("font") or {})
-        label_font.setdefault("color", self._text_color)
-        label_font.setdefault("size", 24 if not self._icon else 22)
-        label_font.setdefault("weight", 500)
+        base_font = dict(self.style.get("font") or {})
+        base_font.setdefault("color", self._text_color)
+        base_font.setdefault("weight", 500)
 
+        if self._variant == "extended":
+            from pydrud.widgets.layout import Row
+
+            row_children = []
+            if self._icon:
+                row_children.append(Icon(
+                    self._icon, key=f"{self.key}._icon",
+                    style={"font": dict(base_font, size=20)}))
+            if self._text:
+                row_children.append(Text(
+                    self._text, key=f"{self.key}._label",
+                    style={"font": dict(base_font, size=16)}))
+            self.children = [Row(
+                children=row_children,
+                spacing=10,
+                vertical_alignment="center",
+                main_axis_size="min",
+                cross_axis_size="min",
+                key=f"{self.key}._row",
+            )]
+            return
+
+        # An explicit ``style={"font": {"size": …}}`` wins; otherwise the
+        # Material default (24dp for a label, 22dp for an icon).
+        icon_font = dict(base_font)
+        icon_font.setdefault("size", 24 if not self._icon else 22)
         if self._icon:
-            child: Widget = Icon(self._icon, key=f"{self.key}._icon", style={"font": label_font})
+            child: Widget = Icon(self._icon, key=f"{self.key}._icon",
+                                 style={"font": icon_font})
         else:
             child = Text(
                 self._text,
                 key=f"{self.key}._label",
-                style={"font": label_font, "textAlign": "center"},
+                style={"font": icon_font, "textAlign": "center"},
             )
         self.children = [child]
 
