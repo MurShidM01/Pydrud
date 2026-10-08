@@ -50,6 +50,7 @@ SPECS.md
 
 # Testing
 .pytest_cache/
+.ruff_cache/
 __pycache__/
 .coverage
 htmlcov/
