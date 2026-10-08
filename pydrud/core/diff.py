@@ -130,7 +130,13 @@ def _diff_iterative(old: Optional[Widget], new: Widget,
                     tree=new_node.to_dict()))
                 continue
             changed_props = _changed_props(old_node, new_node)
-            changed_style = _changed_dict(old_node.style, new_node.style)
+            # Compare the *rendered* style — stylesheet declarations overlaid
+            # by inline values — not just the inline overlay. A widget whose
+            # inline ``bg`` is dropped reverts to the stylesheet's colour; if
+            # only the inline dict were diffed the patch would clear ``bg``
+            # outright and the view would lose its background (SB-007).
+            changed_style = _changed_dict(old_node._serialise_style(),
+                                          new_node._serialise_style())
             if changed_props or changed_style:
                 patch_data: dict = {}
                 if changed_props:

@@ -32,6 +32,34 @@ class TestTreeDiff(unittest.TestCase):
         self.assertEqual(patches[0].op, "update")
         self.assertIn("style", patches[0].data)
 
+    def test_dropping_an_inline_override_restores_the_stylesheet_value(self):
+        """A widget reverts to its PSS value, it is not stripped bare.
+
+        The rendered style is the stylesheet's declarations overlaid by the
+        inline ones, so dropping an inline ``bg`` must patch in the
+        stylesheet's colour — diffing only the inline overlay would send
+        ``bg: None`` and the view would lose its background.
+        """
+        old = Container(key="card", style={"bg": "#FFE85D68"})
+        old._resolved_style = {"bg": "#FF26231F", "borderRadius": 15}
+        new = Container(key="card", style={})
+        new._resolved_style = {"bg": "#FF26231F", "borderRadius": 15}
+
+        patches = TreeDiff.diff(old, new)
+        self.assertEqual(len(patches), 1)
+        self.assertEqual(patches[0].data["style"], {"bg": "#FF26231F"})
+
+    def test_removing_a_stylesheet_declaration_clears_the_key(self):
+        """A PSS edit that drops a declaration does clear it natively."""
+        old = Container(key="card")
+        old._resolved_style = {"bg": "#FF26231F"}
+        new = Container(key="card")
+        new._resolved_style = {}
+
+        patches = TreeDiff.diff(old, new)
+        self.assertEqual(len(patches), 1)
+        self.assertEqual(patches[0].data["style"], {"bg": None})
+
     def test_type_change_triggers_replace(self):
         old = Text("Hi", key="k1")
         new = Button("Hi", key="k1")
