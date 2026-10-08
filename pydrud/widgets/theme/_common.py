@@ -94,6 +94,29 @@ def _tone(r: int, g: int, b: int, factor: float) -> str:
                                    _clamp(b * factor)))
 
 
+def _mix(color_a: str, color_b: str, t: float) -> str:
+    """Linear blend between two colours (``t`` 0 → *color_a*, 1 → *color_b*).
+
+    Used to tween a whole palette: every role moves through the same fraction
+    so the intermediate frames stay a coherent scheme, not a patchwork.
+    """
+    k = max(0.0, min(1.0, float(t)))
+    a = color_a.lstrip("#")
+    b = color_b.lstrip("#")
+    if len(a) == 6:
+        a = "FF" + a
+    if len(b) == 6:
+        b = "FF" + b
+    if len(a) != 8 or len(b) != 8:
+        return color_b if k >= 0.5 else color_a
+    out = []
+    for index in range(0, 8, 2):
+        va = int(a[index:index + 2], 16)
+        vb = int(b[index:index + 2], 16)
+        out.append("%02X" % max(0, min(255, int(round(va + (vb - va) * k)))))
+    return "#" + "".join(out)
+
+
 def _rotate_hue(color: str, degrees: float, *, saturation: float = 1.0) -> str:
     """Rotate a colour around the hue wheel, keeping its lightness."""
     import colorsys

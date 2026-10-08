@@ -5,7 +5,7 @@ Material-style colour constants and a seed-derived :class:`ColorScheme`.
 from __future__ import annotations
 
 from pydrud.widgets.theme._common import (
-    _argb, _ConstantsMeta, _lighten_hsl, _rgb, _rotate_hue, _tone,
+    _argb, _ConstantsMeta, _lighten_hsl, _mix, _rgb, _rotate_hue, _tone,
 )
 
 
@@ -242,6 +242,20 @@ class ColorScheme:
         d = {role: getattr(self, role) for role in self.ROLES}
         d["dark"] = self.dark
         return d
+
+    @classmethod
+    def lerp(cls, start: "ColorScheme", end: "ColorScheme",
+             t: float) -> "ColorScheme":
+        """Blend two schemes role-by-role — the frame between two palettes.
+
+        Every role (and the light/dark flag) moves through the same fraction,
+        so a theme change can be animated instead of snapping.
+        """
+        k = max(0.0, min(1.0, float(t)))
+        roles = {role: _mix(getattr(start, role), getattr(end, role), k)
+                 for role in cls.ROLES}
+        roles["dark"] = end.dark if k >= 0.5 else start.dark
+        return cls(**roles)
 
     def __repr__(self) -> str:
         return f"<ColorScheme primary={self.primary} dark={self.dark}>"

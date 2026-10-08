@@ -234,6 +234,174 @@ class TestRuntimeThemeMode(_RestoresTheme):
             with self.assertRaises(ValueError):
                 app.app.page.set_theme_mode("neon")
 
+    def test_system_mode_is_the_default(self):
+        def main(page):
+            page.add(Text("hi", key="t"))
+
+        with AppTester(main) as app:
+            self.assertEqual(app.app.page.theme_mode, "system")
+
+    def test_system_mode_adopts_a_dark_device(self):
+        def main(page):
+            page.add(Text("hi", key="t"))
+
+        with AppTester(main, dark=True) as app:
+            self.assertEqual(app.app.page.theme_mode, "system")
+            self.assertTrue(Theme.dark_mode)
+            self.assertEqual(Theme.background, "#FF111827")
+
+    def test_system_mode_stays_light_on_a_light_device(self):
+        def main(page):
+            page.add(Text("hi", key="t"))
+
+        with AppTester(main, dark=False):
+            self.assertFalse(Theme.dark_mode)
+
+    def test_a_light_page_ignores_a_dark_device(self):
+        def main(page):
+            page.theme_mode = "light"
+            page.add(Text("hi", key="t"))
+
+        with AppTester(main, dark=True):
+            self.assertFalse(Theme.dark_mode)
+
+    def test_toggling_the_system_setting_recolours_a_system_page(self):
+        def main(page):
+            page.add(Text("hi", key="t"))
+
+        with AppTester(main, dark=False) as app:
+            self.assertFalse(Theme.dark_mode)
+            app.set_dark(True)
+            self.assertTrue(Theme.dark_mode)
+            self.assertEqual(Theme.background, "#FF111827")
+            app.set_dark(False)
+            self.assertFalse(Theme.dark_mode)
+
+    def test_switching_to_system_adopts_the_device_immediately(self):
+        def main(page):
+            page.theme_mode = "light"
+            page.add(Text("hi", key="t"))
+
+        with AppTester(main, dark=True) as app:
+            self.assertFalse(Theme.dark_mode)
+            app.app.page.set_theme_mode("system")
+            app.settle()
+            self.assertTrue(Theme.dark_mode)
+
+
+class TestColorSchemeLerp(unittest.TestCase):
+    """`ColorScheme.lerp` is the frame between two palettes."""
+
+    def _schemes(self):
+        from pydrud.widgets.theme.colors import ColorScheme
+
+        light = ColorScheme.from_seed("#FF6366F1", dark=False)
+        dark = ColorScheme.from_seed("#FF6366F1", dark=True)
+        return ColorScheme, light, dark
+
+    def test_endpoints_are_exact(self):
+        Scheme, light, dark = self._schemes()
+        self.assertEqual(Scheme.lerp(light, dark, 0.0).surface, light.surface)
+        self.assertEqual(Scheme.lerp(light, dark, 1.0).surface, dark.surface)
+
+    def test_midpoint_is_between_the_endpoints(self):
+        Scheme, light, dark = self._schemes()
+        mid = Scheme.lerp(light, dark, 0.5)
+        for channel in ("surface", "primary", "background"):
+            self.assertNotEqual(getattr(mid, channel),
+                                getattr(light, channel))
+            self.assertNotEqual(getattr(mid, channel),
+                                getattr(dark, channel))
+
+    def test_fraction_is_clamped(self):
+        Scheme, light, dark = self._schemes()
+        self.assertEqual(Scheme.lerp(light, dark, -3.0).surface, light.surface)
+        self.assertEqual(Scheme.lerp(light, dark, 9.0).surface, dark.surface)
+
+    def test_dark_flag_flips_past_the_midpoint(self):
+        Scheme, light, dark = self._schemes()
+        self.assertFalse(Scheme.lerp(light, dark, 0.2).dark)
+        self.assertTrue(Scheme.lerp(light, dark, 0.8).dark)
+
+
+class TestAnimatedTheme(_RestoresTheme):
+
+    def _await(self, predicate, timeout: float = 3.0) -> bool:
+        import time
+
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if predicate():
+                return True
+            time.sleep(0.01)
+        return False
+
+    def _await_theme_settled(self, app, before: int,
+                             timeout: float = 3.0) -> int:
+        """Wait until the palette stream stops growing; return how many."""
+        import time
+
+        deadline = time.time() + timeout
+        last, stable = -1, 0
+        while time.time() < deadline:
+            count = len(app.device.commands_named("theme")) - before
+            if count == last and count > 0:
+                stable += 1
+                if stable >= 4:
+                    return count
+            else:
+                stable = 0
+            last = count
+            time.sleep(0.02)
+        return max(last, 0)
+
+    def test_animated_mode_change_lands_on_the_target(self):
+        def main(page):
+            page.add(Text("hi", key="t"))
+
+        with AppTester(main) as app:
+            before = len(app.device.commands_named("theme"))
+            app.app.page.set_theme_mode("dark", animate=True, duration=120)
+            self._await_theme_settled(app, before)
+            self.assertTrue(Theme.dark_mode)
+            self.assertEqual(Theme.background, "#FF111827")
+
+    def test_animation_sends_intermediate_palettes(self):
+        def main(page):
+            page.add(Text("hi", key="t"))
+
+        with AppTester(main) as app:
+            before = len(app.device.commands_named("theme"))
+            app.app.page.set_theme_mode("dark", animate=True, duration=200)
+            # Wait until more than the single final push has arrived.
+            self.assertTrue(self._await(
+                lambda: len(app.device.commands_named("theme")) - before > 1),
+                "an animated change should push >1 palette")
+
+    def test_a_non_animated_change_sends_a_single_palette(self):
+        def main(page):
+            page.add(Text("hi", key="t"))
+
+        with AppTester(main) as app:
+            before = len(app.device.commands_named("theme"))
+            app.app.page.set_theme_mode("dark")
+            app.settle()
+            self.assertEqual(len(app.device.commands_named("theme")) - before, 1)
+
+    def test_animated_seed_change_glides_to_the_new_brand(self):
+        def main(page):
+            page.add(Text("hi", key="t"))
+
+        with AppTester(main) as app:
+            from pydrud import Colors
+            from pydrud.widgets.theme.colors import ColorScheme
+
+            expected = ColorScheme.from_seed(Colors.TEAL, dark=False).primary
+            before = len(app.device.commands_named("theme"))
+            app.app.page.set_theme(Colors.TEAL, animate=True, duration=120)
+            self._await_theme_settled(app, before)
+            self.assertEqual(Theme.primary, expected)
+
 
 def _camel(role: str) -> str:
     head, _, tail = role.partition("_")

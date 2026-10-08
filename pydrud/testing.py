@@ -117,7 +117,7 @@ class FakeRenderer:
 
     def __init__(self, host: str = "127.0.0.1", port: int = 0,
                  width: int = 400, height: int = 800, density: float = 2.0,
-                 capabilities: Optional[dict] = None):
+                 capabilities: Optional[dict] = None, dark: bool = False):
         self.host = host
         self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -128,6 +128,9 @@ class FakeRenderer:
         self.width = width
         self.height = height
         self.density = density
+        #: The device's system dark-mode setting, reported in ``ready`` and
+        #: ``metrics`` so a page in ``theme_mode="system"`` can follow it.
+        self.dark = bool(dark)
         advertised = self.DEFAULT_CAPABILITIES if capabilities is None else capabilities
         self.capabilities = dict(advertised)
 
@@ -372,6 +375,7 @@ class FakeRenderer:
                 "width": self.width,
                 "height": self.height,
                 "density": self.density,
+                "dark": self.dark,
                 "capabilities": self.capabilities,
                 "status_bar_height": 24,
                 "navigation_bar_height": 16,
@@ -387,6 +391,7 @@ class FakeRenderer:
             "density": self.density,
             "width_px": int(self.width * self.density),
             "height_px": int(self.height * self.density),
+            "dark": self.dark,
             "status_bar_height": 24,
             "navigation_bar_height": 16,
             "padding_top": 24,
@@ -396,6 +401,11 @@ class FakeRenderer:
         }
         data.update(overrides)
         self._send({"type": "metrics", "key": "", "data": data})
+
+    def set_dark(self, dark: bool = True) -> None:
+        """Simulate the user toggling the system dark-mode setting."""
+        self.dark = bool(dark)
+        self.send_metrics(reason="theme")
 
     def resize(self, width: int, height: int, **overrides) -> None:
         """Simulate a window resize (split screen, foldable, desktop)."""
@@ -635,12 +645,12 @@ class AppTester:
 
     def __init__(self, target=None, *, app=None, width: int = 400,
                  height: int = 800, density: float = 2.0, title: str = "Test",
-                 capabilities: Optional[dict] = None):
+                 capabilities: Optional[dict] = None, dark: bool = False):
         if target is None and app is None:
             raise ValueError("AppTester needs target= or app=")
         self.device = FakeRenderer(
             width=width, height=height, density=density,
-            capabilities=capabilities,
+            capabilities=capabilities, dark=dark,
         )
         if app is None:
             from pydrud.runtime.app import App
@@ -703,6 +713,11 @@ class AppTester:
 
     def lifecycle(self, state: str) -> "AppTester":
         self.device.lifecycle(state)
+        return self.settle()
+
+    def set_dark(self, dark: bool = True) -> "AppTester":
+        """Toggle the simulated system dark-mode setting and settle the UI."""
+        self.device.set_dark(dark)
         return self.settle()
 
     def tap_snackbar_action(self) -> "AppTester":

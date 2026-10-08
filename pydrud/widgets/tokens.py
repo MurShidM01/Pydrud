@@ -72,6 +72,14 @@ class Tokens:
     elevation_app_bar: float = 0
     elevation_sheet: float = 12
     elevation_dialog: float = 16
+    # Soft drop shadow used by the generic ``shadow`` style property when it
+    # is given as a plain number. ``shadow_color`` empty = derive from the
+    # surface (dark mode tints instead of casting a shadow).
+    shadow_color: str = ""
+    shadow_offset_x: float = 0
+    shadow_offset_y: float = 2
+    shadow_blur: float = 8
+    shadow_spread: float = 0
 
     # ── motion ───────────────────────────────────────────────────────────
     duration_fast: int = 140
