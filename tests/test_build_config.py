@@ -121,7 +121,7 @@ class TestBuildVariants(unittest.TestCase):
 
 
 class TestCollectApks(unittest.TestCase):
-    """`_collect_apks` finds split outputs an `abi_splits` build produces."""
+    """`_collect_apks` finds the APKs an `abi_splits` (flavor) build produces."""
 
     def setUp(self):
         self.root = tempfile.mkdtemp()
@@ -130,46 +130,61 @@ class TestCollectApks(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.root, ignore_errors=True)
 
-    def _touch(self, *names):
-        apk_dir = os.path.join(self.root, "apk")
-        os.makedirs(apk_dir, exist_ok=True)
-        for name in names:
-            with open(os.path.join(apk_dir, name), "wb") as handle:
-                handle.write(b"apk")
-        return apk_dir
+    def _write_yaml(self, text):
+        with open(os.path.join(self.root, "pydrud.yaml"), "w",
+                  encoding="utf-8") as handle:
+            handle.write(text)
+
+    def _touch(self, rel):
+        path = os.path.join(self.root, "apk", *rel.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as handle:
+            handle.write(b"apk")
+        return path
 
     def test_plain_build_returns_the_single_apk(self):
-        apk_dir = self._touch("app-release.apk")
-        self.assertEqual(self.builder._collect_apks(apk_dir, release=True),
-                         [os.path.join(apk_dir, "app-release.apk")])
+        self._write_yaml("app_name: demo\n")
+        path = self._touch("release/app-release.apk")
+        self.assertEqual(
+            self.builder._collect_apks(os.path.join(self.root, "apk"), "release"),
+            [path])
 
     def test_split_build_lists_universal_first_then_abis(self):
-        apk_dir = self._touch(
-            "app-arm64-v8a-release.apk",
-            "app-universal-release.apk",
-            "app-armeabi-v7a-release.apk",
-            "app-x86_64-release.apk",
-        )
-        names = [os.path.basename(p) for p in
-                 self.builder._collect_apks(apk_dir, release=True)]
+        # `abi_splits` puts each ABI in its own flavor directory.
+        self._write_yaml("app_name: demo\nabi_splits: true\n")
+        self._touch("arm64/release/app-arm64-release.apk")
+        self._touch("universal/release/app-universal-release.apk")
+        self._touch("armv7/release/app-armv7-release.apk")
+        self._touch("x86_64/release/app-x86_64-release.apk")
+        names = [os.path.basename(p) for p in self.builder._collect_apks(
+            os.path.join(self.root, "apk"), "release")]
         self.assertEqual(names[0], "app-universal-release.apk")
-        self.assertEqual(
-            sorted(names),
-            sorted(["app-universal-release.apk", "app-arm64-v8a-release.apk",
-                    "app-armeabi-v7a-release.apk", "app-x86_64-release.apk"]),
-        )
+        self.assertEqual(sorted(names), sorted([
+            "app-universal-release.apk", "app-arm64-release.apk",
+            "app-armv7-release.apk", "app-x86_64-release.apk"]))
 
-    def test_missing_directory_returns_empty(self):
+    def test_split_build_ignores_a_stale_plain_apk(self):
+        # A leftover app-release.apk from before the flavors existed must not
+        # shadow the freshly-built flavor APKs.
+        self._write_yaml("app_name: demo\nabi_splits: true\n")
+        self._touch("release/app-release.apk")
+        self._touch("universal/release/app-universal-release.apk")
+        names = [os.path.basename(p) for p in self.builder._collect_apks(
+            os.path.join(self.root, "apk"), "release")]
+        self.assertEqual(names, ["app-universal-release.apk"])
+
+    def test_missing_outputs_returns_empty(self):
+        self._write_yaml("app_name: demo\n")
         self.assertEqual(
-            self.builder._collect_apks(os.path.join(self.root, "nope"),
-                                       release=True),
-            [],
-        )
+            self.builder._collect_apks(os.path.join(self.root, "apk"), "release"),
+            [])
 
     def test_release_unsigned_fallback(self):
-        apk_dir = self._touch("app-release-unsigned.apk")
-        self.assertEqual(self.builder._collect_apks(apk_dir, release=True),
-                         [os.path.join(apk_dir, "app-release-unsigned.apk")])
+        self._write_yaml("app_name: demo\n")
+        path = self._touch("release/app-release-unsigned.apk")
+        self.assertEqual(
+            self.builder._collect_apks(os.path.join(self.root, "apk"), "release"),
+            [path])
 
 
 if __name__ == "__main__":

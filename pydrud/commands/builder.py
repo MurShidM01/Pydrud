@@ -79,16 +79,15 @@ class Builder:
             print(fail("Build failed. Check the output above."))
             return None
 
-        apk_dir = os.path.join(
+        apk_base = os.path.join(
             self.android_dir,
             "app",
             "build",
             "outputs",
             "apk",
-            "release" if release else "debug",
         )
 
-        apks = self._collect_apks(apk_dir, release)
+        apks = self._collect_apks(apk_base, "release" if release else "debug")
         if not apks:
             print(fail("APK not found at expected path."))
             return None
@@ -117,35 +116,44 @@ class Builder:
         # the safe default for `run` and for a single-path `--output`.
         return apks[0]
 
-    def _collect_apks(self, apk_dir: str, release: bool) -> list[str]:
+    def _abi_splits(self) -> bool:
+        """Whether the project builds one APK per ABI (``abi_splits: true``)."""
+        config = self._load_config(self.root)
+        return str(config.get("abi_splits", "")).strip().lower() in {
+            "true", "1", "yes", "on"}
+
+    def _collect_apks(self, apk_base: str, variant: str) -> list[str]:
         """Return every APK the last Gradle build produced.
 
-        A plain build writes a single ``app-<variant>.apk``. With
-        ``abi_splits`` enabled Gradle writes one ``app-<abi>-<variant>.apk``
-        per ABI plus an ``app-universal-<variant>.apk`` instead, so a lookup
-        for the single name would miss them all.
+        A plain build writes ``apk/<variant>/app-<variant>.apk``. With
+        ``abi_splits`` on, each ABI is a product flavor, so Gradle writes
+        ``apk/<flavor>/<variant>/app-<flavor>-<variant>.apk`` instead — a
+        layout the single-file lookup would never find. Reading the flag
+        (rather than globbing both layouts) also ignores a stale
+        ``app-<variant>.apk`` left over from before the flavors were added.
         """
-        variant = "release" if release else "debug"
+        if self._abi_splits():
+            import glob
+            matches = glob.glob(os.path.join(
+                apk_base, "*", variant, f"app-*-{variant}.apk"))
+            matches = [path for path in matches if os.path.isfile(path)]
+            # Universal first (installs anywhere), then ABI flavors by name,
+            # so the order — and the default artifact — is stable.
+            matches.sort(key=lambda p: ("universal" not in os.path.basename(p),
+                                        os.path.basename(p)))
+            return matches
 
-        single = os.path.join(apk_dir, f"app-{variant}.apk")
-        if os.path.isfile(single):
-            return [single]
+        plain = os.path.join(apk_base, variant, f"app-{variant}.apk")
+        if os.path.isfile(plain):
+            return [plain]
 
-        if release:
-            unsigned = os.path.join(apk_dir, "app-release-unsigned.apk")
+        if variant == "release":
+            unsigned = os.path.join(
+                apk_base, "release", "app-release-unsigned.apk")
             if os.path.isfile(unsigned):
                 return [unsigned]
 
-        if not os.path.isdir(apk_dir):
-            return []
-
-        import glob
-        matches = glob.glob(os.path.join(apk_dir, f"app-*-{variant}.apk"))
-        # Universal first (installs anywhere), then ABI splits by name, so
-        # the order — and therefore the default artifact — is stable.
-        matches.sort(key=lambda p: ("universal" not in os.path.basename(p),
-                                    os.path.basename(p)))
-        return matches
+        return []
 
     def run(self, device: str | None = None, release: bool = False,
             watch: bool = False, interactive: bool = True, debug: bool = False):
