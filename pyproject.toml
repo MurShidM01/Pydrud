@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pydrud"
 version = "2.1.5"
-description = "A Material Design 3 UI framework for Python with a toolchain-free Pydash host preview, an optional Chaquopy Android APK target, and a renderer-neutral UI layer."
+description = "Build native Android apps in Python — a declarative, Material Design 3 UI framework (Flutter-inspired) that renders a Python widget tree as native Android Views, with a toolchain-free host preview."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -13,11 +13,15 @@ authors = [
     {name = "Pydrud Contributors"}
 ]
 keywords = [
-    "cross-platform", "pydash", "chaquopy", "android", "framework", "ui",
-    "mobile", "python", "app-development",
+    "pydrud", "android", "python", "material-design", "material-design-3",
+    "material-you", "declarative-ui", "android-ui", "ui-framework",
+    "gui-framework", "flutter-alternative", "chaquopy", "pydash",
+    "native-android", "mobile", "app-development", "cross-platform",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Operating System :: OS Independent",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
@@ -55,10 +59,12 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/MurShidM01/Pydrud"
-Repository = "https://github.com/MurShidM01/Pydrud"
-Documentation = "https://github.com/MurShidM01/Pydrud#readme"
-"Bug Tracker" = "https://github.com/MurShidM01/Pydrud/issues"
+Homepage = "https://github.com/Sindhi-Hacker/Pydrud"
+Repository = "https://github.com/Sindhi-Hacker/Pydrud"
+Documentation = "https://github.com/Sindhi-Hacker/Pydrud/blob/main/docs/ARCHITECTURE.md"
+"Bug Tracker" = "https://github.com/Sindhi-Hacker/Pydrud/issues"
+Changelog = "https://github.com/Sindhi-Hacker/Pydrud/blob/main/CHANGELOG.md"
+"Stylesheet guide" = "https://github.com/Sindhi-Hacker/Pydrud/blob/main/docs/PSS_STYLESHEETS.md"
 
 [project.scripts]
 pydrud = "pydrud.commands.cli:main"

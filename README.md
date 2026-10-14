@@ -2,7 +2,9 @@
   <img src="https://img.shields.io/pypi/v/pydrud?color=6366F1&style=flat-square" alt="PyPI" />
   <img src="https://img.shields.io/pypi/pyversions/pydrud?style=flat-square" alt="Python" />
   <img src="https://img.shields.io/badge/runtimes-Pydash%20%7C%20Chaquopy-6366F1?style=flat-square" alt="Pydash and Chaquopy runtimes" />
-  <img src="https://img.shields.io/github/license/MurShidM01/Pydrud?style=flat-square" alt="License" />
+  <img src="https://img.shields.io/github/license/Sindhi-Hacker/Pydrud?style=flat-square" alt="MIT license" />
+  <img src="https://img.shields.io/github/v/release/Sindhi-Hacker/Pydrud?style=flat-square&color=6366F1" alt="Latest release" />
+  <img src="https://img.shields.io/badge/Material%20Design-3-6366F1?style=flat-square" alt="Material Design 3" />
   <img src="https://img.shields.io/pypi/dm/pydrud?style=flat-square" alt="Downloads" />
 </p>
 
@@ -15,20 +17,37 @@
 
 <p align="center">
   <strong>Congratulations, Android users — Pydash is officially live!</strong><br>
-  Download the preview client from the <a href="https://github.com/MurShidM01/Pydash/releases">Pydash releases page</a>. iOS is coming soon.
+  Download the preview client from the <a href="https://github.com/Sindhi-Hacker/Pydash/releases">Pydash releases page</a>. iOS is coming soon.
 </p>
 
 ---
 
-Pydrud is a declarative UI framework for Python with a platform-neutral widget
-tree, a keyed diff engine, and a versioned render protocol. The same screen
-code drives the host preview and native Android Views — there is no XML and no
-Java to write.
+**Pydrud** is a declarative UI framework for building **native Android apps in
+Python** — a Flutter-inspired, radically simpler alternative to writing Java or
+Kotlin, with **Material Design 3 (Material You)** built in. It is a Python GUI
+framework for Android: write the interface once as a Python widget tree, and a
+generated renderer turns it into **native Android Views** at runtime. There is
+no XML layout and no Java to write, and the widget, theme and styling layers
+stay platform-neutral, so the same screen code renders through any adapter.
+
+Pydrud ships with a platform-neutral widget tree, a keyed diff engine, and a
+versioned render protocol. The same screen code drives the host preview and the
+native Android renderer.
 
 It ships the Material 3 design system end to end: HCT-generated colour with
 all 36 semantic roles, the M3 type scale, shape and elevation systems, the
 component catalogue from buttons to side sheets, and the M3 motion tokens —
 all of it expressed once in Python and translated by the renderer.
+
+**Search terms this project answers to:** Python Android UI framework ·
+declarative Python UI · Material Design 3 in Python · Material You Python ·
+Chaquopy app · native Android Views from Python · Flutter alternative for
+Python · build an Android app without Java · PSS stylesheets.
+
+- 📦 PyPI: [pypi.org/project/pydrud](https://pypi.org/project/pydrud/)
+- 📚 Docs: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/PSS_STYLESHEETS.md](docs/PSS_STYLESHEETS.md)
+- 🐛 Issues: [github.com/Sindhi-Hacker/Pydrud/issues](https://github.com/Sindhi-Hacker/Pydrud/issues)
+- 📝 Changes: [CHANGELOG.md](CHANGELOG.md)
 
 ## Quick start
 
@@ -101,7 +120,7 @@ pip install pydrud                       # from PyPI
 ```
 
 ```bash
-git clone https://github.com/MurShidM01/Pydrud.git
+git clone https://github.com/Sindhi-Hacker/Pydrud.git
 cd Pydrud && pip install -e ".[dev]"     # from source
 ```
 
