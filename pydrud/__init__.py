@@ -6,7 +6,7 @@ and renderer protocol. Pydash is the toolchain-free host-preview default;
 Chaquopy is the opt-in Android APK target that renders native Views.
 """
 
-__version__ = "2.1.4"
+__version__ = "2.1.5"
 __app_name__ = "Pydrud"
 
 from pydrud.runtime.app import App
@@ -136,6 +136,27 @@ from pydrud.widgets import (
     AlertDialog,
     Dialog,
     ModalBottomSheet,
+    # Material 3 components
+    Snackbar,
+    DatePicker,
+    DateRangePicker,
+    TimePicker,
+    StandardBottomSheet,
+    SideSheet,
+    FullScreenDialog,
+    BottomAppBar,
+    FABMenu,
+    FABMenuItem,
+    SearchView,
+    ButtonGroup,
+    LoadingIndicator,
+    SplitButton,
+    Toolbar,
+    Shape,
+    DynamicScheme,
+    CorePalette,
+    TonalPalette,
+    Hct,
     MenuItem,
     MenuDivider,
     PopupMenu,
@@ -334,6 +355,27 @@ __all__ = [
     "AlertDialog",
     "Dialog",
     "ModalBottomSheet",
+    # Material 3 components
+    "Snackbar",
+    "DatePicker",
+    "DateRangePicker",
+    "TimePicker",
+    "StandardBottomSheet",
+    "SideSheet",
+    "FullScreenDialog",
+    "BottomAppBar",
+    "FABMenu",
+    "FABMenuItem",
+    "SearchView",
+    "ButtonGroup",
+    "LoadingIndicator",
+    "SplitButton",
+    "Toolbar",
+    "Shape",
+    "DynamicScheme",
+    "CorePalette",
+    "TonalPalette",
+    "Hct",
     "MenuItem",
     "MenuDivider",
     "PopupMenu",

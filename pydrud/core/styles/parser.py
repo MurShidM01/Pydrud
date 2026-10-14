@@ -323,6 +323,33 @@ _EASINGS = {
     "step-start": "linear",
     "step-end": "linear",
 }
+#: The Material 3 motion names, accepted in a `transition`/`animation`
+#: shorthand exactly as a CSS keyword is. They reach the renderer as the name
+#: and are resolved there through the `easing_*` tokens, so a stylesheet can
+#: name a spec curve without knowing the cubic-bézier behind it.
+_M3_EASINGS = {
+    "standard": "standard",
+    "standard-decelerate": "standard_decelerate",
+    "standard-accelerate": "standard_accelerate",
+    "emphasized": "emphasized",
+    "emphasized-decelerate": "emphasized_decelerate",
+    "emphasized-accelerate": "emphasized_accelerate",
+}
+
+#: The M3 duration steps, so `transition: background medium-2 standard` reads
+#: as it does in the spec table.
+_DURATION_STEPS = frozenset({
+    "fast", "normal", "slow",
+    "short-1", "short-2", "short-3", "short-4",
+    "medium-1", "medium-2", "medium-3", "medium-4",
+    "long-1", "long-2", "long-3", "long-4",
+    "extra-long-1", "extra-long-2", "extra-long-3", "extra-long-4",
+    "short_1", "short_2", "short_3", "short_4",
+    "medium_1", "medium_2", "medium_3", "medium_4",
+    "long_1", "long_2", "long_3", "long_4",
+    "extra_long_1", "extra_long_2", "extra_long_3", "extra_long_4",
+})
+
 _DIRECTIONS = {"normal", "reverse", "alternate", "alternate-reverse"}
 _FILLS = {"forwards", "backwards", "both"}
 _TIMING_FUNCTIONS = ("cubic-bezier(", "steps(", "linear(")
@@ -345,9 +372,11 @@ def parse_animation_shorthand(text: str) -> dict:
     renderer's existing ``animation`` spec.
     """
     spec: dict = {}
-    tokens = text.split()
     times: list[float] = []
-    for token in tokens:
+    # Split on top-level whitespace only: a token reference expands to a curve
+    # like `cubic-bezier(0.2, 0, 0, 1)`, and splitting that on spaces used to
+    # hand the renderer `cubic-bezier(0.2,` — a curve it then ignored.
+    for token in _split_top_level_whitespace(text):
         lowered = token.lower()
         if lowered == "none":
             spec["name"] = "none"
@@ -356,11 +385,18 @@ def parse_animation_shorthand(text: str) -> dict:
         if time is not None:
             times.append(time)
             continue
+        step = lowered.replace("-", "_")
+        if step in _DURATION_STEPS:
+            spec["duration"] = step
+            continue
         if lowered == "infinite":
             spec["iterations"] = "infinite"
             continue
         if lowered in _EASINGS:
             spec["curve"] = _EASINGS[lowered]
+            continue
+        if lowered in _M3_EASINGS:
+            spec["curve"] = _M3_EASINGS[lowered]
             continue
         if any(lowered.startswith(prefix) for prefix in _TIMING_FUNCTIONS):
             spec["curve"] = token
@@ -377,8 +413,8 @@ def parse_animation_shorthand(text: str) -> dict:
         spec.setdefault("name", token)
     if times:
         spec["duration"] = times[0]
-    if len(times) > 1:
-        spec["delay"] = times[1]
+        if len(times) > 1:
+            spec["delay"] = times[1]
     return spec
 
 
@@ -391,7 +427,7 @@ def parse_transition_shorthand(text: str) -> list[dict]:
             continue
         spec: dict = {}
         times: list[float] = []
-        for token in part.split():
+        for token in _split_top_level_whitespace(part):
             lowered = token.lower()
             if lowered == "none":
                 spec["property"] = "none"
@@ -400,8 +436,15 @@ def parse_transition_shorthand(text: str) -> list[dict]:
             if time is not None:
                 times.append(time)
                 continue
+            step = lowered.replace("-", "_")
+            if step in _DURATION_STEPS:
+                spec["duration"] = step
+                continue
             if lowered in _EASINGS:
                 spec["curve"] = _EASINGS[lowered]
+                continue
+            if lowered in _M3_EASINGS:
+                spec["curve"] = _M3_EASINGS[lowered]
                 continue
             if any(lowered.startswith(prefix) for prefix in _TIMING_FUNCTIONS):
                 spec["curve"] = token

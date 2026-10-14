@@ -101,6 +101,24 @@ def _all_core_modules() -> list[str]:
     return sorted(set(discovered))
 
 
+def _all_design_system_modules() -> list[str]:
+    """Every module of the UI layer: widgets, theme, tokens and styling.
+
+    Android is the only renderer Pydrud ships, so nothing enforces neutrality
+    for the widget layer the way the transports do. This sweeps the whole
+    design system instead: the user-facing promise is that the UI code is
+    portable, and that promise is only real if it is checked.
+    """
+    import pydrud.widgets
+
+    discovered = [pydrud.widgets.__name__]
+    discovered.extend(
+        module.name for module in pkgutil.walk_packages(
+            pydrud.widgets.__path__, prefix="pydrud.widgets.")
+    )
+    return sorted(set(discovered))
+
+
 def _leaks_in_fresh_interpreter(
         module_names: list[str]) -> dict[str, list[str]]:
     """Run :func:`_probe` in a brand-new interpreter.
@@ -166,6 +184,66 @@ class TestCrossPlatformNeutrality:
         assert report["__loaded_android_modules__"] == [], (
             "Importing the complete core/PSS surface loaded a platform adapter: "
             + ", ".join(report["__loaded_android_modules__"])
+        )
+
+    def test_the_whole_design_system_is_android_free(self) -> None:
+        """Every widget, theme, token and styling module stays renderer-neutral.
+
+        Android is the only renderer that ships, so the UI layer's portability
+        is a promise rather than something the transports enforce. A widget
+        that reaches for an Android adapter — or a toolchain type the neutral
+        core does not own — would break that promise silently; this is where
+        it fails loudly instead.
+        """
+        module_names = _all_design_system_modules()
+        assert len(module_names) > 30, (
+            f"design-system discovery found only {len(module_names)} modules")
+        report = _leaks_in_fresh_interpreter(module_names)
+        for mod_name in module_names:
+            leaks = report[mod_name]
+            assert not leaks, (
+                f"Design-system module {mod_name!r} pulls in Android-only "
+                "symbols: " + "; ".join(leaks)
+            )
+        assert report["__loaded_android_modules__"] == [], (
+            "Importing the design system loaded a platform adapter: "
+            + ", ".join(report["__loaded_android_modules__"])
+        )
+
+    def test_design_system_imports_from_a_clean_interpreter(self) -> None:
+        """The UI layer must be importable with the Android toolchain absent.
+
+        ``pydrud.android`` holds build-time templates and ``pyjnius`` is only
+        present inside a Chaquopy APK, so importing widgets there must not
+        need either. ``-S`` plus an empty ``PYTHONPATH`` entry is as close as a
+        test gets to "this machine has no Android anything".
+        """
+        names = _all_design_system_modules()
+        env = dict(os.environ)
+        env["PYTHONPATH"] = ROOT
+        script = (
+            "import importlib, sys\n"
+            f"names = {names!r}\n"
+            "for name in names:\n"
+            "    importlib.import_module(name)\n"
+            "bad = [m for m in sys.modules if m == 'pyjnius'\n"
+            "       or m.startswith('jnius')\n"
+            "       or m.startswith('pydrud.android')\n"
+            "       or m.startswith('pydrud.platforms.android')]\n"
+            "print('LEAK:' + ','.join(sorted(bad)))\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=ROOT, env=env, capture_output=True, text=True, timeout=120,
+        )
+        assert result.returncode == 0, (
+            f"the design system failed to import cleanly:\n{result.stderr}")
+        marker = [line for line in result.stdout.splitlines()
+                  if line.startswith("LEAK:")]
+        assert marker, f"probe produced no marker: {result.stdout!r}"
+        assert marker[-1] == "LEAK:", (
+            "the design system reached for platform-specific code: "
+            + marker[-1].removeprefix("LEAK:")
         )
 
     def test_neutrality_probe_leaves_loaded_modules_alone(self) -> None:

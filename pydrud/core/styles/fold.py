@@ -123,12 +123,33 @@ def _coerce_number_keys(style: dict, context: ValueContext) -> None:
 
 
 def _expand_all(box: dict) -> dict:
-    """Turn ``{all: n}`` into explicit sides so a long-hand can override one."""
-    if "all" not in box:
-        return box
-    value = box.pop("all")
-    for side in ("left", "top", "right", "bottom"):
-        box.setdefault(side, value)
+    """Expand the box shorthands into explicit sides.
+
+    ``{all: n}``, ``{horizontal: n}`` and the CSS-style ``{vertical: n}`` split
+    into the four sides a renderer reads, so a later long-hand can still
+    override one edge. A side already present wins.
+    """
+    horizontal = box.pop("horizontal", None)
+    vertical = box.pop("vertical", None)
+    sides = ("left", "top", "right", "bottom")
+    value = box.get("all")
+    if value is not None and (
+        any(side in box for side in sides)
+        or horizontal is not None or vertical is not None
+    ):
+        # A lone ``all`` is left alone — the renderer reads it directly. But the
+        # renderer tests ``all`` *first*, so a box carrying both ``all`` and a
+        # specific edge would silently drop the edge. Expanding makes them
+        # explicit, which is the only way a single edge can win.
+        box.pop("all")
+        for side in sides:
+            box.setdefault(side, value)
+    if horizontal is not None:
+        for side in ("left", "right"):
+            box.setdefault(side, horizontal)
+    if vertical is not None:
+        for side in ("top", "bottom"):
+            box.setdefault(side, vertical)
     return box
 
 
@@ -170,11 +191,12 @@ def _fold_box(style: dict, context: ValueContext) -> None:
             box = _expand_all(dict(box))
         box[side] = value
         style[composite] = _coerce_box(box, context)
-    # Normalise a box that arrived whole.
+    # Normalise a box that arrived whole — including the shorthands, so the
+    # renderer only ever sees the four sides plus the logical start/end pair.
     for composite in ("padding", "margin"):
         box = style.get(composite)
         if isinstance(box, dict):
-            style[composite] = _coerce_box(box, context)
+            style[composite] = _coerce_box(_expand_all(dict(box)), context)
 
 
 def _fold_border(style: dict, context: ValueContext) -> None:

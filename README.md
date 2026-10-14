@@ -22,8 +22,13 @@
 
 Pydrud is a declarative UI framework for Python with a platform-neutral widget
 tree, a keyed diff engine, and a versioned render protocol. The same screen
-code drives a host preview or native Android Views — there is no XML and no
+code drives the host preview and native Android Views — there is no XML and no
 Java to write.
+
+It ships the Material 3 design system end to end: HCT-generated colour with
+all 36 semantic roles, the M3 type scale, shape and elevation systems, the
+component catalogue from buttons to side sheets, and the M3 motion tokens —
+all of it expressed once in Python and translated by the renderer.
 
 ## Quick start
 
@@ -67,6 +72,27 @@ pydrud dev --bridge            # serve the host bridge (runs `adb reverse` for y
 
 All three share the same widget tree, keyed diff and protocol-v2 render
 transactions; only the transport differs.
+
+### Platform-neutral by design
+
+Android is the only renderer Pydrud ships — there is no iOS, Linux, Windows or
+web backend to configure or maintain — but the UI layer itself is
+renderer-agnostic, so the same screen code is portable:
+
+* **One widget vocabulary.** `pydrud/widgets/` imports nothing from
+  `pydrud/platforms/android/`, the generated Java templates or `android.*`.
+* **One wire format.** A plain JSON node dict (`type`, `key`, `style`,
+  `props`, `children`, `events`) with no Android types in it.
+* **Renderer facts as data.** A `RendererProfile` supplies platform-specific
+  style facts to the PSS parser/resolver, so neither ever imports a platform
+  adapter implicitly.
+* **Capability negotiation.** A renderer advertises the widgets and services it
+  supports, and unsupported widgets are substituted with documented fallbacks
+  instead of being dropped.
+
+Adding a platform later means adding one adapter under `pydrud/platforms/`
+plus its transport — not forking the design system. See
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#platform-neutrality).
 
 ## Installation
 
@@ -375,6 +401,11 @@ parsing/resolution, scaffold generation for both project shapes, generated
 Java template parsing, and end-to-end runtime tests via `pydrud.testing` —
 all without a device or emulator.
 
+`tests/test_neutrality.py` additionally proves the UI layer is
+renderer-neutral: every module under `pydrud/widgets/` is imported in a fresh
+interpreter and asserted to reach no Android adapter and no `pyjnius`, so the
+portability claim above cannot regress unnoticed.
+
 ## Roadmap
 
 | Version | Focus |
@@ -384,8 +415,9 @@ all without a device or emulator.
 | **v2.1.2** | Opt-in per-ABI APK splits (`abi_splits`) — one APK per ABI plus a universal APK for smaller downloads |
 | **v2.1.1** | PSS as a full CSS-style language, declarative `@keyframes`/`transition`/`:active`, pluggable runtime backends, Heartbeat starter, content blur, animated theming |
 | **v2.1.0** | `create`/`init android` CLI, pluggable runtime backends, PSS engine, Heartbeat starter, runtime-aware tooling |
-| **Next** | Declarative overlays, deeper Material coverage |
-| **Later** | iOS (SwiftUI), Web (WASM) and macOS desktop backends |
+| **2.1.5** | Material 3 Complete: HCT colour, 36 roles, the M3 component catalogue, M3 typography/shape/motion — Android renderers, platform-neutral UI layer |
+| **Next** | Material Symbols + dynamic colour, expressive motion (springs), container transform, predictive back |
+| **Later** | Further M3 Expressive work, then additional platform backends on top of the neutral UI layer |
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete itemised history.
 

@@ -75,7 +75,13 @@ Interaction pseudo-classes split in two:
 * **Transient** — `:active`, `:hover`, `:focus`. A rule using one is captured
   as a renderer sub-spec (`press`, `hover`, `focus`) and applied by the native
   renderer at the right moment. `.fab:active { transform: scale(.92) }` shrinks
-  the button on touch-down.
+  the button on touch-down. `:hover` follows a mouse, trackpad, stylus or TV
+  remote; `:focus` follows a keyboard, D-pad or accessibility traversal, and a
+  view styled with `:focus` is made focusable so traversal can reach it.
+  Leaving the state restores the rule's base declarations. A state rule that
+  sets no colour of its own is drawn as a Material 3 *state layer*: the base
+  colour blended toward the label colour at the role's published opacity
+  (`stateHover` 0.08, `stateFocus` 0.10).
 * **Persistent** — `:disabled`, `:checked`, `:selected`, `:enabled`. These
   match against the state a widget reports (`_pseudo_states`, or `state` /
   `disabled` / `checked` props) and apply as ordinary declarations.
@@ -135,10 +141,23 @@ renderer-specific.
 
 Matching rules follow CSS-like precedence: selector specificity first, then
 source order. For a widget with multiple classes, all matching rules
-participate. Its inline `style=` values are merged last and therefore override
-PSS declarations. PSS declarations are kept separately from inline styles, so
-removing a declaration from a stylesheet removes its effect on the next build
-instead of leaving a stale value behind.
+participate.
+
+There are three layers, weakest first:
+
+1. **Widget defaults** — what a widget derives from the design tokens and the
+   theme when it is built: a `Card`'s surface colour and radius, a `Column`'s
+   axis and spacing, the sizes a layout needs.
+2. **PSS declarations** — every matching rule, resolved in specificity order.
+3. **Caller values** — anything passed as a keyword argument (`spacing=4`,
+   `bg="#FF0000"`) or in `style={...}`.
+
+So a stylesheet can restyle any component without touching Python —
+`Card { bg: $surface_container_high; }` and `Column { spacing: 24; }` both
+take effect — while a deliberately hand-styled widget keeps the value its
+author gave it. PSS declarations are kept separately from `style`, so removing
+a declaration from a stylesheet removes its effect on the next build instead of
+leaving a stale value behind.
 
 ## Theme tokens (`$token`)
 
@@ -254,6 +273,32 @@ direction fill`); the native renderer runs the timeline, repeating it for
 `infinite`. `transition` tweens a property change when the value changes.
 `transform` is decomposed into Pydrud's `scale`/`rotation`; translation is
 layout and is dropped.
+
+### Naming a duration or a curve
+
+Three spellings work in either shorthand, and they all end up as the same
+tokens on the device:
+
+```pss
+.one   { transition: background 300ms cubic-bezier(.2, 0, 0, 1); }
+.two   { transition: background $duration_medium_2 $easing_emphasized; }
+.three { transition: background medium-2 emphasized-decelerate; }
+```
+
+* A **CSS time** (`300ms`, `.3s`) is milliseconds.
+* A **token reference** — `$duration_medium_2`, `$easing_emphasized` — resolves
+  to the theme's value, so retuning the token in Python moves the animation.
+  Duration tokens carry their unit when they expand (`300ms`).
+* A **Material 3 name** — `short-1` … `extra-long-4`, `fast`, `normal`, `slow`
+  for durations; `standard`, `standard-decelerate`, `standard-accelerate`,
+  `emphasized`, `emphasized-decelerate`, `emphasized-accelerate` for curves —
+  names the spec's step directly. The curve names resolve through the
+  `easing_*` tokens, which hold the spec's cubic-béziers.
+
+A transition that names no curve uses the M3 standard curve
+(`cubic-bezier(.2, 0, 0, 1)`). The CSS keywords (`ease`, `ease-in`,
+`ease-out`, `ease-in-out`, `linear`) and the platform curve names
+(`overshoot`, `bounce`, `anticipate`) still work unchanged.
 
 ## CSS long-hands and shorthands
 

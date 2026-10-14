@@ -49,6 +49,11 @@ class Drawer(Widget):
 
     Pass it to ``Scaffold(drawer=...)``; open it with ``page.open_drawer()``
     or by tapping the AppBar's hamburger icon.
+
+    A drawer that slides over the page is modal in Material 3 terms, so it
+    dims what is behind it with the theme's ``scrim`` role and closes when
+    that dim layer is tapped. A permanent drawer that never covers content
+    passes ``scrim=False`` and keeps the page at full brightness.
     """
 
     _widget_type = "Drawer"
@@ -61,6 +66,7 @@ class Drawer(Widget):
         width: float = 300,
         bg: Optional[str] = None,
         side: str = "start",
+        scrim: bool = True,
         key: Optional[str] = None,
         **kwargs,
     ):
@@ -70,6 +76,7 @@ class Drawer(Widget):
         self.width = float(width)
         self.bg = bg
         self.side = side
+        self.scrim = bool(scrim)
         self.children = []
         if header is not None:
             if header._auto_key:
@@ -81,7 +88,7 @@ class Drawer(Widget):
     def _serialise_props(self) -> dict:
         props = dict(self._extra)
         props.update(_clean({"width": self.width, "bg": self.bg,
-                             "side": self.side}))
+                             "side": self.side, "scrim": self.scrim}))
         return props
 
 

@@ -29,6 +29,18 @@ public class ViewStyler {
     ViewStyler(ViewFactory vf) {
         this.vf = vf;
     }
+
+    /** Style a view had before it entered ``:hover`` / ``:focus``, for restore. */
+    private final Map<View, JSONObject> stateBaseStyles =
+        new java.util.WeakHashMap<>();
+
+    /** Views whose hover/focus listeners are already installed. */
+    private final java.util.Set<View> stateWired =
+        java.util.Collections.newSetFromMap(
+            new java.util.WeakHashMap<View, Boolean>());
+
+    /** Re-entry guard: applying a state must not re-install listeners. */
+    private boolean applyingState = false;
 static final java.util.Set<String> KNOWN_KEYS =
 new java.util.HashSet<>(java.util.Arrays.asList(
 ("accent action actions active activeColor activeIcon address align alignment all "
@@ -38,24 +50,27 @@ new java.util.HashSet<>(java.util.Arrays.asList(
 + "borderLeft borderRadius borderRight "
 + "borderTop borderTopLeftRadius borderTopRightRadius bottom breakpoint buttonSize c1x c1y c2x c2y "
 + "callback_id camera cancel "
-+ "cancellable cap channel characteristic charging checkable checked children circular cmd codeBg "
-+ "color colors columns content controls count crossAxis crossAxisAlignment current curve "
++ "cancellable cap channel characteristic charging checkable checked children circular closeIcon cmd codeBg "
++ "color colors columns confirm content controls count crossAxis crossAxisAlignment current curve "
 + "customTrigger cx cy dark danger dash default deg delay deletable dense density description direction disabled "
 + "dismissible distance divider divisions drawerSide duration dx dy elevation enabled error "
-+ "errorColor error_image events every expand expanded extended fabPosition facing family "
++ "scrim "
+
+
++ "enabled end errorColor error_image events every expand expanded extended fabPosition facing family focus "
 + "feedback filename fill fit floating font font_family format gestures gradient h handled "
-+ "haptic haptics has_events height heightFactor helper highAccuracy hint html icon "
++ "haptic haptics has_events height heightFactor helper highAccuracy hint hour hover html icon "
 + "iconPosition icon_brightness icons id idle ime importance indeterminate index indicator "
 + "indicatorSize initial initialPage initials inputs interval italic itemIcons items iterations javascript join key keyboard "
 + "keyboard_height keyframes kind label labelBehavior lat leadingColor leadingIcon left letterSpacing "
 + "level lights lineHeight lines link locale lon long loop mainAxis mainAxisAlignment "
 + "margin markers max maxColumns maxHeight maxLabelLines maxLines maxWidth max_seconds "
-+ "message mime min minHeight minItemWidth minWidth mode mono multi multiline multiple "
++ "menuIcon menuItems message mime min minHeight minItemWidth minWidth minute mode mono multi multiline multiple "
 + "muted name native navigation_bar_color network new_key obscure offsetX offsetY ok on_primary ongoing op "
 + "opacity open ops options ordered orientation overflow overscroll_glow padding "
 + "padding_bottom padding_left padding_right padding_top paint parent_key password path "
 + "pattern peek permission permissions pie pill pitch placeholder position positions press primary_container "
-+ "progress prompt property props protocol_version r radius rate ratio readOnly readonly records "
++ "progress prompt property props protocol_version r radius range rate ratio readOnly readonly records "
 + "refreshing repeat replace request_id resizeForKeyboard response right ripple role rotate "
 + "rotation route safeArea safeAreaBottom safeAreaTop sample_rate scale scan scanFormats "
 + "scanOverlay scroll scrollable seconds selectable selected semantics sensor service services shadow "
@@ -63,10 +78,10 @@ new java.util.HashSet<>(java.util.Arrays.asList(
 + "status_bar_color stepSize steps strike strikethrough style subject submenu subtitle surface_variant sweep "
 + "swipeThreshold swipeToRemove sx sy tabHeight tabletColumns tabs text textAlign textColor "
 + "textScale text_scale thickness threeLine threshold timeout title tokens tooltip top "
-+ "topDivider topic trailingColor trailingIcon transaction_id transition translateX translateY tristate type "
++ "topDivider topic trailingColor trailingIcon transaction_id transformOrigin transition translateX translateY tristate type "
 + "underline units uppercase url use24h v value values variant vibrate viewClass "
 + "virtualized visible "
-+ "volume w weight width widthFactor x x1 x2 y y1 y2 zIndex zoom ").trim().split(" ")));
++ "volume w weight width widthFactor x x1 x2 y y1 y2 zIndex zoom easing_emphasized easing_emphasized_accelerate easing_emphasized_decelerate easing_linear easing_standard easing_standard_accelerate easing_standard_decelerate dragHandle waveform ").trim().split(" ")));
 static final java.util.Set<String> WARNED_STYLE_KEYS =
 java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
 static final java.util.concurrent.atomic.AtomicBoolean BLUR_WARNED =
@@ -122,9 +137,9 @@ new java.util.HashMap<>();
             : PydrudTheme.elevationCard;
 
         if (PydrudTheme.dark) {
-            // Shadows disappear on dark backgrounds; Material lifts the
-            // surface with a tint instead.
-            fill = PydrudTheme.blend(fill, 0xFFFFFFFF, Math.min(0.08f, elevation * 0.018f));
+            // Shadows disappear on a dark background, so M3 expresses the
+            // elevation as a surface tint at the level's published opacity.
+            fill = PydrudTheme.tonalSurface(fill, elevation);
         }
         view.setBackground(PydrudTheme.shape(fill, radius,
             PydrudTheme.dark ? dp(1) : 0,
@@ -239,23 +254,74 @@ new java.util.HashMap<>();
         }
         if ("Divider".equals(type)) {
             JSONObject s = json.optJSONObject("style");
-            h = dp(s != null ? s.optInt("thickness", 1) : 1);
+            // The hairline thickness is a token; a per-widget `thickness`
+            // still wins over it.
+            h = Math.max(1, dp(s != null
+                ? (float) s.optDouble("thickness", PydrudTheme.dividerThickness)
+                : PydrudTheme.dividerThickness));
         }
         view.setLayoutParams(new ViewGroup.MarginLayoutParams(w, h));
+    }
+
+    /**
+     * Apply a box inset, honouring logical ``start``/``end``.
+     *
+     * ``start`` and ``end`` resolve against the view's layout direction, so
+     * insets written that way mirror themselves in an RTL locale; ``left`` and
+     * ``right`` stay physical, as the documentation promises. Before this
+     * existed the renderer read only ``left``/``top``/``right``/``bottom``, so
+     * ``EdgeInsets.only(start=16, end=8)`` — the documented RTL spelling —
+     * arrived as ``{left: 0, start: 16, end: 8}`` and was applied as *zero*
+     * padding. An inset silently vanishing is worse than one that fails to
+     * mirror, so the logical pair is the fallback for the physical one.
+     */
+    boolean isLogical(JSONObject box) {
+        return box != null && (box.has("start") || box.has("end"));
+    }
+
+    void applyPadding(View view, JSONObject p) {
+        if (p == null) return;
+        if (p.has("all")) {
+            int a = dp(p.optInt("all", 0));
+            view.setPaddingRelative(a, a, a, a);
+            return;
+        }
+        int top = dp(p.optInt("top", 0));
+        int bottom = dp(p.optInt("bottom", 0));
+        if (isLogical(p)) {
+            view.setPaddingRelative(
+                dp(p.optInt("start", p.optInt("left", 0))), top,
+                dp(p.optInt("end", p.optInt("right", 0))), bottom);
+        } else {
+            view.setPadding(dp(p.optInt("left", 0)), top,
+                            dp(p.optInt("right", 0)), bottom);
+        }
+    }
+
+    void applyMargin(ViewGroup.MarginLayoutParams lp, JSONObject m) {
+        if (lp == null || m == null) return;
+        if (m.has("all")) {
+            int a = dp(m.optInt("all", 0));
+            lp.setMargins(a, a, a, a);
+            return;
+        }
+        int top = dp(m.optInt("top", 0));
+        int bottom = dp(m.optInt("bottom", 0));
+        // Vertical margins are direction-agnostic; the horizontal pair is not.
+        lp.setMargins(0, top, 0, bottom);
+        if (isLogical(m)) {
+            lp.setMarginStart(dp(m.optInt("start", m.optInt("left", 0))));
+            lp.setMarginEnd(dp(m.optInt("end", m.optInt("right", 0))));
+        } else {
+            lp.leftMargin = dp(m.optInt("left", 0));
+            lp.rightMargin = dp(m.optInt("right", 0));
+        }
     }
 
     void applyMargins(ViewGroup.MarginLayoutParams lp, JSONObject json) {
         JSONObject s = json != null ? json.optJSONObject("style") : null;
         if (s == null || !s.has("margin")) return;
-        JSONObject m = s.optJSONObject("margin");
-        if (m == null) return;
-        if (m.has("all")) {
-            int a = dp(m.optInt("all", 0));
-            lp.setMargins(a, a, a, a);
-        } else {
-            lp.setMargins(dp(m.optInt("left", 0)), dp(m.optInt("top", 0)),
-                           dp(m.optInt("right", 0)), dp(m.optInt("bottom", 0)));
-        }
+        applyMargin(lp, s.optJSONObject("margin"));
     }
 
     static boolean declaresWidth(JSONObject json) {
@@ -388,33 +454,14 @@ new java.util.HashMap<>();
                 Math.max(0, dimension(s, "minWidth", 0)));
 
             // Padding
-            if (s.has("padding")) {
-                JSONObject p = s.optJSONObject("padding");
-                if (p != null) {
-                    if (p.has("all")) {
-                        int a = dp(p.optInt("all", 0));
-                        view.setPadding(a, a, a, a);
-                    } else {
-                        view.setPadding(dp(p.optInt("left", 0)), dp(p.optInt("top", 0)),
-                                        dp(p.optInt("right", 0)), dp(p.optInt("bottom", 0)));
-                    }
-                }
-            }
+            if (s.has("padding")) applyPadding(view, s.optJSONObject("padding"));
 
             // Margin (when the view already has margin-capable params)
             if (s.has("margin") && view.getLayoutParams() instanceof ViewGroup.MarginLayoutParams) {
                 JSONObject m = s.optJSONObject("margin");
                 ViewGroup.MarginLayoutParams mlp =
                     (ViewGroup.MarginLayoutParams) view.getLayoutParams();
-                if (m != null) {
-                    if (m.has("all")) {
-                        int a = dp(m.optInt("all", 0));
-                        mlp.setMargins(a, a, a, a);
-                    } else {
-                        mlp.setMargins(dp(m.optInt("left", 0)), dp(m.optInt("top", 0)),
-                                       dp(m.optInt("right", 0)), dp(m.optInt("bottom", 0)));
-                    }
-                }
+                if (m != null) applyMargin(mlp, m);
             }
 
             // Absolute positioning (Positioned inside a Stack). The create
@@ -553,8 +600,205 @@ new java.util.HashMap<>();
             if (s.has("shadow")) applyShadow(view, s);
             if (s.has("ripple") && !skipBackground) applyRipple(view, s, radius);
             if (s.has("aspectRatio")) applyAspectRatio(view, s);
+            if (s.has("transformOrigin")) applyTransformOrigin(view, s);
+            if (s.has("disabled") && s.optBoolean("disabled", false)) {
+                applyDisabled(view, s);
+            }
+            applyStateSpecs(view, s);
         } catch (Exception e) {
             Log.w(ViewFactory.TAG, "Style error", e);
+        }
+    }
+
+    /**
+     * Wire the ``:hover`` and ``:focus`` rules a stylesheet declared.
+     *
+     * PSS resolves ``:hover`` / ``:focus`` into sub-specs on the style dict,
+     * exactly like ``:active`` becomes ``press``. Android has real platform
+     * states for both — hover arrives from a mouse, trackpad, stylus or TV
+     * remote, and focus from a keyboard, D-pad or accessibility traversal —
+     * so each maps onto a listener. Entering a state applies its sub-spec on
+     * top of the base style; leaving re-applies the base style, which is what
+     * a CSS state rule means.
+     *
+     * A sub-spec that only changes the colour is treated as a Material 3
+     * *state layer*: the base colour blended toward the label colour at the
+     * role's published opacity ({@code stateHover} 0.08, {@code stateFocus}
+     * 0.10). That is what M3 draws for a hovered or focused surface, so
+     * ``&:hover { }`` with no declarations still does the right thing.
+     */
+    void applyStateSpecs(final View view, final JSONObject style) {
+        if (view == null || style == null) return;
+        final JSONObject hover = style.optJSONObject("hover");
+        final JSONObject focus = style.optJSONObject("focus");
+        final JSONObject press = style.optJSONObject("press");
+        if (hover == null && focus == null && press == null) return;
+
+        // Remember the pre-state style so leaving the state restores it.
+        if (!applyingState) stateBaseStyles.put(view, style);
+
+        // Re-styling the same view (a tree patch) must not stack listeners.
+        if (!stateWired.add(view)) return;
+
+        if (hover != null) {
+            view.setOnHoverListener((v, event) -> {
+                if (event.getAction() == android.view.MotionEvent.ACTION_HOVER_ENTER) {
+                    applyStateStyle(v, "hover");
+                } else if (event.getAction()
+                           == android.view.MotionEvent.ACTION_HOVER_EXIT) {
+                    restoreBaseStyle(v);
+                }
+                return false;
+            });
+        }
+        if (press != null && !(view instanceof android.widget.Button)
+                && !(view instanceof android.widget.CompoundButton)) {
+            // Material components paint their own press ripple; anything else
+            // gets the declarative :active layer applied as a touch state.
+            view.setOnTouchListener((v, event) -> {
+                switch (event.getActionMasked()) {
+                    case android.view.MotionEvent.ACTION_DOWN:
+                        applyStateStyle(v, "press");
+                        break;
+                    case android.view.MotionEvent.ACTION_UP:
+                    case android.view.MotionEvent.ACTION_CANCEL:
+                        restoreBaseStyle(v);
+                        break;
+                    default:
+                        break;
+                }
+                return false;
+            });
+        }
+        if (focus != null) {
+            // A stylesheet that styles :focus is asking for the view to be
+            // reachable by traversal, so make it focusable if it is not.
+            if (!view.isFocusable()) {
+                view.setFocusable(true);
+                if (!view.isFocusableInTouchMode()) view.setFocusableInTouchMode(true);
+            }
+            view.setOnFocusChangeListener((v, hasFocus) -> {
+                if (hasFocus) applyStateStyle(v, "focus");
+                else restoreBaseStyle(v);
+            });
+        }
+    }
+
+    /**
+     * Material 3's disabled treatment for a styled widget.
+     *
+     * ``disabled: true`` used to reach the renderer and stop: the generic
+     * style path had no consumer for it, so only the handful of factories
+     * that called ``setEnabled(false)`` by hand were affected. Now the key
+     * disables the view *and* paints the M3 alphas, so a disabled button
+     * looks disabled instead of merely refusing taps.
+     */
+    void applyDisabled(View view, JSONObject s) {
+        view.setEnabled(false);
+        view.setClickable(false);
+        int container = s.has("bg")
+            ? parseColor(s.optString("bg", ""), Color.TRANSPARENT)
+            : Color.TRANSPARENT;
+        PydrudTheme.applyDisabledTreatment(view, container);
+    }
+
+    /** Merge one state sub-spec over the base style and re-apply it. */
+    private void applyStateStyle(View view, String state) {
+        JSONObject base = stateBaseStyles.get(view);
+        if (base == null || !base.has(state)) return;
+        JSONObject spec = base.optJSONObject(state);
+        if (spec == null) return;
+        JSONObject merged = new JSONObject();
+        try {
+            java.util.Iterator<String> keys = base.keys();
+            while (keys.hasNext()) {
+                String k = keys.next();
+                if ("hover".equals(k) || "focus".equals(k) || "press".equals(k)) continue;
+                merged.put(k, base.get(k));
+            }
+            java.util.Iterator<String> overrides = spec.keys();
+            while (overrides.hasNext()) {
+                String k = overrides.next();
+                merged.put(k, spec.get(k));
+            }
+            // A colour-only state rule is a Material 3 state layer.
+            if (!merged.has("bg") && base.has("bg")) {
+                int fill = parseColor(base.optString("bg", ""), PydrudTheme.surface);
+                int layer = parseColor(base.optString("color", ""),
+                    PydrudTheme.onSurface);
+                float opacity = "hover".equals(state) ? PydrudTheme.stateHover
+                    : "press".equals(state) ? PydrudTheme.statePressed
+                    : PydrudTheme.stateFocus;
+                merged.put("bg", PydrudTheme.toHex(
+                    PydrudTheme.blend(fill, layer, opacity)));
+            }
+        } catch (JSONException e) {
+            return;
+        }
+        applyingState = true;
+        try {
+            applyStyle(view, merged);
+        } catch (Exception e) {
+            Log.w(ViewFactory.TAG, "state style '" + state + "' failed", e);
+        } finally {
+            applyingState = false;
+        }
+    }
+
+    /** Re-apply the style the view had before it entered a state. */
+    private void restoreBaseStyle(View view) {
+        JSONObject base = stateBaseStyles.get(view);
+        if (base == null) return;
+        applyingState = true;
+        try {
+            applyStyle(view, base);
+        } catch (Exception e) {
+            Log.w(ViewFactory.TAG, "restoring base style failed", e);
+        } finally {
+            applyingState = false;
+        }
+    }
+
+    /**
+     * CSS ``transform-origin`` → the pivot Android rotates and scales around.
+     *
+     * Android pivots on the view centre by default, which is CSS's
+     * ``50% 50%``; an explicit origin only matters when it says something
+     * else. Percentages resolve against the current size, so the pivot is
+     * re-applied on every layout.
+     */
+    void applyTransformOrigin(final View view, final JSONObject s) {
+        final String spec = s.optString("transformOrigin", "").trim()
+            .toLowerCase(java.util.Locale.US);
+        if (spec.isEmpty()) return;
+        final Runnable place = () -> {
+            int w = view.getWidth();
+            int h = view.getHeight();
+            if (w <= 0 || h <= 0) return;
+            String[] parts = spec.split("\\s+");
+            view.setPivotX(originAxis(parts.length > 0 ? parts[0] : "center", w));
+            view.setPivotY(originAxis(parts.length > 1 ? parts[1] : "center", h));
+        };
+        place.run();
+        view.addOnLayoutChangeListener(
+            (v, l, t, r, b, ol, ot, or, ob) -> place.run());
+    }
+
+    /** One axis of ``transform-origin``, in pixels. */
+    float originAxis(String token, int extent) {
+        if ("center".equals(token)) return extent / 2f;
+        if ("left".equals(token) || "top".equals(token)) return 0f;
+        if ("right".equals(token) || "bottom".equals(token)) return extent;
+        try {
+            if (token.endsWith("%")) {
+                return extent
+                    * Float.parseFloat(token.substring(0, token.length() - 1)) / 100f;
+            }
+            return dp(Float.parseFloat(token.endsWith("px")
+                ? token.substring(0, token.length() - 2)
+                : token));
+        } catch (NumberFormatException e) {
+            return extent / 2f;
         }
     }
 
@@ -867,43 +1111,21 @@ new java.util.HashMap<>();
         }
     }
 
+    /**
+     * The curve a timing spec names.
+     *
+     * <p>The default is the M3 standard curve rather than the old
+     * accelerate/decelerate keyword: a transition that does not name a curve
+     * is a standard transition, and the spec says how one moves.
+     */
     android.view.animation.Interpolator interpolator(JSONObject spec) {
-        String curve = spec != null ? spec.optString("curve", "ease_in_out") : "ease_in_out";
-        switch (curve) {
-            case "linear":      return new android.view.animation.LinearInterpolator();
-            case "ease":        case "ease_in_out":
-                return new android.view.animation.AccelerateDecelerateInterpolator();
-            case "ease_in":     case "accelerate":
-                return new android.view.animation.AccelerateInterpolator();
-            case "ease_out":    case "decelerate":
-                return new android.view.animation.DecelerateInterpolator();
-            case "bounce":      return new android.view.animation.BounceInterpolator();
-            case "overshoot":   return new android.view.animation.OvershootInterpolator();
-            case "anticipate":  return new android.view.animation.AnticipateInterpolator();
-            default:
-                if (curve.startsWith("cubic-bezier(")) return cubicBezier(curve);
-                return new android.view.animation.AccelerateDecelerateInterpolator();
-        }
+        String curve = spec != null ? spec.optString("curve", "standard") : "standard";
+        return PydrudTheme.easing(curve);
     }
 
     /** Parse a CSS ``cubic-bezier(x1, y1, x2, y2)`` timing function. */
     android.view.animation.Interpolator cubicBezier(String text) {
-        String inner = text.substring(text.indexOf('(') + 1);
-        int close = inner.indexOf(')');
-        if (close >= 0) inner = inner.substring(0, close);
-        String[] parts = inner.split(",");
-        if (parts.length != 4) {
-            return new android.view.animation.AccelerateDecelerateInterpolator();
-        }
-        try {
-            float x1 = Float.parseFloat(parts[0].trim());
-            float y1 = Float.parseFloat(parts[1].trim());
-            float x2 = Float.parseFloat(parts[2].trim());
-            float y2 = Float.parseFloat(parts[3].trim());
-            return new android.view.animation.PathInterpolator(x1, y1, x2, y2);
-        } catch (NumberFormatException e) {
-            return new android.view.animation.AccelerateDecelerateInterpolator();
-        }
+        return PydrudTheme.easing(text);
     }
 
 }

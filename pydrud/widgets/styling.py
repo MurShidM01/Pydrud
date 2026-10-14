@@ -1,8 +1,7 @@
 """
 Styling primitives for Pydrud widgets.
 
-Styles are plain dicts serialised to JSON. The helper classes below
-provide a more ergonomic builder API.
+RTL support (start/end), per-corner border radius, M3 shape tokens.
 """
 
 from __future__ import annotations
@@ -11,9 +10,20 @@ from typing import Optional, Sequence, Union
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
-
 class EdgeInsets:
-    """Represents padding or margin. Immutable."""
+    """Represents padding or margin. Immutable.
+
+    Added ``start``/``end`` for RTL support.  ``left``/``right``
+    remain for absolute positioning; ``start``/``end`` resolve relative
+    to the current text direction.
+
+    ::
+
+        EdgeInsets.all(16)
+        EdgeInsets.symmetric(horizontal=20, vertical=12)
+        EdgeInsets.only(left=8, top=16)
+        EdgeInsets.only(start=16, end=8)  # RTL-aware
+    """
 
     def __init__(
         self,
@@ -24,6 +34,8 @@ class EdgeInsets:
         all: Optional[float] = None,  # noqa: A002
         horizontal: Optional[float] = None,
         vertical: Optional[float] = None,
+        start: Optional[float] = None,
+        end: Optional[float] = None,
     ):
         if all is not None:
             left = top = right = bottom = all
@@ -35,6 +47,8 @@ class EdgeInsets:
         self.top = top
         self.right = right
         self.bottom = bottom
+        self.start = start
+        self.end = end
 
     @classmethod
     def all(cls, value: float) -> "EdgeInsets":
@@ -45,16 +59,23 @@ class EdgeInsets:
         return cls(horizontal=horizontal, vertical=vertical)
 
     @classmethod
-    def only(cls, left=0, top=0, right=0, bottom=0) -> "EdgeInsets":
-        return cls(left=left, top=top, right=right, bottom=bottom)
+    def only(cls, left=0, top=0, right=0, bottom=0,
+             start=None, end=None) -> "EdgeInsets":
+        return cls(left=left, top=top, right=right, bottom=bottom,
+                   start=start, end=end)
 
     def to_dict(self) -> dict:
-        return {"left": self.left, "top": self.top, "right": self.right, "bottom": self.bottom}
+        d = {"left": self.left, "top": self.top,
+             "right": self.right, "bottom": self.bottom}
+        if self.start is not None:
+            d["start"] = self.start
+        if self.end is not None:
+            d["end"] = self.end
+        return d
 
 
 class Alignment:
     """Named alignment constants."""
-
     top_left = "topLeft"
     top_center = "topCenter"
     top_right = "topRight"
@@ -73,15 +94,19 @@ class FontStyle:
         self,
         size: Optional[float] = None,
         color: Optional[str] = None,
-        weight: Optional[int] = None,  # 100-900
+        weight: Optional[int] = None,
         italic: bool = False,
         family: Optional[str] = None,
+        line_height: Optional[float] = None,
+        letter_spacing: Optional[float] = None,
     ):
         self.size = size
         self.color = color
         self.weight = weight
         self.italic = italic
         self.family = family
+        self.line_height = line_height
+        self.letter_spacing = letter_spacing
 
     def to_dict(self) -> dict:
         d: dict = {}
@@ -95,6 +120,10 @@ class FontStyle:
             d["italic"] = True
         if self.family is not None:
             d["family"] = self.family
+        if self.line_height is not None:
+            d["lineHeight"] = self.line_height
+        if self.letter_spacing is not None:
+            d["letterSpacing"] = self.letter_spacing
         return d
 
 
@@ -136,10 +165,6 @@ class Border:
         right: bool = False,
         bottom: bool = False,
     ) -> "Border":
-        """A border on selected edges only — e.g. a bottom hairline::
-
-            Border.only(bottom=True, color=Colors.OUTLINE)
-        """
         none = BorderSide(color, 0)
         border = cls(color, width)
         border.left = BorderSide(color, width) if left else none
@@ -158,18 +183,119 @@ class Border:
 
 
 class BorderRadius:
-    """Rounded-corner radius."""
+    """Rounded-corner radius with per-corner support.
 
-    def __init__(self, radius: float = 0):
+    Supports per-corner radii for M3 filled text fields (top-only),
+    bottom sheets (top-only), and other asymmetric shapes.
+
+    ::
+
+        BorderRadius(16)                          # uniform
+        BorderRadius.only(top_left=4, top_right=4)  # filled text field
+        BorderRadius.only(top_left=28, top_right=28) # bottom sheet
+    """
+
+    def __init__(
+        self,
+        radius: float = 0,
+        *,
+        top_left: Optional[float] = None,
+        top_right: Optional[float] = None,
+        bottom_left: Optional[float] = None,
+        bottom_right: Optional[float] = None,
+    ):
         self.radius = radius
+        self.top_left = top_left if top_left is not None else radius
+        self.top_right = top_right if top_right is not None else radius
+        self.bottom_left = bottom_left if bottom_left is not None else radius
+        self.bottom_right = bottom_right if bottom_right is not None else radius
+
+    @classmethod
+    def only(
+        cls,
+        *,
+        top_left: float = 0,
+        top_right: float = 0,
+        bottom_left: float = 0,
+        bottom_right: float = 0,
+    ) -> "BorderRadius":
+        """Per-corner radius — for M3 filled fields, bottom sheets, etc."""
+        return cls(
+            0, top_left=top_left, top_right=top_right,
+            bottom_left=bottom_left, bottom_right=bottom_right,
+        )
+
+    def is_uniform(self) -> bool:
+        """True when all four corners have the same radius."""
+        return (self.top_left == self.top_right ==
+                self.bottom_left == self.bottom_right)
 
     def to_dict(self) -> dict:
-        return {"radius": self.radius}
+        if self.is_uniform():
+            return {"radius": self.top_left}
+        return {
+            "topLeft": self.top_left,
+            "topRight": self.top_right,
+            "bottomLeft": self.bottom_left,
+            "bottomRight": self.bottom_right,
+        }
 
+
+class Shape:
+    """M3 shape categories — semantic radius tokens.
+
+    Material 3 defines 5 shape categories that map to component families.
+    Use these instead of raw numbers for M3-conformant styling.
+
+    ::
+
+        Shape.extra_small   # 4dp — chips, small controls
+        Shape.small         # 8dp — buttons, text fields
+        Shape.medium        # 12dp — cards, dialogs
+        Shape.large         # 16dp — sheets, large cards
+        Shape.extra_large   # 28dp — bottom sheets, full-screen dialogs
+        Shape.full          # 999dp — pill/circle
+    """
+
+    NONE = 0
+    EXTRA_SMALL = 4
+    SMALL = 8
+    MEDIUM = 12
+    LARGE = 16
+    LARGE_INCREASED = 20
+    EXTRA_LARGE = 28
+    EXTRA_LARGE_INCREASED = 32
+    EXTRA_EXTRA_LARGE = 48
+    FULL = 999
+
+    # Component-specific defaults (M3 spec)
+    BUTTON = 20
+    FAB = 16
+    FAB_LARGE = 28
+    EXTENDED_FAB = 16
+    CHIP = EXTRA_SMALL
+    CARD = MEDIUM
+    DIALOG = EXTRA_LARGE
+    BOTTOM_SHEET = EXTRA_LARGE
+    TEXT_FIELD_FILLED = EXTRA_SMALL     # top corners only
+    TEXT_FIELD_OUTLINED = EXTRA_SMALL
+    NAVIGATION_BAR = NONE
+    NAVIGATION_DRAWER = LARGE
+    MENU = EXTRA_SMALL
+    SNACKBAR = EXTRA_SMALL
+    TAB = NONE
+    SWITCH = FULL
+    CHECKBOX = 2
+    RADIO = FULL
+    SLIDER = FULL
+    SEGMENTED_BUTTON = FULL
+    SEARCH_BAR = FULL
+    TOOLTIP = EXTRA_SMALL
+
+
+# ── Gradient ─────────────────────────────────────────────────────────────────
 
 class _Gradient:
-    """Base for serialisable native background gradients."""
-
     kind = "linear"
 
     def __init__(self, colors: Sequence[str]):
@@ -183,13 +309,6 @@ class _Gradient:
 
 
 class LinearGradient(_Gradient):
-    """A linear background gradient understood by the Android renderer.
-
-    ``direction`` may be ``vertical``, ``horizontal``, ``diagonal``,
-    ``diagonal_up`` or ``up``. The object is also accepted by
-    :meth:`Style.gradient` and ``Container(gradient=...)``.
-    """
-
     def __init__(self, colors: Sequence[str], direction: str = "vertical"):
         if direction not in {"vertical", "horizontal", "diagonal",
                              "diagonal_up", "up"}:
@@ -202,8 +321,6 @@ class LinearGradient(_Gradient):
 
 
 class RadialGradient(_Gradient):
-    """A radial background gradient, measured in device-independent pixels."""
-
     kind = "radial"
 
     def __init__(self, colors: Sequence[str], radius: float = 160):
@@ -217,16 +334,15 @@ class RadialGradient(_Gradient):
 
 
 class SweepGradient(_Gradient):
-    """A sweep gradient descriptor for renderers which support sweep fills."""
-
     kind = "sweep"
 
 
 # ── Style builder ────────────────────────────────────────────────────────────
 
-
 class Style:
     """Fluent builder for widget style dictionaries.
+
+    Supports per-corner radius and M3 shape tokens.
 
     Usage::
 
@@ -248,29 +364,24 @@ class Style:
     # --- background ---
 
     def bg(self, color: str) -> "Style":
-        """Background colour (hex ARGB or RGB)."""
         self._data["bg"] = self._normalise_color(color)
         return self
 
     def opacity(self, value: float) -> "Style":
-        """Opacity 0.0 – 1.0."""
         self._data["opacity"] = value
         return self
 
     def gradient(self, value: _Gradient | dict) -> "Style":
-        """Set a native background gradient."""
         self._data["gradient"] = value.to_dict() if hasattr(value, "to_dict") else dict(value)
         return self
 
     # --- size ---
 
     def width(self, value: Union[float, str]) -> "Style":
-        """Fixed width in dp, or a string like "match", "wrap"."""
         self._data["width"] = value
         return self
 
     def height(self, value: Union[float, str]) -> "Style":
-        """Fixed height in dp, or a string like "match", "wrap"."""
         self._data["height"] = value
         return self
 
@@ -307,7 +418,11 @@ class Style:
         return self
 
     def border_radius(self, value: Union[float, BorderRadius]) -> "Style":
-        self._data["borderRadius"] = value if isinstance(value, (int, float)) else value.radius
+        """Set border radius. Accepts a scalar or per-corner BorderRadius."""
+        if isinstance(value, BorderRadius):
+            self._data["borderRadius"] = value.to_dict()
+        else:
+            self._data["borderRadius"] = value
         return self
 
     # --- font ---
@@ -325,14 +440,12 @@ class Style:
         return self
 
     def text_align(self, align: str) -> "Style":
-        """One of "left", "center", "right"."""
         self._data["textAlign"] = align
         return self
 
     # --- layout ---
 
     def alignment(self, value: str) -> "Style":
-        """Use one of the ``Alignment`` constants."""
         self._data["alignment"] = value
         return self
 
@@ -355,31 +468,26 @@ class Style:
         return self
 
     def blur(self, radius: float) -> "Style":
-        """Frosted-glass blur radius in dp (Android 12 / API 31+)."""
         self._data["blur"] = radius
         return self
 
     # --- image ---
 
     def fit(self, value: str) -> "Style":
-        """Image scale type: "cover", "contain", "fill", "fitWidth", "fitHeight", "none"."""
         self._data["fit"] = value
         return self
 
     # --- shorthands ---
 
     def bg_image(self, src: str, fit: str = "cover") -> "Style":
-        """Set background image."""
         self._data["bgImage"] = {"src": src, "fit": fit}
         return self
 
     def elevation(self, value: float) -> "Style":
-        """Android elevation / shadow."""
         self._data["elevation"] = value
         return self
 
     def build(self) -> dict:
-        """Return the accumulated style dict."""
         return dict(self._data)
 
     @staticmethod

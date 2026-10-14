@@ -45,7 +45,7 @@ public class ViewAnimator {
         }
         JSONObject style = json.optJSONObject("style");
         JSONObject spec = style != null ? style.optJSONObject("animation") : null;
-        long duration = spec != null ? spec.optLong("duration", 250) : 250;
+        long duration = PydrudTheme.durationMs(spec != null ? spec.opt("duration") : null);
         long delay = spec != null ? spec.optLong("delay", 0) : 0;
         JSONObject props = json.optJSONObject("props");
 
@@ -91,7 +91,8 @@ public class ViewAnimator {
 
         android.animation.ValueAnimator animator =
             android.animation.ValueAnimator.ofFloat(0f, 1f);
-        animator.setDuration(Math.max(1, (long) spec.optDouble("duration", 1000)));
+        animator.setDuration(Math.max(1L, PydrudTheme.durationMs(
+            spec.has("duration") ? spec.opt("duration") : PydrudTheme.durationExtraLong4)));
         animator.setStartDelay(Math.max(0, (long) spec.optDouble("delay", 0)));
         animator.setInterpolator(vf.mStyler.interpolator(spec));
 
@@ -187,8 +188,11 @@ public class ViewAnimator {
         if (spec == null && transition == null) return false;
 
         JSONObject timing = transition != null ? transition : spec;
-        long duration = (long) timing.optDouble("duration",
-            spec != null ? spec.optDouble("duration", 250) : 250);
+        // A duration may be a step name ("medium_2") or a number of
+        // milliseconds; both mean the same thing to a component.
+        Object rawDuration = timing != null ? timing.opt("duration") : null;
+        if (rawDuration == null && spec != null) rawDuration = spec.opt("duration");
+        long duration = PydrudTheme.durationMs(rawDuration);
         long delay = (long) timing.optDouble("delay", 0);
         android.view.ViewPropertyAnimator animator = view.animate()
             .setDuration(duration).setStartDelay(delay)

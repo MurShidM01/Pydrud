@@ -100,6 +100,21 @@ public class MaterialViews {
             case "ScaleIn":
             case "AlertDialog":
             case "ModalBottomSheet":
+            // Material 3 components
+            case "Snackbar":
+            case "DatePicker":
+            case "DateRangePicker":
+            case "TimePicker":
+            case "StandardBottomSheet":
+            case "SideSheet":
+            case "FullScreenDialog":
+            case "BottomAppBar":
+            case "FABMenu":
+            case "SearchView":
+            case "ButtonGroup":
+            case "SplitButton":
+            case "LoadingIndicator":
+            case "Toolbar":
                 return true;
             default:
                 return false;
@@ -111,6 +126,7 @@ public class MaterialViews {
         JSONObject props = json.optJSONObject("props");
         if (props == null) props = new JSONObject();
         final String key = json.optString("key", "");
+        lastUnhandledType = null;
         try {
             switch (type) {
                 case "ListTile":            return createListTile(key, props);
@@ -136,6 +152,21 @@ public class MaterialViews {
                 case "AnimatedSwitcher":    return createAnimatedSwitcher(key, props);
                 case "AlertDialog":
                 case "ModalBottomSheet":    return createOverlay(key, props, type);
+                // Material 3 components added in 2.x.
+                case "Snackbar":            return createSnackbar(key, props);
+                case "DatePicker":          return createDatePicker(key, props);
+                case "DateRangePicker":     return createDateRangePicker(key, props);
+                case "TimePicker":          return createTimePicker(key, props);
+                case "StandardBottomSheet": return createStandardBottomSheet(key, props);
+                case "SideSheet":           return createSideSheet(key, props);
+                case "FullScreenDialog":    return createFullScreenDialog(key, props);
+                case "BottomAppBar":        return createBottomAppBar(key, props);
+                case "FABMenu":             return createFABMenu(key, props);
+                case "SearchView":          return createSearchView(key, props);
+                case "ButtonGroup":         return createButtonGroup(key, props);
+                case "SplitButton":         return createSplitButton(key, props);
+                case "LoadingIndicator":    return createLoadingIndicator(props);
+                case "Toolbar":             return createToolbar(key, props);
                 default:
                     // Transparent wrappers: Drawer, Tooltip, gestures,
                     // animations and form containers are plain hosts whose
@@ -148,6 +179,28 @@ public class MaterialViews {
         }
     }
 
+    /**
+     * The last type that fell through to the transparent-wrapper path.
+     *
+     * <p>{@link #create} accepts any unknown type and hands back an empty
+     * container, which keeps older trees renderable but also means a typo or
+     * a missing factory silently renders nothing. {@link #createWrapper}
+     * records what it was asked for here and logs it, so the mistake shows up
+     * in logcat and in ``analyzer`` output instead of on an empty screen.
+     */
+    static String lastUnhandledType = null;
+
+    /** Types that are intentionally rendered as plain transparent hosts. */
+    private static final java.util.Set<String> KNOWN_WRAPPERS =
+        new java.util.HashSet<>(java.util.Arrays.asList(
+            "Drawer", "Tooltip", "Form", "FormField", "GestureDetector",
+            "AnimatedSwitcher", "AnimatedContainer", "PageView", "Hero",
+            "Opacity", "Transform", "ClipRect", "SafeArea", "Padding",
+            "Center", "Align", "SizedBox", "FractionallySizedBox",
+            "Viewport", "Scrollable", "Theme", "MediaQuery", "Builder",
+            "Material", "RepaintBoundary", "LayoutBuilder", "SliverPadding"
+        ));
+
     // ── lists ────────────────────────────────────────────────────────────
 
     private View createListTile(final String key, JSONObject p) {
@@ -158,8 +211,6 @@ public class MaterialViews {
         int vertical = dp(dense ? 8 : 12);
         int gutter = dp(PydrudTheme.cardPadding);
         row.setPaddingRelative(gutter, vertical, gutter, vertical);
-        row.setMinimumHeight(PydrudTheme.adaptive(
-            dense ? PydrudTheme.listTileHeight - 8 : PydrudTheme.listTileHeight + 8));
 
         float radius = dp(PydrudTheme.radiusCard * 0.75f);
         boolean selected = p.optBoolean("selected", false);
@@ -191,11 +242,21 @@ public class MaterialViews {
         labels.addView(title);
 
         String subtitle = p.optString("subtitle", "");
+        // M3 gives a list tile one height per line count, and all three are
+        // published tokens — a one-line tile is not 88dp tall just because a
+        // longer variant exists.
+        final boolean threeLine = p.optBoolean("threeLine", false);
+        int lines = subtitle.isEmpty() ? 1 : (threeLine ? 3 : 2);
+        float tileHeight = lines == 3 ? PydrudTheme.listTileHeightThreeLine
+                         : lines == 2 ? PydrudTheme.listTileHeightTwoLine
+                                      : PydrudTheme.listTileHeight;
+        if (dense) tileHeight = Math.max(PydrudTheme.listTileHeight - 8, tileHeight - 8);
+        row.setMinimumHeight(PydrudTheme.adaptive(tileHeight));
         if (!subtitle.isEmpty()) {
             TextView sub = new TextView(activity);
             sub.setText(subtitle);
             PydrudTheme.applyTextDefaults(sub, 13f, 400, PydrudTheme.onSurfaceVariant);
-            sub.setMaxLines(p.optBoolean("threeLine", false) ? 2 : 1);
+            sub.setMaxLines(threeLine ? 2 : 1);
             sub.setEllipsize(TextUtils.TruncateAt.END);
             LinearLayout.LayoutParams subLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -281,6 +342,9 @@ public class MaterialViews {
     private View createChip(final String key, JSONObject p) {
         Chip chip = new Chip(activity);
         chip.setText(p.optString("label", ""));
+        chip.setEnsureMinTouchTargetSize(false);
+        chip.setMinimumHeight(PydrudTheme.dp(PydrudTheme.chipHeight));
+        chip.setMinHeight(PydrudTheme.dp(PydrudTheme.chipHeight));
         chip.setCheckable("filter".equals(p.optString("variant", "assist")));
         chip.setChecked(p.optBoolean("selected", false));
         chip.setCloseIconVisible(p.optBoolean("deletable", false));
@@ -433,7 +497,7 @@ public class MaterialViews {
             button.setText(action.toUpperCase());
             button.setTextColor(color);
             button.setTypeface(null, Typeface.BOLD);
-            button.setPadding(dp(12), 0, 0, 0);
+            button.setPaddingRelative(dp(12), 0, 0, 0);
             button.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) {
                     if (events != null) events.dispatch("click", key, null);
@@ -461,7 +525,7 @@ public class MaterialViews {
         LinearLayout box = new LinearLayout(activity);
         box.setOrientation(LinearLayout.HORIZONTAL);
         box.setGravity(Gravity.CENTER_VERTICAL);
-        box.setPadding(dp(16), dp(6), dp(12), dp(6));
+        box.setPaddingRelative(dp(16), dp(6), dp(12), dp(6));
         box.setMinimumHeight(PydrudTheme.adaptive(PydrudTheme.inputHeight));
         box.setBackground(PydrudTheme.shape(PydrudTheme.surfaceVariant, dp(26),
             dp(1), PydrudTheme.alpha(PydrudTheme.outline, 0.9f)));
@@ -757,6 +821,14 @@ public class MaterialViews {
             }
             return column;
         }
+        // A known wrapper type draws nothing of its own; anything else is a
+        // factory we are missing, and says so loudly.
+        if (!KNOWN_WRAPPERS.contains(type)) {
+            lastUnhandledType = type;
+            Log.w(TAG, "no factory for widget type \"" + type
+                + "\" — falling back to a transparent container. "
+                + "Add a case in MaterialViews.create().");
+        }
         return new FrameLayout(activity);
     }
 
@@ -840,6 +912,8 @@ public class MaterialViews {
 
             @Override public void onViewAttachedToWindow(View v) {
                 if (dialog != null) return;
+                // Only these two types reach createOverlay; anything else
+                // with a dialog needs its own factory.
                 dialog = "ModalBottomSheet".equals(type)
                     ? buildBottomSheet(key, p)
                     : buildAlertDialog(key, p);
@@ -866,6 +940,11 @@ public class MaterialViews {
     private android.app.Dialog buildAlertDialog(final String key, JSONObject p) {
         com.google.android.material.dialog.MaterialAlertDialogBuilder builder =
             new com.google.android.material.dialog.MaterialAlertDialogBuilder(activity);
+        // The dialog surface takes its radius and elevation from the tokens, so
+        // a theme retunes every dialog at once instead of each call site
+        // carrying its own literal.
+        final android.graphics.drawable.Drawable dialogSurface = PydrudTheme.shape(
+            PydrudTheme.surfaceContainerHigh, PydrudTheme.dp(PydrudTheme.radiusDialog));
         String title = p.optString("title", "");
         String message = p.optString("message", "");
         if (!title.isEmpty()) builder.setTitle(title);
@@ -897,12 +976,29 @@ public class MaterialViews {
             builder.setPositiveButton(a != null ? a.optString("label", "") : "",
                 (d, w) -> fireAction(key, a != null ? a.optString("value", "") : ""));
         }
-        return builder.create();
+        final android.app.Dialog dialog = builder.create();
+        dialog.setOnShowListener(d -> {
+            android.view.Window w = dialog.getWindow();
+            if (w == null) return;
+            w.setBackgroundDrawable(dialogSurface);
+            PydrudTheme.elevate(w.getDecorView(), PydrudTheme.elevationDialog);
+        });
+        return dialog;
     }
 
     private android.app.Dialog buildBottomSheet(final String key, JSONObject p) {
         final com.google.android.material.bottomsheet.BottomSheetDialog dialog =
             new com.google.android.material.bottomsheet.BottomSheetDialog(activity);
+        dialog.setOnShowListener(d -> {
+            android.view.View sheet = dialog.findViewById(
+                com.google.android.material.R.id.design_bottom_sheet);
+            if (sheet != null) {
+                sheet.setBackground(PydrudTheme.topRoundedShape(
+                    PydrudTheme.surfaceContainerLow,
+                    PydrudTheme.dp(PydrudTheme.radiusSheet)));
+                PydrudTheme.elevate(sheet, PydrudTheme.elevationSheet);
+            }
+        });
         boolean dismissible = p.optBoolean("dismissible", true);
         dialog.setCancelable(dismissible);
         dialog.setCanceledOnTouchOutside(dismissible);
@@ -1230,5 +1326,844 @@ public class MaterialViews {
             }
             return PydrudTheme.primary;
         }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Material 3 component factories
+    // ══════════════════════════════════════════════════════════════════════
+
+    /** Snackbar — transient bottom message with optional action. */
+    private View createSnackbar(String key, JSONObject props) {
+        LinearLayout row = new LinearLayout(activity);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        int pad = PydrudTheme.dp(12);
+        row.setPadding(pad, pad, pad, pad);
+        row.setBackground(PydrudTheme.shape(
+            PydrudTheme.inverseSurface,
+            PydrudTheme.dp(PydrudTheme.radiusSnackbar)));
+
+        String message = props.optString("message", "");
+        TextView tv = new TextView(activity);
+        tv.setText(message);
+        tv.setTextColor(PydrudTheme.inverseOnSurface);
+        PydrudTheme.applyTextDefaults(tv, 14, 400, PydrudTheme.inverseOnSurface);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        row.addView(tv, lp);
+
+        String action = props.optString("action", "");
+        if (!action.isEmpty()) {
+            TextView btn = new TextView(activity);
+            btn.setText(action);
+            btn.setTextColor(PydrudTheme.primary);
+            PydrudTheme.applyTextDefaults(btn, 14, 500, PydrudTheme.primary);
+            btn.setPaddingRelative(PydrudTheme.dp(8), 0, 0, 0);
+            btn.setClickable(true);
+            btn.setOnClickListener(v -> {
+                if (events != null) events.dispatch("action", key, null);
+            });
+            row.addView(btn);
+        }
+        return row;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Material 3 pickers — real MaterialDatePicker / MaterialTimePicker
+    // ══════════════════════════════════════════════════════════════════════
+    //
+    // These used to render a placeholder label. They now open the official
+    // Material Components dialogs, which is what gives Pydrud a real
+    // calendar grid with month/year navigation and a real clock dial with
+    // keyboard toggle — both themed by the host Theme.Material3.xxx parent
+    // so they pick up the scheme colours automatically.
+    //
+    // The wrapper stays in the tree (so layout, patching and removal all
+    // behave normally) and owns the dialog's lifetime: attaching opens it,
+    // detaching dismisses it, and cancelling reports back to Python.
+
+    /** Shared host for any dialog-backed picker. */
+    private View pickerHost(final String key, final String kind, final JSONObject p) {
+        final FrameLayout host = new FrameLayout(activity);
+        host.setMinimumWidth(0);
+        host.setMinimumHeight(0);
+        host.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            android.app.Dialog dialog;
+            boolean selfClosing;
+
+            @Override public void onViewAttachedToWindow(View v) {
+                if (dialog != null) return;
+                dialog = "time".equals(kind)
+                    ? buildMaterialTimePicker(key, p)
+                    : buildMaterialDatePicker(key, p);
+                if (dialog == null) return;
+                dialog.setOnDismissListener(d -> {
+                    dialog = null;
+                    if (!selfClosing) {
+                        JSONObject data = new JSONObject();
+                        try { data.put("dismissed", true); } catch (Exception ignored) {}
+                        if (events != null) events.dispatch("cancel", key, data);
+                    }
+                });
+                dialog.show();
+            }
+
+            @Override public void onViewDetachedFromWindow(View v) {
+                if (dialog == null) return;
+                selfClosing = true;
+                dialog.dismiss();
+                selfClosing = false;
+                dialog = null;
+            }
+        });
+        return host;
+    }
+
+    /** Material date picker. */
+    private View createDatePicker(String key, JSONObject p) {
+        return pickerHost(key, "date", p);
+    }
+
+    /** Material date *range* picker — two-month grid with a start/end span. */
+    private View createDateRangePicker(String key, JSONObject p) {
+        JSONObject rangeProps = p;
+        try {
+            rangeProps = new JSONObject(p.toString());
+            rangeProps.put("range", true);
+        } catch (Exception ignored) {}
+        return pickerHost(key, "date", rangeProps);
+    }
+
+    /** Material time picker with the M3 clock dial. */
+    private View createTimePicker(String key, JSONObject p) {
+        return pickerHost(key, "time", p);
+    }
+
+    private android.app.Dialog buildMaterialDatePicker(final String key, JSONObject p) {
+        try {
+            boolean range = p.optBoolean("range", false);
+            com.google.android.material.datepicker.MaterialDatePicker.Builder<?> builder =
+                range
+                    ? com.google.android.material.datepicker.MaterialDatePicker
+                        .dateRangePicker()
+                    : com.google.android.material.datepicker.MaterialDatePicker
+                        .datePicker();
+
+            String title = p.optString("title", "");
+            if (!title.isEmpty()) builder.setTitleText(title);
+
+            // MaterialDatePicker ships a calendar grid; M3's "input" mode is
+            // the same dialog with the text-entry toggle surfaced.
+            if ("input".equals(p.optString("mode", "calendar"))) {
+                builder.setInputMode(
+                    com.google.android.material.datepicker.MaterialDatePicker.INPUT_MODE);
+            }
+
+            long today = com.google.android.material.datepicker.MaterialDatePicker
+                .todayInUtcMilliseconds();
+            long selection = p.optLong("selection", today);
+            builder.setSelection(range ? new androidx.core.util.Pair<>(
+                    p.optLong("start", selection),
+                    p.optLong("end", selection))
+                : selection);
+
+            if (p.optBoolean("dismissible", true)) {
+                builder.setCancelable(true);
+            } else {
+                // A non-dismissible picker keeps only its confirm button.
+                builder.setCancelable(false);
+                builder.setNegativeButtonText(null);
+            }
+
+            final com.google.android.material.datepicker.MaterialDatePicker<?> picker =
+                builder.build();
+
+            picker.addOnPositiveButtonClickListener(sel -> {
+                if (events == null) return;
+                JSONObject data = new JSONObject();
+                try {
+                    if (sel instanceof androidx.core.util.Pair) {
+                        androidx.core.util.Pair<?, ?> span =
+                            (androidx.core.util.Pair<?, ?>) sel;
+                        data.put("start", ((Number) span.first).longValue());
+                        data.put("end", ((Number) span.second).longValue());
+                        data.put("days", ((Number) span.first).longValue()
+                            != ((Number) span.second).longValue());
+                    } else {
+                        data.put("value", ((Number) sel).longValue());
+                    }
+                    data.put("confirmed", true);
+                } catch (Exception ignored) {}
+                events.dispatch("change", key, data);
+            });
+            picker.addOnNegativeButtonClickListener(v -> {
+                if (events != null) events.dispatch("cancel", key, null);
+            });
+            return picker;
+        } catch (Throwable t) {
+            // Never take the app down: fall back to a plain system dialog.
+            Log.e(TAG, "MaterialDatePicker unavailable, using fallback", t);
+            return buildFallbackDateDialog(key, p);
+        }
+    }
+
+    private android.app.Dialog buildMaterialTimePicker(final String key, JSONObject p) {
+        try {
+            com.google.android.material.timepicker.MaterialTimePicker.Builder builder =
+                new com.google.android.material.timepicker.MaterialTimePicker.Builder()
+                    .setTimeFormat(p.optString("format", "24h").equals("12h")
+                        ? android.text.format.DateFormat.is24HourFormat(activity)
+                            ? com.google.android.material.timepicker.TimeFormat.CLOCK_24H
+                            : com.google.android.material.timepicker.TimeFormat.CLOCK_12H
+                        : com.google.android.material.timepicker.TimeFormat.CLOCK_24H);
+            builder.setHour(p.optInt("hour", 0));
+            builder.setMinute(p.optInt("minute", 0));
+            String title = p.optString("title", "");
+            if (!title.isEmpty()) builder.setTitleText(title);
+            // M3's two time-picker modes: the clock dial, or the keyboard.
+            if ("input".equals(p.optString("mode", "dial"))) {
+                builder.setInputMode(
+                    com.google.android.material.timepicker.MaterialTimePicker.INPUT_MODE_KEYBOARD);
+            }
+            if (!p.optBoolean("dismissible", true)) {
+                builder.setCancelable(false);
+            } else {
+                builder.setCancelable(true);
+            }
+
+            final com.google.android.material.timepicker.MaterialTimePicker picker =
+                builder.build();
+            picker.addOnPositiveButtonClickListener(v -> {
+                if (events == null) return;
+                JSONObject data = new JSONObject();
+                try {
+                    data.put("hour", picker.getHour());
+                    data.put("minute", picker.getMinute());
+                    data.put("confirmed", true);
+                } catch (Exception ignored) {}
+                events.dispatch("change", key, data);
+            });
+            picker.addOnNegativeButtonClickListener(v -> {
+                if (events != null) events.dispatch("cancel", key, null);
+            });
+            return picker;
+        } catch (Throwable t) {
+            Log.e(TAG, "MaterialTimePicker unavailable, using fallback", t);
+            return buildFallbackTimeDialog(key, p);
+        }
+    }
+
+    /** Last-resort date entry so the component still works without Material. */
+    private android.app.Dialog buildFallbackDateDialog(final String key, JSONObject p) {
+        java.util.Calendar cal = java.util.Calendar.getInstance();
+        android.app.DatePickerDialog dialog = new android.app.DatePickerDialog(
+            activity, (view, year, month, day) -> {
+                if (events == null) return;
+                JSONObject data = new JSONObject();
+                try {
+                    java.util.Calendar chosen = java.util.Calendar.getInstance();
+                    chosen.set(year, month, day);
+                    data.put("value", chosen.getTimeInMillis());
+                    data.put("year", year);
+                    data.put("month", month + 1);
+                    data.put("day", day);
+                    data.put("confirmed", true);
+                } catch (Exception ignored) {}
+                events.dispatch("change", key, data);
+            }, cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH),
+            cal.get(java.util.Calendar.DAY_OF_MONTH));
+        dialog.setOnCancelListener(d -> {
+            if (events != null) events.dispatch("cancel", key, null);
+        });
+        return dialog;
+    }
+
+    /** Last-resort time entry. */
+    private android.app.Dialog buildFallbackTimeDialog(final String key, JSONObject p) {
+        android.app.TimePickerDialog dialog = new android.app.TimePickerDialog(
+            activity, (view, hour, minute) -> {
+                if (events == null) return;
+                JSONObject data = new JSONObject();
+                try {
+                    data.put("hour", hour);
+                    data.put("minute", minute);
+                    data.put("confirmed", true);
+                } catch (Exception ignored) {}
+                events.dispatch("change", key, data);
+            }, p.optInt("hour", 0), p.optInt("minute", 0),
+            android.text.format.DateFormat.is24HourFormat(activity));
+        dialog.setOnCancelListener(d -> {
+            if (events != null) events.dispatch("cancel", key, null);
+        });
+        return dialog;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Connected button group, split button and docked toolbar
+    // ══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Material 3 connected button group.
+     *
+     * <p>The segments share one pill silhouette: the first keeps its outer
+     * start corners, the last its outer end corners, and everything in
+     * between is squared off. That connected profile is what makes an M3
+     * button group read as a single control rather than a row of separate
+     * buttons. Selection is dispatch-driven: tapping a segment reports its
+     * index and the group redraws the selected pill.
+     */
+    private View createButtonGroup(final String key, JSONObject p) {
+        final float radius = PydrudTheme.dp(PydrudTheme.radiusButton);
+        final int dividerColor = PydrudTheme.alpha(PydrudTheme.outline, 0.55f);
+        final boolean vertical =
+            "vertical".equals(p.optString("orientation", "horizontal"));
+        final int selected = p.optInt("selected", 0);
+
+        LinearLayout group = new LinearLayout(activity) {
+            private boolean styling = false;
+            private int current = selected;
+
+            private void applySegmentShapes() {
+                if (styling) return;
+                styling = true;
+                try {
+                    int n = getChildCount();
+                    for (int i = 0; i < n; i++) {
+                        View child = getChildAt(i);
+                        if (child instanceof View
+                            && child.getTag() != null
+                            && "pydrud-divider".equals(child.getTag())) {
+                            continue;
+                        }
+                        LayoutParams lp = (LayoutParams) child.getLayoutParams();
+                        lp.topMargin = 0;
+                        lp.bottomMargin = 0;
+                        boolean first = i == 0;
+                        boolean last = i == n - 1;
+                        float[] corners = vertical
+                            ? new float[]{
+                                first ? radius : 0f, first ? radius : 0f,
+                                first ? radius : 0f, first ? radius : 0f,
+                                last ? radius : 0f, last ? radius : 0f,
+                                last ? radius : 0f, last ? radius : 0f}
+                            : new float[]{
+                                first ? radius : 0f, first ? radius : 0f,
+                                last ? radius : 0f, last ? radius : 0f,
+                                last ? radius : 0f, last ? radius : 0f,
+                                first ? radius : 0f, first ? radius : 0f};
+                        GradientDrawable bg = new GradientDrawable();
+                        bg.setShape(GradientDrawable.RECTANGLE);
+                        bg.setCornerRadii(corners);
+                        bg.setColor(i == current
+                            ? PydrudTheme.secondaryContainer
+                            : PydrudTheme.surfaceContainerLow);
+                        bg.setStroke(Math.max(1, PydrudTheme.dp(PydrudTheme.dividerThickness)),
+                            i == current ? PydrudTheme.primary : PydrudTheme.outlineVariant);
+                        child.setBackground(bg);
+                        child.setClickable(true);
+                        final int index = i;
+                        child.setOnClickListener(v -> {
+                            current = index;
+                            applySegmentShapes();
+                            if (events != null) {
+                                JSONObject data = new JSONObject();
+                                try { data.put("index", index); } catch (Exception ignored) {}
+                                events.dispatch("change", key, data);
+                            }
+                        });
+                    }
+                } finally {
+                    styling = false;
+                }
+            }
+
+            private void addDividers() {
+                for (int i = getChildCount() - 1; i > 0; i--) {
+                    View child = getChildAt(i);
+                    if (child.getTag() != null
+                        && "pydrud-divider".equals(child.getTag())) continue;
+                    View divider = new View(getContext());
+                    divider.setTag("pydrud-divider");
+                    divider.setBackgroundColor(dividerColor);
+                    LayoutParams dlp = vertical
+                        ? new LayoutParams(LayoutParams.MATCH_PARENT,
+                                           Math.max(1, PydrudTheme.dp(PydrudTheme.dividerThickness)))
+                        : new LayoutParams(Math.max(1, PydrudTheme.dp(PydrudTheme.dividerThickness)),
+                                           LayoutParams.MATCH_PARENT);
+                    int inset = PydrudTheme.dp(vertical ? 0 : 10);
+                    if (vertical) {
+                        dlp.leftMargin = inset;
+                        dlp.rightMargin = inset;
+                    } else {
+                        dlp.topMargin = inset;
+                        dlp.bottomMargin = inset;
+                    }
+                    super.addView(divider, i, dlp);
+                }
+            }
+
+            @Override public void addView(View child, int index,
+                                          android.view.ViewGroup.LayoutParams params) {
+                super.addView(child, index, params);
+                if (styling) return;
+                addDividers();
+                applySegmentShapes();
+            }
+        };
+        group.setGravity(Gravity.CENTER);
+        group.setMinimumHeight(PydrudTheme.touchTarget());
+        // Children land after this returns; the override above catches them.
+        return group;
+    }
+
+    /**
+     * Material 3 split button: a leading action plus a trailing menu
+     * trigger, separated by a divider and sharing one pill outline.
+     */
+    private View createSplitButton(final String key, JSONObject p) {
+        LinearLayout row = new LinearLayout(activity);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+
+        float radius = PydrudTheme.dp(PydrudTheme.radiusButton);
+        String variant = p.optString("variant", "filled");
+        int accent = PydrudTheme.parse(p.optString("bg", ""), PydrudTheme.primary);
+        int fill = accent;
+        int label = PydrudTheme.onColorFor(accent);
+        if ("tonal".equals(variant)) {
+            fill = PydrudTheme.dark
+                ? PydrudTheme.blend(accent, PydrudTheme.surface, 0.72f)
+                : PydrudTheme.blend(accent, 0xFFFFFFFF, 0.86f);
+            label = PydrudTheme.dark
+                ? PydrudTheme.lighten(accent, 0.45f)
+                : PydrudTheme.darken(accent, 0.35f);
+        } else if ("outlined".equals(variant)) {
+            fill = Color.TRANSPARENT;
+            label = accent;
+        }
+
+        row.setBackground(fill == Color.TRANSPARENT
+            ? PydrudTheme.outlineBackground(
+                PydrudTheme.alpha(accent, 0.45f), radius,
+                PydrudTheme.dp(PydrudTheme.borderWidth * 1.4f),
+                PydrudTheme.alpha(accent, PydrudTheme.rippleOpacity))
+            : PydrudTheme.buttonBackground(fill, radius, true));
+        row.setMinimumHeight(PydrudTheme.adaptive(PydrudTheme.buttonHeightMd));
+
+        String text = p.optString("label", "");
+        if (!text.isEmpty()) {
+            TextView primary = new TextView(activity);
+            primary.setText(text);
+            primary.setGravity(Gravity.CENTER_VERTICAL);
+            primary.setPaddingRelative(PydrudTheme.dp(20), 0, PydrudTheme.dp(12), 0);
+            PydrudTheme.applyTextDefaults(primary, PydrudTheme.textBody, 600, label);
+            String icon = p.optString("icon", "");
+            if (!icon.isEmpty()) {
+                primary.setCompoundDrawablesRelativeWithIntrinsicBounds(
+                    factory.icon(icon, label, PydrudTheme.dp(18)), null, null, null);
+                primary.setCompoundDrawablePadding(PydrudTheme.dp(8));
+            }
+            primary.setClickable(true);
+            primary.setOnClickListener(v -> {
+                if (events != null) events.dispatch("click", key, null);
+            });
+            row.addView(primary, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.MATCH_PARENT));
+        }
+
+        View divider = new View(activity);
+        divider.setBackgroundColor(PydrudTheme.alpha(label, 0.28f));
+        LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
+            Math.max(1, PydrudTheme.dp(PydrudTheme.dividerThickness)),
+            LinearLayout.LayoutParams.MATCH_PARENT);
+        int inset = PydrudTheme.dp(8);
+        dlp.topMargin = inset;
+        dlp.bottomMargin = inset;
+        row.addView(divider, dlp);
+
+        ImageView arrow = new ImageView(activity);
+        arrow.setImageDrawable(factory.icon(
+            p.optString("menuIcon", "arrow-drop-down"), label, PydrudTheme.dp(22)));
+        arrow.setPadding(PydrudTheme.dp(12), 0, PydrudTheme.dp(12), 0);
+        arrow.setClickable(true);
+        arrow.setContentDescription(p.optBoolean("semantics", false)
+            ? "More actions" : "More actions");
+        row.addView(arrow, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.MATCH_PARENT));
+
+        // The trailing half opens the related-actions menu.
+        JSONArray items = p.optJSONArray("menuItems");
+        final JSONArray menuItems = items == null ? new JSONArray() : items;
+        arrow.setOnClickListener(v -> {
+            if (menuItems.length() == 0) {
+                // No menu declared — report the tap so Python can decide.
+                if (events != null) events.dispatch("menu", key, null);
+                return;
+            }
+            androidx.appcompat.widget.PopupMenu menu =
+                new androidx.appcompat.widget.PopupMenu(activity, v);
+            for (int i = 0; i < menuItems.length(); i++) {
+                JSONObject item = menuItems.optJSONObject(i);
+                String itemLabel = item == null ? "" : item.optString("label", "");
+                menu.getMenu().add(android.view.Menu.NONE, i, i, itemLabel);
+            }
+            menu.setOnMenuItemClickListener(item -> {
+                if (events == null) return true;
+                JSONObject data = new JSONObject();
+                try {
+                    JSONObject src = menuItems.optJSONObject(item.getItemId());
+                    data.put("index", item.getItemId());
+                    data.put("value", src == null ? "" : src.optString("label", ""));
+                    if (src != null && src.has("value")) {
+                        data.put("value", src.optString("value", ""));
+                    }
+                } catch (Exception ignored) {}
+                events.dispatch("select", key, data);
+                return true;
+            });
+            menu.show();
+        });
+
+        return row;
+    }
+
+    /**
+     * Material 3 docked toolbar — a pill-shaped surface that carries a
+     * title plus frequently used actions.
+     *
+     * <p>``variant`` is ``small`` / ``medium`` / ``large`` to match the M3
+     * toolbar sizes; medium and large reserve extra height for a headline.
+     * The action widgets arrive as children, so they are pushed to the end
+     * of the row by giving the title the remaining weight.
+     */
+    private View createToolbar(String key, JSONObject p) {
+        LinearLayout bar = new LinearLayout(activity);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+
+        String variant = p.optString("variant", "small");
+        boolean large = "large".equals(variant);
+        boolean medium = "medium".equals(variant);
+
+        int bg = PydrudTheme.parse(p.optString("bg", ""), PydrudTheme.surfaceContainer);
+        int fg = PydrudTheme.onSurface;
+
+        float radius = PydrudTheme.dp(PydrudTheme.radiusToolbar);
+        bar.setBackground(PydrudTheme.shape(bg, radius));
+        bar.setPadding(PydrudTheme.dp(6), PydrudTheme.dp(6),
+                       PydrudTheme.dp(6), PydrudTheme.dp(6));
+        float height = PydrudTheme.toolbarHeight * (large ? 1.6f : medium ? 1.3f : 1f);
+        bar.setMinimumHeight(PydrudTheme.adaptive(height));
+        PydrudTheme.elevate(bar, PydrudTheme.elevationCard);
+        PydrudTheme.addRipple(bar, PydrudTheme.alpha(fg, PydrudTheme.rippleOpacity),
+            radius);
+
+        String title = p.optString("title", "");
+        if (!title.isEmpty()) {
+            TextView tv = new TextView(activity);
+            tv.setText(title);
+            tv.setMaxLines(1);
+            tv.setEllipsize(TextUtils.TruncateAt.END);
+            PydrudTheme.applyTextDefaults(tv,
+                large ? PydrudTheme.textHeadline : PydrudTheme.textLabel,
+                large ? 400 : 600, fg);
+            tv.setPaddingRelative(PydrudTheme.dp(12), 0, PydrudTheme.dp(8), 0);
+            bar.addView(tv, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        }
+        return bar;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Sheets
+    // ══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Material 3 standard (non-modal) bottom sheet — a persistent panel
+     * anchored to the bottom of its parent, with the spec's top-only
+     * rounding, container colour and drag handle.
+     */
+    private View createStandardBottomSheet(String key, JSONObject p) {
+        LinearLayout sheet = new LinearLayout(activity);
+        sheet.setOrientation(LinearLayout.VERTICAL);
+        int bg = PydrudTheme.parse(p.optString("bg", ""), PydrudTheme.surfaceContainerLow);
+        sheet.setBackground(PydrudTheme.topRoundedShape(
+            bg, PydrudTheme.dp(PydrudTheme.radiusSheet)));
+        PydrudTheme.elevate(sheet, PydrudTheme.elevationSheet);
+
+        if (p.optBoolean("dragHandle", true)) {
+            View handle = new View(activity);
+            handle.setBackground(PydrudTheme.shape(
+                PydrudTheme.alpha(PydrudTheme.onSurfaceVariant, 0.4f),
+                PydrudTheme.dp(2)));
+            LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(
+                PydrudTheme.dp(32), PydrudTheme.dp(4));
+            hlp.gravity = Gravity.CENTER_HORIZONTAL;
+            hlp.topMargin = PydrudTheme.dp(8);
+            hlp.bottomMargin = PydrudTheme.dp(4);
+            sheet.addView(handle, hlp);
+        }
+        sheet.setMinimumHeight(PydrudTheme.dp(96));
+        return sheet;
+    }
+
+    /**
+     * Material 3 side sheet — a panel that slides in from the start/end
+     * edge with the spec's single-sided rounding.
+     */
+    private View createSideSheet(String key, JSONObject p) {
+        LinearLayout sheet = new LinearLayout(activity);
+        sheet.setOrientation(LinearLayout.VERTICAL);
+        boolean end = !"start".equals(p.optString("side", "end"));
+        int bg = PydrudTheme.parse(p.optString("bg", ""), PydrudTheme.surfaceContainerLow);
+        float radius = PydrudTheme.dp(PydrudTheme.radiusSheet);
+        sheet.setBackground(PydrudTheme.sideRoundedShape(bg, radius, end));
+        PydrudTheme.elevate(sheet, PydrudTheme.elevationSheet);
+        int width = (int) p.optDouble("width", PydrudTheme.sideSheetWidth);
+        sheet.setMinimumWidth(PydrudTheme.adaptive(width));
+        sheet.setPadding(PydrudTheme.dp(16), PydrudTheme.dp(16),
+                         PydrudTheme.dp(16), PydrudTheme.dp(16));
+
+        String title = p.optString("title", "");
+        if (!title.isEmpty()) {
+            TextView tv = new TextView(activity);
+            tv.setText(title);
+            tv.setMaxLines(1);
+            tv.setEllipsize(TextUtils.TruncateAt.END);
+            PydrudTheme.applyTextDefaults(tv, PydrudTheme.textTitle, 400,
+                PydrudTheme.onSurfaceVariant);
+            tv.setPadding(PydrudTheme.dp(4), PydrudTheme.dp(4),
+                          PydrudTheme.dp(4), PydrudTheme.dp(12));
+            sheet.addView(tv);
+        }
+        return sheet;
+    }
+
+    /**
+     * Material 3 full-screen dialog — a dialog that owns the whole window,
+     * headed by an M3 top app bar with a close affordance.
+     */
+    private View createFullScreenDialog(String key, JSONObject p) {
+        final FrameLayout host = new FrameLayout(activity);
+        host.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            android.app.Dialog dialog;
+            boolean selfClosing;
+
+            @Override public void onViewAttachedToWindow(View v) {
+                if (dialog != null) return;
+                dialog = buildFullScreenDialog(key, p);
+                dialog.setOnDismissListener(d -> {
+                    dialog = null;
+                    if (!selfClosing && events != null) {
+                        events.dispatch("dismiss", key, null);
+                    }
+                });
+                dialog.show();
+            }
+
+            @Override public void onViewDetachedFromWindow(View v) {
+                if (dialog == null) return;
+                selfClosing = true;
+                dialog.dismiss();
+                selfClosing = false;
+                dialog = null;
+            }
+        });
+        return host;
+    }
+
+    private android.app.Dialog buildFullScreenDialog(final String key, JSONObject p) {
+        android.app.Dialog dialog = new android.app.Dialog(
+            activity, com.google.android.material.R.style.Theme_Material3_DayNight_NoActionBar);
+        LinearLayout column = new LinearLayout(activity);
+        column.setOrientation(LinearLayout.VERTICAL);
+        column.setBackgroundColor(PydrudTheme.parse(
+            p.optString("bg", ""), PydrudTheme.surface));
+
+        // M3 top app bar: close icon, title, optional confirm label.
+        LinearLayout bar = new LinearLayout(activity);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setPaddingRelative(PydrudTheme.dp(4), PydrudTheme.dp(8),
+                               PydrudTheme.dp(8), PydrudTheme.dp(8));
+        bar.setMinimumHeight(PydrudTheme.dp(
+            "large".equals(p.optString("variant", "small")) ? PydrudTheme.appBarHeightLarge
+            : "medium".equals(p.optString("variant", "small")) ? PydrudTheme.appBarHeightMedium
+            : PydrudTheme.appBarHeight));
+        PydrudTheme.elevate(bar, PydrudTheme.elevationAppBar);
+
+        ImageView close = new ImageView(activity);
+        close.setImageDrawable(factory.icon(
+            p.optString("closeIcon", "close"), PydrudTheme.onSurface,
+            PydrudTheme.dp(24)));
+        close.setPadding(PydrudTheme.dp(12), PydrudTheme.dp(12),
+                         PydrudTheme.dp(12), PydrudTheme.dp(12));
+        close.setClickable(true);
+        final android.app.Dialog dialogRef = dialog;
+        close.setOnClickListener(v -> {
+            dialogRef.dismiss();
+            if (events != null) events.dispatch("cancel", key, null);
+        });
+        bar.addView(close);
+
+        String title = p.optString("title", "");
+        if (!title.isEmpty()) {
+            TextView tv = new TextView(activity);
+            tv.setText(title);
+            tv.setMaxLines(1);
+            tv.setEllipsize(TextUtils.TruncateAt.END);
+            PydrudTheme.applyTextDefaults(tv, PydrudTheme.textTitle, 400, PydrudTheme.onSurface);
+            tv.setPadding(PydrudTheme.dp(8), 0, PydrudTheme.dp(8), 0);
+            bar.addView(tv, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        } else {
+            bar.addView(new View(activity), new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        }
+
+        String confirm = p.optString("confirm", "");
+        if (!confirm.isEmpty()) {
+            TextView cta = new TextView(activity);
+            cta.setText(confirm);
+            cta.setPadding(PydrudTheme.dp(16), PydrudTheme.dp(10),
+                           PydrudTheme.dp(16), PydrudTheme.dp(10));
+            PydrudTheme.applyTextDefaults(cta, PydrudTheme.textLabel, 600, PydrudTheme.primary);
+            cta.setClickable(true);
+            cta.setOnClickListener(v -> {
+                if (events != null) events.dispatch("confirm", key, null);
+                dialogRef.dismiss();
+            });
+            bar.addView(cta);
+        }
+        column.addView(bar, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        View divider = new View(activity);
+        divider.setBackgroundColor(PydrudTheme.outlineVariant);
+        column.addView(divider, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, Math.max(1, PydrudTheme.dp(PydrudTheme.dividerThickness))));
+
+        // Content host — ViewFactory attaches the children here.
+        FrameLayout content = new FrameLayout(activity);
+        column.addView(content, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        dialog.setContentView(column);
+        android.view.Window window = dialog.getWindow();
+        if (window != null) {
+            window.setLayout(LinearLayout.LayoutParams.MATCH_PARENT,
+                             LinearLayout.LayoutParams.MATCH_PARENT);
+        }
+        dialog.setCancelable(p.optBoolean("dismissible", true));
+        return dialog;
+    }
+
+    /** Bottom app bar with optional FAB cutout. */
+    private View createBottomAppBar(String key, JSONObject props) {
+        LinearLayout bar = new LinearLayout(activity);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        int pad = PydrudTheme.dp(8);
+        bar.setPadding(pad, pad, pad, pad);
+        bar.setMinimumHeight(PydrudTheme.dp(PydrudTheme.navHeight));
+        String bg = props.optString("bg", "");
+        bar.setBackgroundColor(bg.isEmpty()
+            ? PydrudTheme.surface
+            : PydrudTheme.parse(bg, PydrudTheme.surface));
+        float elevation = (float) props.optDouble("elevation", 0);
+        if (elevation > 0) PydrudTheme.elevate(bar, elevation);
+        return bar;
+    }
+
+    /** FAB menu — expandable FAB with multiple actions. */
+    private View createFABMenu(String key, JSONObject props) {
+        FrameLayout wrapper = new FrameLayout(activity);
+        wrapper.setLayoutParams(new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT));
+        String icon = props.optString("icon", "plus");
+        View fab = createFAB(icon, key);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+            PydrudTheme.dp(PydrudTheme.fabSize),
+            PydrudTheme.dp(PydrudTheme.fabSize));
+        lp.gravity = Gravity.BOTTOM | Gravity.END;
+        lp.bottomMargin = PydrudTheme.dp(24);
+        lp.rightMargin = PydrudTheme.dp(24);
+        wrapper.addView(fab, lp);
+        return wrapper;
+    }
+
+    private View createFAB(String icon, String key) {
+        FrameLayout fab = new FrameLayout(activity);
+        fab.setBackground(PydrudTheme.ripple(
+            PydrudTheme.shape(PydrudTheme.primary, PydrudTheme.dp(PydrudTheme.radiusFab)),
+            PydrudTheme.rippleOn(PydrudTheme.primary),
+            PydrudTheme.dp(PydrudTheme.radiusFab)));
+        fab.setElevation(PydrudTheme.dp(PydrudTheme.elevationFab));
+        ImageView iv = new ImageView(activity);
+        iv.setImageDrawable(factory.icon(icon, PydrudTheme.onPrimary, 24));
+        int iconPad = PydrudTheme.dp(16);
+        fab.addView(iv, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT));
+        iv.setPadding(iconPad, iconPad, iconPad, iconPad);
+        fab.setOnClickListener(v -> {
+            if (events != null) events.dispatch("click", key, null);
+        });
+        return fab;
+    }
+
+    /** Search view — full-screen search experience. */
+    private View createSearchView(String key, JSONObject props) {
+        LinearLayout container = new LinearLayout(activity);
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.setBackgroundColor(PydrudTheme.surface);
+        int pad = PydrudTheme.dp(16);
+        container.setPadding(pad, pad, pad, pad);
+
+        // Search input
+        android.widget.EditText input = new android.widget.EditText(activity);
+        input.setHint(props.optString("hint", "Search"));
+        input.setBackground(PydrudTheme.inputBackground(
+            PydrudTheme.surfaceContainerHighest,
+            PydrudTheme.surfaceContainerHighest,
+            PydrudTheme.dp(PydrudTheme.radiusChip),
+            PydrudTheme.outline, PydrudTheme.primary,
+            PydrudTheme.dp(PydrudTheme.borderWidth)));
+        input.setPadding(PydrudTheme.dp(16), PydrudTheme.dp(12),
+                         PydrudTheme.dp(16), PydrudTheme.dp(12));
+        PydrudTheme.applyTextDefaults(input, 16, 400, PydrudTheme.onSurface);
+        container.addView(input, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT));
+        input.addTextChangedListener(new android.text.TextWatcher() {
+            public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+            public void onTextChanged(CharSequence s, int a, int b, int c) {}
+            public void afterTextChanged(android.text.Editable s) {
+                JSONObject data = new JSONObject();
+                try { data.put("value", s.toString()); } catch (Exception ignored) {}
+                if (events != null) events.dispatch("change", key, data);
+            }
+        });
+        return container;
+    }
+
+    /** Loading indicator — M3 Expressive waveform indicator. */
+    private View createLoadingIndicator(JSONObject props) {
+        ProgressBar pb = new ProgressBar(activity);
+        pb.setIndeterminate(true);
+        String color = props.optString("color", "");
+        if (!color.isEmpty()) {
+            pb.getIndeterminateDrawable().setColorFilter(
+                PydrudTheme.parse(color, PydrudTheme.primary),
+                android.graphics.PorterDuff.Mode.SRC_IN);
+        }
+        float size = (float) props.optDouble("size", 48);
+        pb.setLayoutParams(new FrameLayout.LayoutParams(
+            PydrudTheme.dp(size), PydrudTheme.dp(size)));
+        return pb;
     }
 }

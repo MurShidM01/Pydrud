@@ -6,6 +6,7 @@ All notable changes to Pydrud are documented here.
 
 | Version | Theme | Highlights |
 |---------|-------|------------|
+| [2.1.5](#215--2026-10-13) | **Material 3 Complete** | HCT colour system, 36 M3 colour roles, 12 new M3 components, RTL support, per-corner radius, exact M3 typography, tonal elevation, uncapped font scale; Android-only renderers, platform-neutral UI layer |
 | [2.1.4](#214--2026-10-09) | Per-ABI via flavors | Rebuilds `abi_splits` with a product flavor dimension (Chaquopy rejects `splits.abi`); `pydrud build` collects the flavor APKs |
 | [2.1.3](#213--2026-10-09) | Split-build fix | `pydrud build` discovers per-ABI APKs, prints them all and returns the universal one; `--output` copies every split |
 | [2.1.2](#212--2026-10-09) | Per-ABI builds | Opt-in `abi_splits` emits one APK per ABI plus a universal APK for smaller downloads |
@@ -24,6 +25,227 @@ All notable changes to Pydrud are documented here.
 | [1.2.0](#120--the-full-android-toolkit) | Full Android toolkit | Material components, camera, push, background work |
 | [1.1.0](#110) / [1.0.1](#101) | Foundation | Stack/Positioned, ListView, GridView, Card, system UI |
 | [1.0.0](#100) | First release | Declarative Python → native Android over a TCP bridge |
+
+---
+
+## [2.1.5] — 2026-10-13
+
+**Material 3 Complete — the largest design-system upgrade in Pydrud history.**
+
+This release brings Pydrud from ~55% M3 conformance to ~90%+ by implementing
+the full HCT colour system, 30+ semantic colour roles, 12 new M3 components,
+RTL support, per-corner radius, exact M3 typography baseline, tonal elevation,
+and uncapped font scaling.
+
+Android remains the only renderer Pydrud ships. The widget, theme and styling
+layers are already renderer-agnostic — a plain JSON node dict, a data-only
+renderer profile and capability negotiation — so the same UI code is ready for
+other platforms without any of them shipping yet.
+
+### Breaking changes
+
+- **Tokens**: `radius_chip` changed from 999 (pill) to 8 (M3 small). `radius_button` changed from 14 to 20. `radius_input` changed from 14 to 4. `radius_sheet` changed from 24 to 28. `radius_dialog` changed from 24 to 28. `app_bar_height` changed from 56 to 64. `nav_height` changed from 64 to 80. `input_height` changed from 52 to 56. `elevation_card` changed from 0 to 1. `elevation_button` changed from 1.5 to 1. `elevation_fab` changed from 6 to 3. `elevation_dialog` changed from 16 to 3.
+- **Typography**: Headline and title weights changed from 500/600 to M3 baseline 400/500. Line-heights and letter-spacing added to all 15 roles.
+- **Font scale**: The 1.2× cap on font scaling has been removed. Text now scales freely per user preference. Clamp layout density if needed.
+
+### Colour system (HCT)
+
+- **HCT colour space** (`pydrud.widgets.theme.hct`): Full implementation of Google's CAM16-based Hue-Chroma-Tone model. Pure Python, no dependencies.
+- **Tonal palettes**: `TonalPalette` generates tones 0–100 at fixed hue+chroma. Cached for performance.
+- **Core palette**: `CorePalette.of(seed)` generates all 6 M3 palettes (primary, secondary, tertiary, neutral, neutral-variant, error) from one seed colour.
+- **DynamicScheme**: Complete M3 scheme with all 49 colour roles, generated from tonal palettes. Supports light/dark and 5 scheme variants (tonal_spot, vibrant, expressive, neutral, monochrome).
+- **30+ colour roles**: primary, on_primary, primary_container, on_primary_container, secondary, on_secondary, secondary_container, on_secondary_container, tertiary, on_tertiary, tertiary_container, on_tertiary_container, error, on_error, error_container, on_error_container, surface, on_surface, surface_variant, on_surface_variant, outline, outline_variant, shadow, scrim, inverse_surface, inverse_on_surface, inverse_primary, surface_dim, surface_bright, surface_container_lowest, surface_container_low, surface_container, surface_container_high, surface_container_highest.
+- **ColorScheme.from_seed()** now uses HCT tonal palettes instead of sRGB mixing. White seed no longer produces 1:1 contrast pairs.
+- **Contrast check fix**: `Colors.meets_contrast()` now compares unrounded ratio (was rounding before threshold comparison).
+- **Scheme variants**: `ColorScheme.from_seed_variant(seed, variant="vibrant")` for tonal_spot, vibrant, expressive, neutral, monochrome.
+- **Fixed accents and surface tint are public roles.** The 12 tone-locked
+  `primary_fixed` / `primary_fixed_dim` / `on_primary_fixed` /
+  `on_primary_fixed_variant` (and the secondary and tertiary families) plus
+  `surface_tint` are now in `ColorScheme.ROLES`, on `Theme`, and in
+  `Theme.payload()`. They were generated but unreachable: a stylesheet could
+  not write `$primary_fixed` and the renderer never received them, so any
+  widget asking for one painted the placeholder default. `ColorScheme.ROLES`
+  is now 49 roles, matching the scheme exactly.
+
+### Theme payload contract fix
+
+- `Theme.payload()` now forwards ALL M3 colour roles to the native renderer, not just a subset. Previously `on_surface_variant` was read from the scheme but not defined in the scheme's ROLES.
+- `Theme.use()` correctly applies all roles from both DynamicScheme and legacy ColorScheme.
+- `Theme.apply()` accepts any named colour role as a keyword argument.
+
+### Typography
+
+- All 15 `TextTheme` roles now have exact M3 baseline weights, line-heights, and letter-spacing.
+- `FontStyle` gained `line_height` and `letter_spacing` parameters.
+- `headline_*` weight corrected from 500 to 400. `title_large` weight corrected from 500 to 400. `title_medium` and `title_small` weight corrected from 600 to 500.
+
+### Shape & styling
+
+- **Per-corner border radius**: `BorderRadius.only(top_left=4, top_right=4)` for M3 filled text fields, bottom sheets, etc. Serializes as `{topLeft, top_right, bottom_left, bottom_right}`.
+- **Shape class**: M3 shape categories (EXTRA_SMALL=4, SMALL=8, MEDIUM=12, LARGE=16, EXTRA_LARGE=28, FULL=999) plus component-specific defaults (BUTTON=20, CARD=12, DIALOG=28, etc.).
+- **RTL support**: `EdgeInsets` now accepts `start=` and `end=` parameters for text-direction-aware padding/margin.
+
+### Elevation
+
+- **M3 elevation levels**: L0=0dp, L1=1dp, L2=3dp, L3=6dp, L4=8dp, L5=12dp. Token inconsistency fixed (was DIALOG=12 vs elevation_dialog=16).
+- **Tonal elevation**: `tonal_elevation_0` through `tonal_elevation_5` tokens for primary-color tinting of elevated surfaces in dark mode.
+- Component elevations corrected to M3 spec.
+
+### Font scale
+
+- Removed the 1.2× font scale cap. Text now honours the full user font scale setting (up to 200% on Android 14+). This fixes an accessibility regression for low-vision users.
+
+### New components (12)
+
+| Component | Description |
+|-----------|-------------|
+| `Snackbar` | M3 transient message with action, duration, dismissible, two-line |
+| `DatePicker` | Calendar and input modes, date constraints |
+| `DateRangePicker` | Start/end date range selection |
+| `TimePicker` | Dial and input modes, 12/24-hour |
+| `StandardBottomSheet` | Persistent bottom sheet with drag handle |
+| `SideSheet` | Side-anchored sheet for medium+ breakpoints |
+| `FullScreenDialog` | Full-screen dialog for complex forms |
+| `BottomAppBar` | Bottom actions bar with FAB cutout |
+| `FABMenu` | FAB expanding to multiple actions |
+| `SearchView` | Full-screen search with suggestions/recent |
+| `ButtonGroup` | M3 Expressive button group |
+| `SplitButton` | Button paired with related menu |
+| `LoadingIndicator` | M3 Expressive waveform loading indicator |
+| `Toolbar` | Flexible toolbar (small/medium/large variants) |
+
+### Design tokens (new)
+
+- `radius_menu`, `radius_snackbar`, `radius_tooltip`
+- `app_bar_height_medium` (112), `app_bar_height_large` (152)
+- `list_tile_height_three_line` (88)
+- `chip_height` (32), `switch_width` (52), `switch_height` (32)
+- `checkbox_size` (18), `radio_size` (20)
+- `elevation_level_0` through `elevation_level_5`
+- `elevation_nav_bar`, `elevation_menu`
+- `tonal_elevation_0` through `tonal_elevation_5`
+- `duration_short_1` through `duration_extra_long_4` (16 M3 durations)
+- `easing_standard`, `easing_emphasized`, etc. (7 M3 easings)
+- `state_focus` (0.10), `state_dragged` (0.16)
+- `state_disabled_content` (0.38), `state_disabled_container` (0.12)
+
+### Every published token now changes the screen
+
+* **60 tokens were declared, loaded into the renderer and never read.** An
+  audit of all 127 published tokens against their readers found the tonal
+  elevation ladder, the disabled/pressed/dragged state alphas, the weight and
+  text-size anchors, the component sizes and the motion default all in that
+  state: a theme could retune them and nothing on the device moved. All are
+  wired up — `tonal_elevation_0..5` drive the surface tint ladder,
+  `state_pressed`/`state_dragged`/`state_disabled_*` drive real state layers,
+  `duration_normal` is the animator's default, and the component sizes and
+  elevations feed the components that own them.
+* **A `ListTile` was always 88 dp tall.** Material 3 publishes 56/72/88 for
+  the one-, two- and three-line tile; the line count now picks the step.
+* **Every hairline was pinned at 1 dp.** `divider_thickness` now feeds every
+  rule Java draws, from dividers to menu separators.
+* **`disabled: true` is a style key.** It applies the M3 disabled container
+  and content roles instead of an invented grey.
+
+### Motion — the spec's curves, and something that moves
+
+* **The easing tokens held platform keywords, not the spec's curves.**
+  `easing_standard` was `ease_in_out` and `easing_emphasized` was `overshoot`
+  — approximations that cannot express the M3 standard curve, which starts
+  fast and eases out steeply. All seven now hold the spec's cubic-béziers.
+* **Nothing read them.** `duration_normal` was the only motion token with a
+  consumer; a stylesheet could name `$duration_medium_2` and the shorthand
+  parser would split the substituted curve on its spaces and hand the renderer
+  `cubic-bezier(0.2,` — a curve it ignored — while the duration went missing
+  entirely. Both shorthands now split on top-level whitespace only, a duration
+  token expands with its unit (`300ms`), and the M3 step and curve names are
+  accepted directly (`transition: background medium-2 emphasized-decelerate`).
+* **One resolver, three vocabularies.** `PydrudTheme.easing()` resolves the M3
+  names through the `easing_*` tokens, raw CSS timing functions
+  (`cubic-bezier`, `linear()`, `steps(n)`) and the platform keywords, and
+  `PydrudTheme.durationMs()` resolves a step name, a number or a CSS time.
+  The styler, the animator and every component animation go through them, so a
+  curve or a duration cannot mean one thing in the framework and another in a
+  stylesheet.
+* **Python evaluates the same curves.** `CubicBezier` (Newton with a bisection
+  fallback, matching `PathInterpolator`) and the M3 names join the curve table,
+  so `Animation(curve="standard")` and an `AnimationController` tween follow
+  the tokens too. `Animation`'s duration default is now `duration_normal` and
+  its default curve is the M3 standard one.
+* **The framework's own animations read the tokens** instead of millisecond
+  literals: press feedback (`short_2`/`short_4` with the standard
+  accelerate/decelerate pair), layout transitions (`short_4`), entering views
+  (`medium_2` emphasized-decelerate), the drawer (`medium_2` in,
+  `medium_1` out) and the scrim fade (`medium_1`), image fade-in (`short_4`)
+  and swipe dismissal.
+* `tests/test_m3_motion.py` (29 tests, 82 subtests) pins the spec tables, the
+  curve evaluation, the shorthand vocabulary and every consumer.
+
+### Fixed — shadow and scrim are the spec's black, and both are used
+
+* **The two roles had drifted to a tinted grey** (`#33101828`, `#99101828`).
+  Material 3 defines both as `#000000`, and the scrim's *opacity* belongs to
+  the component that composites it, not to the colour — so the role is black
+  everywhere and the framework applies the spec's 32 % where it draws one.
+* **The renderer dropped both roles.** Python shipped `shadow` and `scrim` in
+  every theme payload and Java never read them, so a scheme's own shadow and
+  scrim never reached the device. Both are now loaded and applied.
+* **A modal drawer dims the page.** It previously slid over the content with
+  no scrim at all; it now composites the scrim role, closes when that layer is
+  tapped, and animates with the motion default. `Drawer(scrim=False)` keeps a
+  permanent drawer at full brightness.
+* `tests/test_token_liveness.py` renders the Java templates the way the device
+  would and requires every token to be read, to be a published pick-from scale,
+  or to be framework chrome with a written reason.
+
+### Fixed — colour scheme role coverage
+
+* **`ColorScheme.ROLES` now includes `on_primary_container`,
+  `on_secondary_container` and `on_tertiary_container`.** The three roles
+  existed as constants and were consumed by the Java theme but were never
+  copied from `DynamicScheme`, so `from_seed()` handed every consumer the
+  placeholder default.
+* **An unspecified colour role no longer defaults to `PRIMARY`.** A partially
+  specified `ColorScheme` used to paint every unspecified role saturated
+  indigo; each role now falls back to its own M3 default.
+* **`Theme.payload()` publishes all 49 roles** (33 → 36 → 49) to every renderer.
+
+### PSS — every declaration now reaches the screen
+
+* **`:hover` and `:focus` rules are applied on device.** PSS resolved them into
+  renderer sub-specs like `:active` does, but only `press` had a consumer, so a
+  `:hover` or `:focus` rule resolved cleanly, serialised cleanly, and then
+  tripped the "unhandled style key" path on the device and changed nothing —
+  even though the documentation promised they were applied. Both now install
+  the matching platform listener (Android gets hover from a mouse, trackpad,
+  stylus or TV remote, and focus from a keyboard, D-pad or accessibility
+  traversal); entering the state applies the sub-spec over the base style and
+  leaving it restores the base style. A view styled with `:focus` is made
+  focusable so traversal can reach it.
+* **State rules consume the M3 state-layer opacities.** `stateHover` (0.08)
+  and `stateFocus` (0.10) were published as tokens with nothing drawing them.
+  A state rule that sets no background of its own is now rendered as a
+  Material 3 state layer: the base fill blended toward the label colour at
+  that role's opacity.
+* **`transform-origin` is honoured.** The declaration was accepted, folded and
+  serialised, but the renderer never read it, so it did nothing. It now moves
+  the view's rotation/scale pivot, with keywords, percentages and pixel
+  lengths supported and re-applied on layout.
+* **A stylesheet can restyle a component again.** Widgets write their own
+  defaults into `style` as they initialise — a `Card` takes its surface colour
+  from the theme, a `Column` records its axis and spacing, a `SizedBox` its
+  size — and nothing recorded which values came from the widget and which came
+  from the caller. Since inline values win over PSS, those defaults *were* the
+  inline layer, so `Card { bg: … }` or `Column { spacing: 24 }` resolved
+  cleanly, serialised cleanly, and then lost to the widget's own default with
+  no warning at all. 22 widget types were affected, including every layout
+  container. The cascade is now the documented three layers: widget defaults
+  are weakest, then PSS, then values the caller passed as a keyword argument or
+  in `style={...}`.
+* **Widget defaults no longer clobber `style={...}`.** Constructors that
+  assigned unconditionally meant `Column(style={"spacing": 3})` reached the
+  renderer as `0` — the caller's own value, silently replaced by the argument
+  default before the widget was ever built.
 
 ---
 

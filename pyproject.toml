@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pydrud"
-version = "2.1.4"
-description = "A Flutter-inspired Python UI framework with a toolchain-free Pydash host preview and an optional Chaquopy Android APK target."
+version = "2.1.5"
+description = "A Material Design 3 UI framework for Python with a toolchain-free Pydash host preview, an optional Chaquopy Android APK target, and a renderer-neutral UI layer."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"

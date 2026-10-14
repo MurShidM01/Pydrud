@@ -44,6 +44,11 @@ _WIDGET_CLASSES = {
     "RefreshIndicator", "Stepper", "WebView", "VideoPlayer", "Chart",
     "PopupMenu", "DropdownMenu", "PopupMenuButton",
     "AlertDialog", "Dialog", "ModalBottomSheet",
+    # Material 3 components
+    "Snackbar", "DatePicker", "DateRangePicker", "TimePicker",
+    "StandardBottomSheet", "SideSheet", "FullScreenDialog",
+    "BottomAppBar", "FABMenu", "SearchView", "ButtonGroup",
+    "SplitButton", "LoadingIndicator", "Toolbar",
     # v1.2 — gestures, animation and forms
     "GestureDetector", "InkWell", "Dismissible", "Draggable",
     # v1.3 — painting, hardware, maps, rich text, big lists

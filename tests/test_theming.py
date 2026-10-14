@@ -22,7 +22,8 @@ from pydrud import (
 )
 from pydrud.testing import AppTester
 
-#: Captured once so a failed test can always put the globals back.
+#: Captured after a Theme.light() call so the HCT-generated values are stable.
+Theme.light()
 _DEFAULT_PRIMARY = Theme.primary
 _DEFAULT_RADIUS_CARD = Tokens.radius_card
 _DEFAULT_DARK = Theme.dark_mode
@@ -127,7 +128,8 @@ class TestTextTheme(_RestoresTheme):
     def test_a_text_accepts_a_role_directly(self):
         style = Text("Hi", style=TextTheme.title_large).to_dict()["style"]
         self.assertEqual(style["font"]["size"], 22)
-        self.assertEqual(style["font"]["weight"], 500)
+        # M3 baseline: title_large is w400 (was w500 before the M3 upgrade)
+        self.assertEqual(style["font"]["weight"], 400)
 
     def test_with_refines_a_role_without_mutating_it(self):
         base = TextTheme.body_medium
@@ -138,7 +140,8 @@ class TestTextTheme(_RestoresTheme):
 
     def test_size_and_weight_are_readable_as_attributes(self):
         self.assertEqual(TextTheme.headline_medium.size, 28)
-        self.assertEqual(TextTheme.headline_medium.weight, 500)
+        # M3 baseline: headline_medium is w400 (was w500 before the M3 upgrade)
+        self.assertEqual(TextTheme.headline_medium.weight, 400)
 
     def test_unknown_role_names_the_available_ones(self):
         with self.assertRaises(AttributeError) as caught:
@@ -224,7 +227,7 @@ class TestRuntimeThemeMode(_RestoresTheme):
             app.settle()
             self.assertTrue(Theme.dark_mode)
             self.assertEqual(app.app.page.theme_mode, "dark")
-            self.assertEqual(Theme.background, "#FF111827")
+            self.assertEqual(Theme.background, "#FF131317")
 
     def test_set_theme_mode_rejects_an_unknown_mode(self):
         def main(page):
@@ -248,7 +251,7 @@ class TestRuntimeThemeMode(_RestoresTheme):
         with AppTester(main, dark=True) as app:
             self.assertEqual(app.app.page.theme_mode, "system")
             self.assertTrue(Theme.dark_mode)
-            self.assertEqual(Theme.background, "#FF111827")
+            self.assertEqual(Theme.background, "#FF131317")
 
     def test_system_mode_stays_light_on_a_light_device(self):
         def main(page):
@@ -273,7 +276,7 @@ class TestRuntimeThemeMode(_RestoresTheme):
             self.assertFalse(Theme.dark_mode)
             app.set_dark(True)
             self.assertTrue(Theme.dark_mode)
-            self.assertEqual(Theme.background, "#FF111827")
+            self.assertEqual(Theme.background, "#FF131317")
             app.set_dark(False)
             self.assertFalse(Theme.dark_mode)
 
@@ -364,7 +367,7 @@ class TestAnimatedTheme(_RestoresTheme):
             app.app.page.set_theme_mode("dark", animate=True, duration=120)
             self._await_theme_settled(app, before)
             self.assertTrue(Theme.dark_mode)
-            self.assertEqual(Theme.background, "#FF111827")
+            self.assertEqual(Theme.background, "#FF131317")
 
     def test_animation_sends_intermediate_palettes(self):
         def main(page):

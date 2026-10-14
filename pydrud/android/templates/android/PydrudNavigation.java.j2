@@ -122,6 +122,9 @@ public final class PydrudNavigation {
         /** Apply a full or partial props object and rebuild what changed. */
         public void applyProps(JSONObject p) {
             if (p == null) return;
+            // A navigation bar is a level-0 M3 surface (a tinted background,
+            // no shadow); the token is honoured so a theme can raise it.
+            PydrudTheme.elevate(this, PydrudTheme.elevationNavBar);
             boolean structural = p.has("items");
             java.util.Iterator<String> keys = p.keys();
             while (keys.hasNext()) {
@@ -459,7 +462,7 @@ public final class PydrudNavigation {
             drawIndicator(canvas);
             super.dispatchDraw(canvas);
             if (topDivider) {
-                float h = Math.max(1f, PydrudTheme.dp(0.5f));
+                float h = Math.max(1f, PydrudTheme.dp(PydrudTheme.dividerThickness));
                 canvas.drawRect(getPaddingLeft(), getPaddingTop(),
                                 getWidth() - getPaddingRight(),
                                 getPaddingTop() + h, dividerPaint);

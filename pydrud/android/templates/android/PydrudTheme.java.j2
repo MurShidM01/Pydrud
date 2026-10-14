@@ -198,11 +198,32 @@ public final class PydrudTheme {
     public static int onSurfaceVariant   = 0xFF6B7280;
     public static int outline            = 0xFFE5E7EB;
     public static int outlineStrong      = 0xFFD1D5DB;
+    // Material 3 surface ladder + the container roles M3 components need.
+    public static int surfaceDim             = 0xFFDED8E1;
+    public static int surfaceBright          = 0xFFFFFBFE;
+    public static int surfaceContainerLowest = 0xFFFFFFFF;
+    public static int surfaceContainerLow    = 0xFFF7F2FA;
+    public static int surfaceContainer       = 0xFFF3EDF7;
+    public static int surfaceContainerHigh   = 0xFFECE6F0;
+    public static int surfaceContainerHighest= 0xFFE6E0E9;
+    public static int surfaceTint            = 0xFF6750A4;
+    public static int secondaryContainer     = 0xFFE8DEF8;
+    public static int onSecondaryContainer   = 0xFF1D192B;
+    public static int tertiary               = 0xFF7D5260;
+    public static int tertiaryContainer      = 0xFFFFD8E4;
+    public static int onTertiaryContainer    = 0xFF31111D;
+    public static int errorContainer         = 0xFFF9DEDC;
+    public static int onErrorContainer       = 0xFF410E0B;
+    public static int outlineVariant         = 0xFFCAC4D0;
+    public static int inverseSurface         = 0xFF313033;
+    public static int inverseOnSurface       = 0xFFF4EFF4;
+    public static int inversePrimary         = 0xFFD0BCFF;
     public static int error              = 0xFFEF4444;
     public static int onError            = 0xFFFFFFFF;
     public static int disabledBg         = 0xFFE9EAEE;
     public static int disabledFg         = 0xFFA1A7B3;
-    public static int shadow             = 0x33101828;
+    public static int shadow             = 0xFF000000;
+    public static int scrim              = 0xFF000000;
     public static boolean dark = false;
 
     private static boolean explicitMode = false;
@@ -251,6 +272,18 @@ public final class PydrudTheme {
         return String.format(java.util.Locale.US, "#%08X", color);
     }
 
+    /**
+     * A colour as the ``#AARRGGBB`` string the style dict speaks.
+     *
+     * The style pipeline is string-based end to end (Python resolves PSS to
+     * hex, {@code ViewStyler.parseColor} parses it back), so anything that
+     * synthesises a style value — a state layer, for instance — has to hand
+     * back the same spelling rather than a packed int.
+     */
+    public static String toHex(int color) {
+        return hex(color);
+    }
+
     /** Adopt a palette pushed from Python. Missing roles are derived. */
     public static void apply(JSONObject scheme) {
         if (scheme == null) return;
@@ -273,6 +306,39 @@ public final class PydrudTheme {
         if (scheme.has("primary_container")) {
             primaryContainer = color(scheme, "primary_container", primaryContainer);
         }
+
+        // Material 3's full role set. Every one of these is present in the
+        // payload Python pushes, so components can reach for the role the
+        // spec names instead of approximating it from another colour.
+        onPrimaryContainer     = color(scheme, "on_primary_container", onPrimaryContainer);
+        onSecondary            = color(scheme, "on_secondary", onSecondary);
+        secondaryContainer     = color(scheme, "secondary_container", secondaryContainer);
+        onSecondaryContainer   = color(scheme, "on_secondary_container", onSecondaryContainer);
+        tertiary               = color(scheme, "tertiary", tertiary);
+        tertiaryContainer      = color(scheme, "tertiary_container", tertiaryContainer);
+        onTertiaryContainer    = color(scheme, "on_tertiary_container", onTertiaryContainer);
+        onError                = color(scheme, "on_error", onError);
+        errorContainer         = color(scheme, "error_container", errorContainer);
+        onErrorContainer       = color(scheme, "on_error_container", onErrorContainer);
+        onBackground           = color(scheme, "on_background", onBackground);
+        onSurfaceVariant       = color(scheme, "on_surface_variant", onSurfaceVariant);
+        outlineVariant         = color(scheme, "outline_variant", outlineVariant);
+        inverseSurface         = color(scheme, "inverse_surface", inverseSurface);
+        inverseOnSurface       = color(scheme, "inverse_on_surface", inverseOnSurface);
+        inversePrimary         = color(scheme, "inverse_primary", inversePrimary);
+        surfaceDim             = color(scheme, "surface_dim", surfaceDim);
+        surfaceBright          = color(scheme, "surface_bright", surfaceBright);
+        surfaceContainerLowest = color(scheme, "surface_container_lowest", surfaceContainerLowest);
+        surfaceContainerLow    = color(scheme, "surface_container_low", surfaceContainerLow);
+        surfaceContainer       = color(scheme, "surface_container", surfaceContainer);
+        surfaceContainerHigh   = color(scheme, "surface_container_high", surfaceContainerHigh);
+        surfaceContainerHighest= color(scheme, "surface_container_highest", surfaceContainerHighest);
+        surfaceTint            = color(scheme, "surface_tint", surfaceTint);
+        // The two roles nothing used to read. Both are plain black in M3; the
+        // scrim's opacity belongs to the component that draws it, which is
+        // why `scrimOverlay()` exists instead of a pre-dimmed colour.
+        shadow                 = color(scheme, "shadow", shadow);
+        scrim                  = color(scheme, "scrim", scrim);
         applyTokens(scheme.optJSONObject("tokens"));
     }
 
@@ -299,7 +365,8 @@ public final class PydrudTheme {
         outlineStrong    = 0xFFD1D5DB;
         disabledBg       = 0xFFE9EAEE;
         disabledFg       = 0xFFA1A7B3;
-        shadow           = 0x33101828;
+        shadow           = 0xFF000000;
+        scrim            = 0xFF000000;
         derive();
     }
 
@@ -447,6 +514,39 @@ public final class PydrudTheme {
         return gd;
     }
 
+    /**
+     * Rounded on the top corners only — the Material 3 bottom-sheet profile.
+     */
+    public static GradientDrawable topRoundedShape(int fill, float radiusPx) {
+        GradientDrawable gd = new GradientDrawable();
+        gd.setShape(GradientDrawable.RECTANGLE);
+        gd.setColor(fill);
+        gd.setCornerRadii(new float[]{
+            radiusPx, radiusPx,   // top-left
+            radiusPx, radiusPx,   // top-right
+            0f, 0f,               // bottom-right
+            0f, 0f,               // bottom-left
+        });
+        return gd;
+    }
+
+    /**
+     * Rounded on one vertical edge — the Material 3 side-sheet profile.
+     *
+     * @param endSide round the *end* (right in LTR) corners instead of the
+     *     start corners, for a sheet that slides in from the opposite edge.
+     */
+    public static GradientDrawable sideRoundedShape(int fill, float radiusPx,
+                                                    boolean endSide) {
+        GradientDrawable gd = new GradientDrawable();
+        gd.setShape(GradientDrawable.RECTANGLE);
+        gd.setColor(fill);
+        gd.setCornerRadii(endSide
+            ? new float[]{0f, 0f, radiusPx, radiusPx, radiusPx, radiusPx, 0f, 0f}
+            : new float[]{radiusPx, radiusPx, 0f, 0f, 0f, 0f, radiusPx, radiusPx});
+        return gd;
+    }
+
     /** Rounded ripple over a background drawable. */
     public static Drawable ripple(Drawable content, int rippleColor, float radiusPx) {
         GradientDrawable mask = shape(0xFFFFFFFF, radiusPx);
@@ -491,17 +591,24 @@ public final class PydrudTheme {
         try {
             StateListAnimator sla = new StateListAnimator();
 
+            // Press in fast and ease out, release slower: the durations are
+            // the short steps of the M3 motion ladder, the curves are the
+            // standard accelerate/decelerate pair.
+            long downMs = durationMs("short_2");
+            long upMs = durationMs("short_4");
             AnimatorSet down = new AnimatorSet();
             down.playTogether(
-                ObjectAnimator.ofFloat(view, "scaleX", pressedScale).setDuration(90),
-                ObjectAnimator.ofFloat(view, "scaleY", pressedScale).setDuration(90),
-                ObjectAnimator.ofFloat(view, "translationZ", dp(pressedZ)).setDuration(90));
+                ObjectAnimator.ofFloat(view, "scaleX", pressedScale).setDuration(downMs),
+                ObjectAnimator.ofFloat(view, "scaleY", pressedScale).setDuration(downMs),
+                ObjectAnimator.ofFloat(view, "translationZ", dp(pressedZ)).setDuration(downMs));
+            down.setInterpolator(easing("standard_accelerate"));
 
             AnimatorSet up = new AnimatorSet();
             up.playTogether(
-                ObjectAnimator.ofFloat(view, "scaleX", 1f).setDuration(160),
-                ObjectAnimator.ofFloat(view, "scaleY", 1f).setDuration(160),
-                ObjectAnimator.ofFloat(view, "translationZ", dp(restZ)).setDuration(160));
+                ObjectAnimator.ofFloat(view, "scaleX", 1f).setDuration(upMs),
+                ObjectAnimator.ofFloat(view, "scaleY", 1f).setDuration(upMs),
+                ObjectAnimator.ofFloat(view, "translationZ", dp(restZ)).setDuration(upMs));
+            up.setInterpolator(easing("standard_decelerate"));
 
             sla.addState(new int[]{android.R.attr.state_pressed}, down);
             sla.addState(new int[]{}, up);
@@ -509,7 +616,303 @@ public final class PydrudTheme {
         } catch (Throwable ignored) {}
     }
 
+    // ── motion ───────────────────────────────────────────────────────────
+    //
+    // Material 3 motion is a duration step plus an easing curve, and both are
+    // tokens. A component asks for a name — `medium_2`, `emphasized` — and
+    // gets the token's value, so retuning either one moves every component
+    // that named it instead of only the ones that were edited by hand.
+
+    private static final java.util.HashMap<String,
+        android.view.animation.Interpolator> EASING_CACHE = new java.util.HashMap<>();
+
+    /**
+     * A duration token by name, or a raw millisecond count.
+     *
+     * <p>Accepts the M3 steps (`short_1` … `extra_long_4`), the legacy
+     * aliases (`fast`, `normal`, `slow`), a number and a numeric string, and
+     * a CSS time (`300ms`, `0.3s`) — which is what a `$duration_*` reference
+     * expands to in a stylesheet. Anything unrecognised falls back to the
+     * default duration.
+     */
+    public static long durationMs(Object value) {
+        if (value == null) return durationNormal;
+        if (value instanceof Number) return (long) ((Number) value).doubleValue();
+        String key = value.toString().trim().toLowerCase(java.util.Locale.US)
+            .replace("-", "").replace("_", "").replace(" ", "");
+        if (key.isEmpty()) return durationNormal;
+        if (key.endsWith("ms")) {
+            try { return (long) Double.parseDouble(key.substring(0, key.length() - 2)); }
+            catch (NumberFormatException ignored) { return durationNormal; }
+        }
+        if (key.endsWith("s")) {
+            try { return (long) (Double.parseDouble(key.substring(0, key.length() - 1)) * 1000); }
+            catch (NumberFormatException ignored) { return durationNormal; }
+        }
+        switch (key) {
+            case "fast":        return durationFast;
+            case "normal":      return durationNormal;
+            case "slow":        return durationSlow;
+            case "short1":      return durationShort1;
+            case "short2":      return durationShort2;
+            case "short3":      return durationShort3;
+            case "short4":      return durationShort4;
+            case "medium1":     return durationMedium1;
+            case "medium2":     return durationMedium2;
+            case "medium3":     return durationMedium3;
+            case "medium4":     return durationMedium4;
+            case "long1":       return durationLong1;
+            case "long2":       return durationLong2;
+            case "long3":       return durationLong3;
+            case "long4":       return durationLong4;
+            case "extralong1":  return durationExtraLong1;
+            case "extralong2":  return durationExtraLong2;
+            case "extralong3":  return durationExtraLong3;
+            case "extralong4":  return durationExtraLong4;
+            default:
+                try { return (long) Double.parseDouble(key); }
+                catch (NumberFormatException e) { return durationNormal; }
+        }
+    }
+
+    /** A duration step by name, defaulting to the token's default. */
+    public static long durationMs(String step) {
+        return durationMs((Object) step);
+    }
+
+    /**
+     * An easing curve by name.
+     *
+     * <p>Three vocabularies are accepted, and they all live here so a
+     * stylesheet, a widget and the framework cannot drift apart:
+     *
+     * <ul>
+     *   <li>the M3 motion names — `standard`, `emphasized`,
+     *       `standard_decelerate`, `emphasized_accelerate`, … — resolved
+     *       through the {@code easing_*} tokens, so a retuned curve is picked
+     *       up everywhere;</li>
+     *   <li>a raw CSS timing function — `cubic-bezier(…)`, `linear()`,
+     *       `steps(n)` — which is what {@code $easing_*} substitutes to;</li>
+     *   <li>the platform curve names Pydrud has always accepted — `ease_out`,
+     *       `ease_in_out`, `bounce`, `overshoot`, `anticipate` — kept
+     *       because existing code names them.</li>
+     * </ul>
+     */
+    public static android.view.animation.Interpolator easing(String name) {
+        String key = name == null ? "" : name.trim();
+        String m3 = key.toLowerCase(java.util.Locale.US).replace('_', '-');
+        switch (m3) {
+            case "": case "default": case "standard": key = easingStandard; break;
+            case "emphasized":             key = easingEmphasized; break;
+            case "standard-decelerate":    key = easingStandardDecelerate; break;
+            case "standard-accelerate":    key = easingStandardAccelerate; break;
+            case "emphasized-decelerate":  key = easingEmphasizedDecelerate; break;
+            case "emphasized-accelerate":  key = easingEmphasizedAccelerate; break;
+            default: break;
+        }
+        android.view.animation.Interpolator cached = EASING_CACHE.get(key);
+        if (cached != null) return cached;
+        android.view.animation.Interpolator built = buildEasing(key);
+        EASING_CACHE.put(key, built);
+        return built;
+    }
+
+    /** The M3 curve a standard transition uses. */
+    public static android.view.animation.Interpolator defaultEasing() {
+        return easing(easingStandard);
+    }
+
+    private static android.view.animation.Interpolator buildEasing(String key) {
+        String lower = key.toLowerCase(java.util.Locale.US);
+        if (lower.startsWith("cubic-bezier(")) {
+            android.view.animation.Interpolator path = pathFor(lower);
+            if (path != null) return path;
+        }
+        if (lower.startsWith("linear(")) {
+            return new android.view.animation.LinearInterpolator();
+        }
+        if (lower.startsWith("steps(")) {
+            return new StepsInterpolator(stepsFor(lower));
+        }
+        switch (lower.replace('_', '-')) {
+            case "linear":      return new android.view.animation.LinearInterpolator();
+            case "ease-in": case "accelerate":
+                return new android.view.animation.AccelerateInterpolator();
+            case "ease-out": case "decelerate":
+                return new android.view.animation.DecelerateInterpolator();
+            case "bounce":      return new android.view.animation.BounceInterpolator();
+            case "overshoot":   return new android.view.animation.OvershootInterpolator();
+            case "anticipate":  return new android.view.animation.AnticipateInterpolator();
+            case "ease": case "ease-in-out": default:
+                return new android.view.animation.AccelerateDecelerateInterpolator();
+        }
+    }
+
+    /** ``cubic-bezier(x1, y1, x2, y2)``, or null when it does not parse. */
+    private static android.view.animation.Interpolator pathFor(String text) {
+        String inner = text.substring(text.indexOf('(') + 1);
+        if (inner.contains(")")) inner = inner.substring(0, inner.indexOf(')'));
+        String[] parts = inner.split(",");
+        if (parts.length != 4) return null;
+        try {
+            return new android.view.animation.PathInterpolator(
+                Float.parseFloat(parts[0].trim()),
+                Float.parseFloat(parts[1].trim()),
+                Float.parseFloat(parts[2].trim()),
+                Float.parseFloat(parts[3].trim()));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** The step count in a CSS ``steps(n)`` timing function. */
+    private static int stepsFor(String text) {
+        String inner = text.substring(text.indexOf('(') + 1);
+        if (inner.contains(")")) inner = inner.substring(0, inner.indexOf(')'));
+        String[] parts = inner.split(",");
+        try {
+            return Math.max(1, (int) Float.parseFloat(parts[0].trim()));
+        } catch (NumberFormatException e) {
+            return 1;
+        }
+    }
+
+    /** A CSS ``steps(n)`` ramp: the value holds, then jumps. */
+    static final class StepsInterpolator
+            implements android.view.animation.Interpolator {
+        private final int steps;
+
+        StepsInterpolator(int steps) { this.steps = Math.max(1, steps); }
+
+        @Override public float getInterpolation(float input) {
+            if (input >= 1f) return 1f;
+            return (float) Math.floor(input * steps) / steps;
+        }
+    }
+
     /** Soft, modern shadow (Material shadows are harsh by default). */
+    /**
+     * The M3 tonal-elevation tint for a dp elevation: levels 0-5 are 0, 5%,
+     * 8%, 11%, 12% and 14% of the surface-tint role.
+     */
+    public static float tonalTintFor(float elevationDp) {
+        // The dp ladder below is the L0-L5 scale, so a theme that retunes
+        // `elevation_level_*` moves the tonal tints with it.
+        float[] ladder = {elevationLevel0, elevationLevel1, elevationLevel2,
+                          elevationLevel3, elevationLevel4, elevationLevel5};
+        float[] tints = {tonalElevation0, tonalElevation1, tonalElevation2,
+                         tonalElevation3, tonalElevation4, tonalElevation5};
+        if (elevationDp <= ladder[0]) return tints[0];
+        for (int i = 1; i < ladder.length; i++) {
+            if (elevationDp <= ladder[i]) return tints[i];
+        }
+        return tints[tints.length - 1];
+    }
+
+    /**
+     * Express elevation as Material 3 does on a dark surface: by tinting the
+     * surface toward the surface-tint role rather than deepening a shadow.
+     *
+     * A shadow is invisible against a dark background, which is why M3 keeps
+     * the tonal-elevation table at all. This used to blend toward *white* at
+     * an invented 1.8%-per-dp rate, which drifted every dark surface away
+     * from its role and ignored the table entirely.
+     */
+    public static int tonalSurface(int color, float elevationDp) {
+        float tint = tonalTintFor(elevationDp);
+        if (tint <= 0f) return color;
+        return blend(color, surfaceTint, tint);
+    }
+
+    /**
+     * Material 3's disabled treatment.
+     *
+     * A disabled container keeps 12% of its colour and its content 38%, so a
+     * disabled control reads as "unavailable" without becoming unreadable.
+     * Both numbers are tokens (`state_disabled_container`,
+     * `state_disabled_content`) rather than literals.
+     */
+    public static void applyDisabledTreatment(View view, int containerColor) {
+        if (view == null) return;
+        if (containerColor != Color.TRANSPARENT) {
+            view.setBackground(shape(
+                alpha(containerColor, stateDisabledContainer), 0f));
+        }
+        view.setAlpha(1f);
+        if (view instanceof TextView) {
+            TextView tv = (TextView) view;
+            tv.setTextColor(alpha(tv.getCurrentTextColor(), stateDisabledContent));
+        } else if (view instanceof ImageView) {
+            view.setImageAlpha(
+                Math.round(255f * stateDisabledContent));
+        }
+    }
+
+    /** A Material 3 state layer: the content colour at the role's opacity. */
+    public static int stateLayer(int contentColor, float opacity) {
+        return alpha(contentColor, opacity);
+    }
+
+    /**
+     * Track a toggle's intrinsic size from its token.
+     *
+     * ``checkbox_size``, ``radio_size``, ``switch_width`` and ``switch_height``
+     * were published and never read, so a theme that retuned them changed
+     * nothing on screen. The touch target stays at the M3 minimum so a
+     * smaller glyph does not shrink the tappable area.
+     */
+    public static void sizeToggle(View view, float sizeDp) {
+        if (view == null) return;
+        int px = dp(sizeDp);
+        view.setMinimumWidth(px);
+        view.setLayoutParams(new android.view.ViewGroup.LayoutParams(
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT, px));
+    }
+
+    /**
+     * Whether a scrollable view draws the overscroll glow.
+     *
+     * ``overscroll_glow`` was published and never read; the scroll containers
+     * hard-coded ``OVER_SCROLL_IF_CONTENT_SCROLLS``.
+     */
+    public static int overScrollMode() {
+        return overscrollGlow ? View.OVER_SCROLL_IF_CONTENT_SCROLLS
+                              : View.OVER_SCROLL_NEVER;
+    }
+
+    /**
+     * Snap a nominal text size to the published type scale.
+     *
+     * ``text_caption`` (12) and ``text_display`` (57) are the ends of the M3
+     * scale; a caller that passes 0 means "use the body size", and a size past
+     * display is clamped so a runaway scale cannot outgrow the screen.
+     */
+    public static float snapTextSize(float sizeSp) {
+        if (sizeSp <= 0f) return textBody;
+        if (sizeSp >= textDisplay) return textDisplay;
+        if (sizeSp <= textCaption) return textCaption;
+        return sizeSp;
+    }
+
+    /** The layer a row wears while it is being dragged (``stateDragged``). */
+    public static int draggedLayer() {
+        return alpha(onSurface, stateDragged);
+    }
+
+    /**
+     * The M3 modal scrim: {@code scrim} composited at the spec's 32 %.
+     *
+     * <p>Every modal surface dims what is behind it by this much, and a theme
+     * that changes the scrim role changes all of them — which is the point of
+     * shipping the role at all.
+     */
+    public static int scrimOverlay() {
+        return alpha(scrim, SCRIM_ALPHA);
+    }
+
+    /** The share of the scrim role a modal surface composites. */
+    public static final float SCRIM_ALPHA = 0.32f;
+
     public static void elevate(View view, float elevationDp) {
         if (view == null) return;
         try {
@@ -540,10 +943,13 @@ public final class PydrudTheme {
     public static float radiusImage  = 12f;
 
     // size
-    public static float appBarHeight   = 56f;
-    public static float navHeight      = 64f;
+    public static float appBarHeight   = 64f;
+    public static float navHeight      = 80f;
     public static float railWidth      = 80f;
     public static float fabSize        = 56f;
+    // Material 3 docked toolbar and side sheet.
+    public static float toolbarHeight  = 64f;
+    public static float sideSheetWidth = 360f;
     public static float inputHeight    = 52f;
     public static float buttonHeightSm = 38f;
     public static float buttonHeightMd = 48f;
@@ -604,6 +1010,103 @@ public final class PydrudTheme {
     public static float letterSpacingToken = 0f;
     public static float lineHeight = 1.32f;
 
+    // Material 3 component sizes
+    public static float appBarHeightMedium = 112f;
+    public static float appBarHeightLarge = 152f;
+    public static float listTileHeightThreeLine = 88f;
+    public static float chipHeight = 32f;
+    public static float switchWidth = 52f;
+    public static float switchHeight = 32f;
+    public static float checkboxSize = 18f;
+    public static float radioSize = 20f;
+
+    // Material 3 radii
+    public static float radiusMenu = 4f;
+    public static float radiusSnackbar = 4f;
+    public static float radiusTooltip = 4f;
+    public static float radiusToolbar = 32f;
+
+    // Material 3's named corner scale.
+    public static float cornerNone = 0f;
+    public static float cornerExtraSmall = 4f;
+    public static float cornerSmall = 8f;
+    public static float cornerMedium = 12f;
+    public static float cornerLarge = 16f;
+    public static float cornerLargeIncreased = 20f;
+    public static float cornerExtraLarge = 28f;
+    public static float cornerExtraLargeIncreased = 32f;
+    public static float cornerExtraExtraLarge = 48f;
+    /** M3's "full" corner: a sentinel resolved to half the short side. */
+    public static float cornerFull = 999f;
+
+    /**
+     * Resolve a corner radius, honouring the "full" sentinel.
+     *
+     * Material 3's ``full`` shape is half the shortest side — a pill for a
+     * button, a circle for a square. GradientDrawable has no percentage
+     * mode, so anything at or above the sentinel resolves to height / 2.
+     */
+    public static float resolvedCorner(float radiusPx, float heightPx) {
+        return radiusPx >= cornerFull
+            ? Math.max(0f, heightPx / 2f)
+            : radiusPx;
+    }
+
+    // Material 3 elevation levels
+    public static float elevationLevel0 = 0f;
+    public static float elevationLevel1 = 1f;
+    public static float elevationLevel2 = 3f;
+    public static float elevationLevel3 = 6f;
+    public static float elevationLevel4 = 8f;
+    public static float elevationLevel5 = 12f;
+    public static float elevationNavBar = 0f;
+    public static float elevationMenu = 2f;
+
+    // Material 3 tonal elevation
+    public static float tonalElevation0 = 0f;
+    public static float tonalElevation1 = 0.05f;
+    public static float tonalElevation2 = 0.08f;
+    public static float tonalElevation3 = 0.11f;
+    public static float tonalElevation4 = 0.12f;
+    public static float tonalElevation5 = 0.14f;
+
+    // Material 3 durations
+    public static int durationShort1 = 50;
+    public static int durationShort2 = 100;
+    public static int durationShort3 = 150;
+    public static int durationShort4 = 200;
+    public static int durationMedium1 = 250;
+    public static int durationMedium2 = 300;
+    public static int durationMedium3 = 350;
+    public static int durationMedium4 = 400;
+    public static int durationLong1 = 450;
+    public static int durationLong2 = 500;
+    public static int durationLong3 = 550;
+    public static int durationLong4 = 600;
+    public static int durationExtraLong1 = 700;
+    public static int durationExtraLong2 = 800;
+    public static int durationExtraLong3 = 900;
+    public static int durationExtraLong4 = 1000;
+
+    // Material 3 easing curves
+    // The curves are CSS cubic-béziers, which is what the Python tokens hold
+    // and what a stylesheet writes — the platform names (`ease_out`,
+    // `overshoot`, …) are still accepted anywhere a curve is named, but they
+    // are approximations of these, not these.
+    public static String easingStandard = "cubic-bezier(0.2, 0, 0, 1)";
+    public static String easingStandardDecelerate = "cubic-bezier(0, 0, 0, 1)";
+    public static String easingStandardAccelerate = "cubic-bezier(0.3, 0, 1, 1)";
+    public static String easingEmphasized = "cubic-bezier(0.2, 0, 0, 1)";
+    public static String easingEmphasizedDecelerate = "cubic-bezier(0.05, 0.7, 0.1, 1)";
+    public static String easingEmphasizedAccelerate = "cubic-bezier(0.3, 0, 0.8, 0.15)";
+    public static String easingLinear = "cubic-bezier(0, 0, 1, 1)";
+
+    // Material 3 state layers
+    public static float stateFocus = 0.10f;
+    public static float stateDragged = 0.16f;
+    public static float stateDisabledContent = 0.38f;
+    public static float stateDisabledContainer = 0.12f;
+
     // behaviour
     public static boolean haptics = true;
     public static boolean overscrollGlow = false;
@@ -624,6 +1127,8 @@ public final class PydrudTheme {
         navHeight      = num(t, "nav_height", navHeight);
         railWidth      = num(t, "rail_width", railWidth);
         fabSize        = num(t, "fab_size", fabSize);
+        toolbarHeight  = num(t, "toolbar_height", toolbarHeight);
+        sideSheetWidth = num(t, "side_sheet_width", sideSheetWidth);
         inputHeight    = num(t, "input_height", inputHeight);
         buttonHeightSm = num(t, "button_height_sm", buttonHeightSm);
         buttonHeightMd = num(t, "button_height_md", buttonHeightMd);
@@ -682,6 +1187,73 @@ public final class PydrudTheme {
 
         haptics        = t.optBoolean("haptics", haptics);
         overscrollGlow = t.optBoolean("overscroll_glow", overscrollGlow);
+
+        // Material 3 tokens
+        appBarHeightMedium = num(t, "app_bar_height_medium", appBarHeightMedium);
+        appBarHeightLarge = num(t, "app_bar_height_large", appBarHeightLarge);
+        listTileHeightThreeLine = num(t, "list_tile_height_three_line", listTileHeightThreeLine);
+        chipHeight     = num(t, "chip_height", chipHeight);
+        switchWidth    = num(t, "switch_width", switchWidth);
+        switchHeight   = num(t, "switch_height", switchHeight);
+        checkboxSize   = num(t, "checkbox_size", checkboxSize);
+        radioSize      = num(t, "radio_size", radioSize);
+        radiusMenu     = num(t, "radius_menu", radiusMenu);
+        radiusSnackbar = num(t, "radius_snackbar", radiusSnackbar);
+        radiusTooltip  = num(t, "radius_tooltip", radiusTooltip);
+        radiusToolbar  = num(t, "radius_toolbar", radiusToolbar);
+        cornerNone     = num(t, "corner_none", cornerNone);
+        cornerExtraSmall = num(t, "corner_extra_small", cornerExtraSmall);
+        cornerSmall    = num(t, "corner_small", cornerSmall);
+        cornerMedium   = num(t, "corner_medium", cornerMedium);
+        cornerLarge    = num(t, "corner_large", cornerLarge);
+        cornerLargeIncreased = num(t, "corner_large_increased", cornerLargeIncreased);
+        cornerExtraLarge = num(t, "corner_extra_large", cornerExtraLarge);
+        cornerExtraLargeIncreased =
+            num(t, "corner_extra_large_increased", cornerExtraLargeIncreased);
+        cornerExtraExtraLarge =
+            num(t, "corner_extra_extra_large", cornerExtraExtraLarge);
+        cornerFull     = num(t, "corner_full", cornerFull);
+        elevationLevel0 = num(t, "elevation_level_0", elevationLevel0);
+        elevationLevel1 = num(t, "elevation_level_1", elevationLevel1);
+        elevationLevel2 = num(t, "elevation_level_2", elevationLevel2);
+        elevationLevel3 = num(t, "elevation_level_3", elevationLevel3);
+        elevationLevel4 = num(t, "elevation_level_4", elevationLevel4);
+        elevationLevel5 = num(t, "elevation_level_5", elevationLevel5);
+        elevationNavBar = num(t, "elevation_nav_bar", elevationNavBar);
+        elevationMenu  = num(t, "elevation_menu", elevationMenu);
+        tonalElevation0 = num(t, "tonal_elevation_0", tonalElevation0);
+        tonalElevation1 = num(t, "tonal_elevation_1", tonalElevation1);
+        tonalElevation2 = num(t, "tonal_elevation_2", tonalElevation2);
+        tonalElevation3 = num(t, "tonal_elevation_3", tonalElevation3);
+        tonalElevation4 = num(t, "tonal_elevation_4", tonalElevation4);
+        tonalElevation5 = num(t, "tonal_elevation_5", tonalElevation5);
+        durationShort1 = (int) num(t, "duration_short_1", durationShort1);
+        durationShort2 = (int) num(t, "duration_short_2", durationShort2);
+        durationShort3 = (int) num(t, "duration_short_3", durationShort3);
+        durationShort4 = (int) num(t, "duration_short_4", durationShort4);
+        durationMedium1 = (int) num(t, "duration_medium_1", durationMedium1);
+        durationMedium2 = (int) num(t, "duration_medium_2", durationMedium2);
+        durationMedium3 = (int) num(t, "duration_medium_3", durationMedium3);
+        durationMedium4 = (int) num(t, "duration_medium_4", durationMedium4);
+        durationLong1  = (int) num(t, "duration_long_1", durationLong1);
+        durationLong2  = (int) num(t, "duration_long_2", durationLong2);
+        durationLong3  = (int) num(t, "duration_long_3", durationLong3);
+        durationLong4  = (int) num(t, "duration_long_4", durationLong4);
+        durationExtraLong1 = (int) num(t, "duration_extra_long_1", durationExtraLong1);
+        durationExtraLong2 = (int) num(t, "duration_extra_long_2", durationExtraLong2);
+        durationExtraLong3 = (int) num(t, "duration_extra_long_3", durationExtraLong3);
+        durationExtraLong4 = (int) num(t, "duration_extra_long_4", durationExtraLong4);
+        easingStandard = t.optString("easing_standard", easingStandard);
+        easingStandardDecelerate = t.optString("easing_standard_decelerate", easingStandardDecelerate);
+        easingStandardAccelerate = t.optString("easing_standard_accelerate", easingStandardAccelerate);
+        easingEmphasized = t.optString("easing_emphasized", easingEmphasized);
+        easingEmphasizedDecelerate = t.optString("easing_emphasized_decelerate", easingEmphasizedDecelerate);
+        easingEmphasizedAccelerate = t.optString("easing_emphasized_accelerate", easingEmphasizedAccelerate);
+        easingLinear   = t.optString("easing_linear", easingLinear);
+        stateFocus     = num(t, "state_focus", stateFocus);
+        stateDragged   = num(t, "state_dragged", stateDragged);
+        stateDisabledContent = num(t, "state_disabled_content", stateDisabledContent);
+        stateDisabledContainer = num(t, "state_disabled_container", stateDisabledContainer);
     }
 
     private static float num(JSONObject json, String key, float fallback) {
@@ -711,9 +1283,11 @@ public final class PydrudTheme {
                 return Typeface.create(Typeface.SANS_SERIF, w, italic);
             }
         } catch (Throwable ignored) {}
+        // Snapped against the M3 weight roles rather than literals, so an app
+        // that retunes weight_medium changes the whole scale with it.
         String family = "sans-serif";
-        if (weight >= 800)      family = "sans-serif-black";
-        else if (weight >= 600) family = "sans-serif-medium";
+        if (weight >= weightBold + 100) family = "sans-serif-black";
+        else if (weight >= weightMedium) family = "sans-serif-medium";
         else if (weight <= 300) family = "sans-serif-light";
         return Typeface.create(family, italic ? Typeface.ITALIC : Typeface.NORMAL);
     }
@@ -727,8 +1301,8 @@ public final class PydrudTheme {
             }
         } catch (Throwable ignored) {}
         int style = Typeface.NORMAL;
-        if (weight >= 600 && italic) style = Typeface.BOLD_ITALIC;
-        else if (weight >= 600) style = Typeface.BOLD;
+        if (weight >= weightBold && italic) style = Typeface.BOLD_ITALIC;
+        else if (weight >= weightBold) style = Typeface.BOLD;
         else if (italic) style = Typeface.ITALIC;
         return Typeface.create(familyName, style);
     }
@@ -736,13 +1310,24 @@ public final class PydrudTheme {
     /** Tight, readable text metrics — the single biggest visual upgrade. */
     public static void applyTextDefaults(TextView tv, float sizeSp, int weight, int color) {
         if (tv == null) return;
+        sizeSp = snapTextSize(sizeSp);
         tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP,
                        scaledSp(sizeSp * fontScaleToken));
         tv.setTextColor(color);
         tv.setTypeface(typeface(weight, false));
         tv.setIncludeFontPadding(false);
         tv.setLineSpacing(0f, sizeSp >= textHeadline ? lineHeight * 0.82f : lineHeight);
+        if (weight == 0) tv.setTypeface(typeface((int) weightRegular, false));
         tv.setLetterSpacing(letterSpacingFor(sizeSp, weight));
+    }
+
+    /**
+     * The duration a transition uses when a widget does not name one.
+     *
+     * M3 calls this "medium 2"; it is published as ``duration_normal``.
+     */
+    public static long defaultDurationMs() {
+        return (long) durationNormal;
     }
 
     /** Large text tracks tighter, small caps-ish labels track wider. */
@@ -852,7 +1437,8 @@ public final class PydrudTheme {
         try {
             android.animation.LayoutTransition transition =
                 new android.animation.LayoutTransition();
-            transition.setDuration(180);
+            transition.setDuration(durationMs("short_4"));
+            transition.setInterpolator(easing("standard"));
             transition.enableTransitionType(android.animation.LayoutTransition.CHANGING);
             transition.setAnimateParentHierarchy(false);
             group.setLayoutTransition(transition);
@@ -865,9 +1451,11 @@ public final class PydrudTheme {
         try {
             view.setAlpha(0f);
             view.setTranslationY(dp(8));
+            // An entering element decelerates into place: M3's
+            // emphasized-decelerate at the medium-2 step.
             view.animate().alpha(1f).translationY(0f)
-                .setDuration(220).setStartDelay(delayMs)
-                .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                .setDuration(durationMs("medium_2")).setStartDelay(delayMs)
+                .setInterpolator(easing("emphasized_decelerate"))
                 .start();
         } catch (Throwable ignored) {}
     }

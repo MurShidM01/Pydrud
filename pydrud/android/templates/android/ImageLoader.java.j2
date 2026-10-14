@@ -148,7 +148,11 @@ return value.getByteCount() / 1024;
 
     static void fadeIn(ImageView view) {
         view.setAlpha(0f);
-        view.animate().alpha(1f).setDuration(180).start();
+        // An image fades in on the M3 standard curve at the short-4 step.
+        view.animate().alpha(1f)
+            .setDuration(PydrudTheme.durationMs("short_4"))
+            .setInterpolator(PydrudTheme.easing("standard"))
+            .start();
     }
 
     int decodeTarget(ImageView view) {

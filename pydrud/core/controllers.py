@@ -24,6 +24,111 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
+class CubicBezier:
+    """A CSS ``cubic-bezier(x1, y1, x2, y2)`` timing function.
+
+    The Material 3 easing tokens are cubic-béziers, and they have to mean the
+    same thing on both sides of the bridge: the renderer animates with a
+    ``PathInterpolator`` built from the same four numbers, so a value the
+    device would ease into has to ease the same way in Python. Solving for
+    ``t`` at a given ``x`` is Newton's method with a bisection fallback, which
+    is what the platform does internally.
+    """
+
+    __slots__ = ("x1", "y1", "x2", "y2")
+
+    def __init__(self, x1: float, y1: float, x2: float, y2: float):
+        if not 0.0 <= x1 <= 1.0 or not 0.0 <= x2 <= 1.0:
+            raise ValueError("cubic-bezier control x values must be in 0..1")
+        self.x1, self.y1, self.x2, self.y2 = float(x1), float(y1), float(x2), float(y2)
+
+    @classmethod
+    def parse(cls, text: str) -> "CubicBezier":
+        """Parse ``cubic-bezier(0.2, 0, 0, 1)`` (whitespace is free-form)."""
+        inner = text[text.index("(") + 1:]
+        inner = inner[: inner.index(")")] if ")" in inner else inner
+        parts = [part.strip() for part in inner.split(",")]
+        if len(parts) != 4:
+            raise ValueError(f"cubic-bezier needs four numbers, got {text!r}")
+        return cls(*(float(part) for part in parts))
+
+    def __call__(self, t: float) -> float:
+        if t <= 0.0:
+            return 0.0
+        if t >= 1.0:
+            return 1.0
+        x = self._solve(t)
+        return self._bezier(x, self.y1, self.y2)
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return (f"cubic-bezier({self.x1}, {self.y1}, {self.x2}, {self.y2})")
+
+    @staticmethod
+    def _bezier(u: float, p1: float, p2: float) -> float:
+        """The cubic Bézier with endpoints 0 and 1 at parameter ``u``."""
+        v = 1.0 - u
+        return 3.0 * v * v * u * p1 + 3.0 * v * u * u * p2 + u * u * u
+
+    @staticmethod
+    def _slope(u: float, p1: float, p2: float) -> float:
+        v = 1.0 - u
+        return (3.0 * v * v * p1 + 6.0 * v * u * (p2 - p1)
+                + 3.0 * u * u * (1.0 - p2))
+
+    def _solve(self, x: float) -> float:
+        u = x
+        for _ in range(8):
+            error = self._bezier(u, self.x1, self.x2) - x
+            if abs(error) < 1e-6:
+                return u
+            slope = self._slope(u, self.x1, self.x2)
+            if abs(slope) < 1e-6:
+                break
+            u -= error / slope
+        low, high = 0.0, 1.0
+        u = x
+        for _ in range(40):
+            error = self._bezier(u, self.x1, self.x2) - x
+            if abs(error) < 1e-7:
+                break
+            if error < 0:
+                low = u
+            else:
+                high = u
+            u = (low + high) / 2.0
+        return u
+
+
+#: Material 3 easing names mapped to the token that carries the curve, so a
+#: widget (or a stylesheet) can name the spec's curve and Python evaluates the
+#: same cubic-bézier the renderer will.
+M3_CURVES = {
+    "standard": "easing_standard",
+    "standard_decelerate": "easing_standard_decelerate",
+    "standard_accelerate": "easing_standard_accelerate",
+    "emphasized": "easing_emphasized",
+    "emphasized_decelerate": "easing_emphasized_decelerate",
+    "emphasized_accelerate": "easing_emphasized_accelerate",
+    "linear": "easing_linear",
+}
+
+
+def _m3_curve(token_name: str) -> Callable[[float], float]:
+    """Read a curve token lazily, so ``Tokens.update()`` is honoured."""
+    def ease(t: float) -> float:
+        from pydrud.widgets.tokens import Tokens
+
+        raw = getattr(Tokens, token_name)
+        return CubicBezier.parse(raw)(t) if "cubic-bezier(" in raw else _keyword(raw)(t)
+
+    ease.__name__ = f"m3_{token_name}"
+    return ease
+
+
+def _keyword(name: str) -> Callable[[float], float]:
+    return CURVES.get(name, lambda t: t)
+
+
 #: Easing functions shared with renderers that animate these values.
 CURVES: dict[str, Callable[[float], float]] = {
     "linear": lambda t: t,
@@ -41,6 +146,11 @@ CURVES: dict[str, Callable[[float], float]] = {
 }
 
 
+for _m3_name, _m3_token in M3_CURVES.items():
+    CURVES.setdefault(_m3_name, _m3_curve(_m3_token))
+
+
+
 def _bounce(t: float) -> float:
     n, d = 7.5625, 2.75
     if t < 1 / d:
@@ -56,7 +166,15 @@ def _bounce(t: float) -> float:
 
 
 def curve(name: str) -> Callable[[float], float]:
-    """Look up an easing function by name."""
+    """Look up an easing function by name.
+
+    Accepts the platform curve names Pydrud has always used
+    (``ease_in_out``, ``overshoot``, …), the Material 3 motion names
+    (``standard``, ``emphasized_decelerate``, …) and a raw CSS
+    ``cubic-bezier(...)``, which is what the easing tokens hold.
+    """
+    if isinstance(name, str) and "cubic-bezier(" in name:
+        return CubicBezier.parse(name)
     if name not in CURVES:
         raise ValueError(f"Unknown curve {name!r}. Available: "
                          f"{', '.join(sorted(CURVES))}")

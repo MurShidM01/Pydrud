@@ -442,6 +442,17 @@ static final int VIRTUALIZE_THRESHOLD = 24;
         JSONObject s = json.optJSONObject("style");
         iv.setScaleType(vf.mStyler.scaleType(s != null ? s.optString("fit", "contain") : "contain"));
         iv.setAdjustViewBounds(true);
+        // M3's default image shape is the medium corner; a styled
+        // `borderRadius` or `circular` still overrides it in ViewStyler.
+        float radius = s != null && s.has("borderRadius")
+            ? vf.mStyler.dp(s.optInt("borderRadius", 0))
+            : PydrudTheme.dp(PydrudTheme.radiusImage);
+        boolean circle = s != null && s.optBoolean("circular", false);
+        if (circle) radius = PydrudTheme.dp(999);
+        if (radius > 0f) {
+            iv.setBackground(PydrudTheme.shape(android.graphics.Color.TRANSPARENT, radius));
+            iv.setClipToOutline(true);
+        }
         vf.mImageLoader.loadImageInto(iv, src, s);
         return iv;
     }
@@ -473,6 +484,7 @@ static final int VIRTUALIZE_THRESHOLD = 24;
 
     CheckBox createCheckbox(JSONObject json) {
         CheckBox cb = new androidx.appcompat.widget.AppCompatCheckBox(vf.activity);
+        PydrudTheme.sizeToggle(cb, PydrudTheme.checkboxSize);
         JSONObject p = json.optJSONObject("props");
         if (p != null) {
             cb.setText(p.optString("label", ""));
@@ -485,6 +497,8 @@ static final int VIRTUALIZE_THRESHOLD = 24;
     CompoundButton createSwitchView(JSONObject json) {
         androidx.appcompat.widget.SwitchCompat sw =
             new androidx.appcompat.widget.SwitchCompat(vf.activity);
+        sw.setSwitchMinWidth(PydrudTheme.dp(PydrudTheme.switchWidth));
+        PydrudTheme.sizeToggle(sw, PydrudTheme.switchHeight);
         JSONObject p = json.optJSONObject("props");
         if (p != null) {
             sw.setText(p.optString("label", ""));
@@ -521,6 +535,7 @@ static final int VIRTUALIZE_THRESHOLD = 24;
 
     RadioButton createRadio(JSONObject json) {
         RadioButton rb = new androidx.appcompat.widget.AppCompatRadioButton(vf.activity);
+        PydrudTheme.sizeToggle(rb, PydrudTheme.radioSize);
         JSONObject p = json.optJSONObject("props");
         if (p != null) {
             rb.setText(p.optString("label", ""));
@@ -744,6 +759,9 @@ static final int VIRTUALIZE_THRESHOLD = 24;
         int color = vf.mStyler.parseColor(s != null ? s.optString("color", "") : "",
                                PydrudTheme.outline);
         v.setBackgroundColor(color);
+        // A Divider carries the theme's hairline thickness unless the caller
+        // asked for another one, so retuning the token moves every rule.
+        v.setMinimumHeight(PydrudTheme.dp(PydrudTheme.dividerThickness));
         return v;
     }
 
