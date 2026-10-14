@@ -55,6 +55,8 @@ _WIDGET_CLASSES = {
     "Canvas", "CameraPreview", "QRScanner", "MapView", "RichText", "Markdown",
     "ReorderableList", "InfiniteList",
     "AnimatedContainer", "AnimatedOpacity", "AnimatedScale",
+    # v2.1 — Material 3 shape morphing (MaterialShapes + springs)
+    "ShapeMorph",
     "AnimatedRotation", "AnimatedSwitcher", "FadeIn", "SlideIn", "ScaleIn",
     "Hero", "Form", "FormField",
     # v1.5 — responsive layout

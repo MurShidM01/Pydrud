@@ -68,6 +68,7 @@ static final int VIRTUALIZE_THRESHOLD = 24;
                 case "Positioned":
                 case "Card":
                 case "Stack":
+                case "ShapeMorph":
                     view = createBox(json); break;
                 case "Column":
                     view = vf.mLayout.createLinear(json, LinearLayout.VERTICAL); break;
@@ -176,9 +177,16 @@ static final int VIRTUALIZE_THRESHOLD = 24;
         }
     }
 
+    /** Copy a prop under its stylesheet name, when the prop was set. */
+    static void copyIfPresent(JSONObject from, JSONObject to, String prop,
+                              String styleKey) throws JSONException {
+        if (from != null && from.has(prop)) to.put(styleKey, from.get(prop));
+    }
+
     FrameLayout createBox(JSONObject json) throws JSONException {
-        FrameLayout fl = new FrameLayout(vf.activity);
         String type = json.optString("type", "");
+        FrameLayout fl = "ShapeMorph".equals(type)
+            ? new PydrudShapes.MorphView(vf.activity) : new FrameLayout(vf.activity);
         JSONObject s = json.optJSONObject("style");
 
         String alignment = (s != null) ? s.optString("alignment", "") : "";
@@ -186,6 +194,35 @@ static final int VIRTUALIZE_THRESHOLD = 24;
         int grav = alignment.isEmpty() ? Gravity.NO_GRAVITY : vf.mStyler.gravity(alignment);
 
         if ("Card".equals(type)) vf.mStyler.styleCard(fl, s);
+
+        // Shape morphing (Material 3 `shape-morph`): the widget's props carry
+        // the two shapes and how far between them to sit, and a stylesheet can
+        // retune all five — `ShapeMorph.tile { shape-to: cookie_9; }`.
+        if ("ShapeMorph".equals(type)) {
+            JSONObject p = vf.props(json);
+            JSONObject morphStyle = new JSONObject();
+            if (p != null) {
+                copyIfPresent(p, morphStyle, "from", "shapeFrom");
+                copyIfPresent(p, morphStyle, "to", "shapeTo");
+                copyIfPresent(p, morphStyle, "progress", "shapeProgress");
+                copyIfPresent(p, morphStyle, "rotation", "shapeRotation");
+                copyIfPresent(p, morphStyle, "spring", "shapeSpring");
+            }
+            if (s != null) {
+                for (String key : new String[]{"shapeFrom", "shapeTo",
+                        "shapeProgress", "shapeRotation", "shapeSpring",
+                        "bg"}) {
+                    if (s.has(key)) morphStyle.put(key, s.get(key));
+                }
+            }
+            if (!morphStyle.has("shapeFrom")) morphStyle.put("shapeFrom", "circle");
+            if (!morphStyle.has("shapeTo")) {
+                morphStyle.put("shapeTo", morphStyle.optString("shapeFrom"));
+            }
+            // First paint only: the drawable is built already at the current
+            // progress, so nothing animates until a later patch moves it.
+            vf.mStyler.shapeMorphDrawable(morphStyle, fl);
+        }
 
         JSONArray arr = json.optJSONArray("children");
         if (arr != null) {

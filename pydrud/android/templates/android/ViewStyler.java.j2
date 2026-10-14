@@ -55,8 +55,10 @@ new java.util.HashSet<>(java.util.Arrays.asList(
 + "customTrigger cx cy dark danger dash default deg delay deletable dense density description direction disabled "
 + "dismissible distance divider divisions drawerSide duration dx dy elevation enabled error "
 + "scrim grade optical iconWeight iconGrade iconOptical iconFill "
-
-
++ "spring_fast_spatial spring_default_spatial spring_slow_spatial "
++ "spring_fast_effects spring_default_effects spring_slow_effects "
++ "shapeFrom shapeTo shapeProgress shapeRotation shapeSpring "
++ "from to progress rotation spring "
 + "enabled end errorColor error_image events every expand expanded extended fabPosition facing family focus "
 + "feedback filename fill fit floating font font_family format gestures gradient h handled "
 + "haptic haptics has_events height heightFactor helper highAccuracy hint hour hover html icon "
@@ -405,6 +407,62 @@ new java.util.HashMap<>();
         }
     }
 
+    /** Normalise a shape name: `COOKIE-9`, `cookie9` and `cookie_9` agree. */
+    static String shapeName(String raw) {
+        String text = raw == null ? "" : raw.trim().toLowerCase(java.util.Locale.US)
+            .replace('-', '_');
+        if (PydrudShapes.has(text)) return text;
+        // `cookie9` / `puffy square` are common spellings of `cookie_9`.
+        String spaced = text.replace("_", "");
+        for (String candidate : PydrudShapes.names()) {
+            if (candidate.replace("_", "").equals(spaced)) return candidate;
+        }
+        return text;
+    }
+
+    /**
+     * The morph a style block asks for, or null when it does not name one.
+     *
+     * <p>The drawable starts at the current progress and is returned, so the
+     * create path can hand it straight to a view that animates later.
+     */
+    static PydrudShapes.MorphDrawable shapeMorphDrawable(JSONObject s, View view) {
+        if (s == null || !s.has("shapeFrom")) return null;
+        String from = shapeName(s.optString("shapeFrom", "circle"));
+        String to = shapeName(s.optString("shapeTo", from));
+        if (!PydrudShapes.has(from)) from = "circle";
+        if (!PydrudShapes.has(to)) to = from;
+        float progress = (float) s.optDouble("shapeProgress", 1.0);
+        float rotation = (float) s.optDouble("shapeRotation", 0.0);
+        int bg = parseColor(s.optString("bg", ""), PydrudTheme.primaryContainer);
+        String spring = s.optString("shapeSpring",
+            s.optString("spring", PydrudShapes.defaultSpring()));
+
+        // A view that is already morphing keeps its drawable — and with it its
+        // current progress — so a changed `shape-progress` springs from where
+        // the shape actually is instead of snapping back to the old shape.
+        PydrudShapes.MorphDrawable live =
+            view != null && view.getBackground() instanceof PydrudShapes.MorphDrawable
+                ? (PydrudShapes.MorphDrawable) view.getBackground() : null;
+        if (live != null && live.sameAs(from, to)) {
+            live.setFill(bg);
+            live.setSpring(spring);
+            live.setRotation(rotation);
+            live.animateTo(progress);
+            return live;
+        }
+        PydrudShapes.MorphDrawable morph =
+            new PydrudShapes.MorphDrawable(from, to, progress, rotation, bg);
+        morph.setSpring(spring);
+        if (view != null) view.setClipToOutline(false);
+        return morph;
+    }
+
+    /** True when the style block is morphing a shape rather than filling one. */
+    static boolean morphsShape(JSONObject s) {
+        return s != null && s.has("shapeFrom");
+    }
+
     void applyStyle(View view, JSONObject s) {
         if (s == null) return;
         warnUnknownStyleKeys(s);
@@ -424,7 +482,13 @@ new java.util.HashMap<>();
                 || view instanceof CompoundButton || view instanceof SeekBar
                 || view instanceof Spinner;
 
-            if (skipBackground) {
+            // A shape morph owns its background: the shape *is* the
+            // background, so `shape-from`/`shape-to` repaint here and a
+            // plain `bg` further down never gets a chance to overwrite it.
+            PydrudShapes.MorphDrawable morph = shapeMorphDrawable(s, view);
+            if (morph != null) {
+                view.setBackground(morph);
+            } else if (skipBackground) {
                 // These widgets own their background (ripple + state layers);
                 // overwriting it here would undo the Material styling.
             } else if (hasGradient) {

@@ -300,6 +300,66 @@ A transition that names no curve uses the M3 standard curve
 `ease-out`, `ease-in-out`, `linear`) and the platform curve names
 (`overshoot`, `bounce`, `anticipate`) still work unchanged.
 
+### Springs, for motion that is not a curve
+
+Material's second motion vocabulary is the spring: a **damping ratio and a
+stiffness** rather than a curve and a duration. A spring has no duration — it
+runs until it settles — so it takes as long as the distance needs, which is
+what makes a shape morph, a sheet or a drawer feel physical.
+
+```pss
+.card   { transition: scale spring-fast-spatial; }
+.chip   { shape-from: circle; shape-to: cookie_9; shape-spring: spring-slow-spatial; }
+```
+
+The six spec springs are available by name, or referenced as tokens:
+
+| Spring | Damping / stiffness | For |
+|--------|--------------------|-----|
+| `spring-fast-spatial` | 0.9 / 1400 | switches, buttons, shape changes |
+| `spring-default-spatial` | 0.9 / 700 | sheets, drawers, panels |
+| `spring-slow-spatial` | 0.9 / 300 | full-screen movement |
+| `spring-fast-effects` | 1.0 / 3800 | small colour and opacity changes |
+| `spring-default-effects` | 1.0 / 1600 | medium colour and opacity changes |
+| `spring-slow-effects` | 1.0 / 800 | full-screen fades |
+
+*Spatial* springs move something and may overshoot slightly; *effects* springs
+animate colour or opacity and are critically damped, so a value never bounces
+past its target. A spring named where a curve is expected (a `transition`
+timing function, an `animation` curve) is resolved to its settle time and its
+step response — `$spring_fast_spatial` and `spring-fast-spatial` are the same
+curve. Pick the speed by the distance covered, as Material does.
+
+### Shape morphing
+
+`ShapeMorph` draws a Material shape and morphs between two of them. The shape
+*is* the container's background, so its children sit inside it exactly as they
+would inside a Card:
+
+```python
+ShapeMorph(
+    Shapes.CIRCLE, Shapes.COOKIE_9,
+    progress=1 if selected else 0, rotation=90, size=96,
+    bg=Theme.primary_container, child=Icon(Icons.FAVORITE),
+)
+```
+
+`progress` is the whole animation: 0 paints the first shape, 1 the second, and
+every value between is a real member of the shape family rather than a tangle
+of crossing curves. Changing it springs the shape instead of snapping it, and
+a stylesheet can retune the whole morph for a class:
+
+```pss
+ShapeMorph.badge { shape-from: circle; shape-to: sunny; shape-progress: 1;
+                   shape-rotation: 45; shape-spring: spring-default-spatial; }
+```
+
+The family is the Material shape catalogue: `circle`, `square`,
+`puffy_square`, `diamond`, `puffy_diamond`, `pentagon`, `hexagon`, `octagon`,
+`gem`, `clover_4/6/8/12`, `cookie_4/6/9/12`, `burst`, `soft_burst`, `flower`
+and `sunny`. Names are forgiving — `COOKIE-9`, `cookie9` and `cookie_9` all
+mean the same shape.
+
 ## CSS long-hands and shorthands
 
 CSS spellings are folded into Pydrud's canonical composites, so the renderer

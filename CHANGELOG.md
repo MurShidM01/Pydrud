@@ -181,6 +181,35 @@ other platforms without any of them shipping yet.
 * `tests/test_m3_motion.py` (29 tests, 82 subtests) pins the spec tables, the
   curve evaluation, the shorthand vocabulary and every consumer.
 
+### Shape morphing and springs
+
+* **Material's second motion vocabulary is now implemented: springs.**
+  The spec publishes six of them as a damping ratio and a stiffness — the
+  `motionSpring*` theme attributes — and Pydrud had only curves and durations.
+  A spring has no duration; it runs until it settles, so it takes as long as
+  the distance needs. All six are tokens (`spring_fast_spatial` …,
+  `spring_slow_effects`), the Python `Spring` evaluator is the analytic step
+  response (under-, critically and over-damped), and the renderer's
+  `SpringInterpolator` is the same function as a `TimeInterpolator`, so a
+  spring means the same thing on both sides. Spatial springs overshoot
+  slightly; effects springs are critically damped and never do.
+* **Shapes are a family, and a morph is the motion between two members.**
+  New `ShapeMorph` widget and `PydrudShapes` renderer: every shape is a radius
+  function sampled at the same angles — superellipses (circle, square, diamond
+  and their puffy variants), rounded polygons (pentagon, hexagon, octagon,
+  gem) and waves (`cookie`, `clover`, `burst`, `flower`, `sunny`) — so any two
+  have matching vertices and the interpolation between them is always a real
+  shape rather than a tangle of crossing curves. `progress` is the whole
+  animation; changing it springs the shape instead of snapping it, and a
+  morph can rotate as it reshapes.
+* **A stylesheet can retune a morph**, including its progress and its spring:
+  `shape-from`, `shape-to`, `shape-progress`, `shape-rotation` and
+  `shape-spring` are registered PSS keys with native consumers, and a shape
+  morph owns its background so a plain `bg` cannot paint over it.
+* `tests/test_m3_shapes.py` (43 tests, 135 subtests) pins the spring values,
+  the analytic evaluation, the settle time, the shape geometry, the widget,
+  the stylesheet keys and the generated Java.
+
 ### Icons — the Material Symbols axes reach the glyph
 
 * **Every icon drew at its defaults.** The catalogue ships 2,148 Material

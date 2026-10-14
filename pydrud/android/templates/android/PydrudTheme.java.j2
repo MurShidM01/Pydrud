@@ -675,6 +675,118 @@ public final class PydrudTheme {
         }
     }
 
+    /**
+     * A Material spring by name, as {@code {damping, stiffness}}.
+     *
+     * <p>Springs are read from the tokens, so a theme that wants a bouncier
+     * motion scheme retunes one token and every animation that named that
+     * spring follows.
+     */
+    public static float[] spring(String name) {
+        String key = name == null ? "" : name.trim().toLowerCase(java.util.Locale.US)
+            .replace('-', '_');
+        String raw;
+        switch (key) {
+            case "spring_fast_spatial":    raw = springFastSpatial; break;
+            case "spring_slow_spatial":    raw = springSlowSpatial; break;
+            case "spring_fast_effects":    raw = springFastEffects; break;
+            case "spring_default_effects": raw = springDefaultEffects; break;
+            case "spring_slow_effects":    raw = springSlowEffects; break;
+            // Rounded to one spring, Material's default spatial spring is the
+            // one a shape morph, a sheet or a drawer moves on.
+            case "spring_default_spatial":
+            case "": case "spring":
+            default:                       raw = springDefaultSpatial;
+        }
+        float damping = 0.9f, stiffness = 700f;
+        String[] parts = raw.split(",");
+        if (parts.length == 2) {
+            try {
+                damping = Float.parseFloat(parts[0].trim());
+                stiffness = Float.parseFloat(parts[1].trim());
+            } catch (NumberFormatException ignored) { }
+        }
+        return new float[]{Math.max(0.05f, damping), Math.max(1f, stiffness)};
+    }
+
+    /** A spring as a time interpolator, over its own settle time. */
+    public static android.view.animation.Interpolator springEasing(String name) {
+        float[] spec = spring(name);
+        String cacheKey = "spring:" + spec[0] + "," + spec[1];
+        android.view.animation.Interpolator cached = EASING_CACHE.get(cacheKey);
+        if (cached != null) return cached;
+        android.view.animation.Interpolator built =
+            new SpringInterpolator(spec[0], spec[1]);
+        EASING_CACHE.put(cacheKey, built);
+        return built;
+    }
+
+    /** How long a spring takes to settle, in milliseconds. */
+    public static long springDurationMs(String name) {
+        return (long) ((SpringInterpolator) springEasing(name)).settleMs();
+    }
+
+    /**
+     * The analytic step response of a damped spring, sampled as an easing.
+     *
+     * <p>A spring has no duration — it runs until it settles — so the
+     * animation is given the settle time and this maps progress across it
+     * exactly. Unit mass: ω₀ = √stiffness, and the three regimes (under-,
+     * critically and over-damped) each have a closed form.
+     */
+    static final class SpringInterpolator
+            implements android.view.animation.Interpolator {
+        private final float damping;
+        private final float stiffness;
+        private final float settle;
+
+        SpringInterpolator(float damping, float stiffness) {
+            this.damping = damping;
+            this.stiffness = stiffness;
+            this.settle = solveSettleMs();
+        }
+
+        float settleMs() { return settle; }
+
+        /** Where the spring is {@code ms} milliseconds after release. */
+        float at(float ms) {
+            float omega = (float) Math.sqrt(stiffness);
+            float t = ms / 1000f;
+            if (damping < 1f) {
+                float decayed = (float) Math.exp(-damping * omega * t);
+                float omegaD = omega * (float) Math.sqrt(1f - damping * damping);
+                return 1f - decayed * ((float) Math.cos(omegaD * t)
+                    + (damping * omega / omegaD) * (float) Math.sin(omegaD * t));
+            }
+            if (Math.abs(damping - 1f) < 1e-6f) {
+                return 1f - (1f + omega * t) * (float) Math.exp(-omega * t);
+            }
+            float root = omega * (float) Math.sqrt(damping * damping - 1f);
+            float decayed = (float) Math.exp(-damping * omega * t);
+            return 1f - decayed * ((float) Math.cosh(root * t)
+                + (damping * omega / root) * (float) Math.sinh(root * t));
+        }
+
+        private float solveSettleMs() {
+            for (int ms = 1; ms < 8000; ms++) {
+                if (Math.abs(at(ms) - 1f) < 0.001f
+                        && Math.abs(at(ms + 1) - 1f) < 0.001f
+                        && Math.abs(at(ms + 10) - 1f) < 0.001f
+                        && Math.abs(at(ms + 40) - 1f) < 0.001f
+                        && Math.abs(at(ms + 90) - 1f) < 0.001f) {
+                    return ms;
+                }
+            }
+            return 2000f;
+        }
+
+        @Override public float getInterpolation(float input) {
+            if (input <= 0f) return 0f;
+            if (input >= 1f) return 1f;
+            return at(input * settle);
+        }
+    }
+
     /** A duration step by name, defaulting to the token's default. */
     public static long durationMs(String step) {
         return durationMs((Object) step);
@@ -1101,6 +1213,17 @@ public final class PydrudTheme {
     public static String easingEmphasizedAccelerate = "cubic-bezier(0.3, 0, 0.8, 0.15)";
     public static String easingLinear = "cubic-bezier(0, 0, 1, 1)";
 
+    // The M3 spring motion system: a damping ratio and a stiffness, written
+    // the way the token carries them. `spatial` springs move something and
+    // may overshoot; `effects` springs change colour or opacity and are
+    // critically damped, so a value never bounces past its target.
+    public static String springFastSpatial = "0.9, 1400";
+    public static String springDefaultSpatial = "0.9, 700";
+    public static String springSlowSpatial = "0.9, 300";
+    public static String springFastEffects = "1.0, 3800";
+    public static String springDefaultEffects = "1.0, 1600";
+    public static String springSlowEffects = "1.0, 800";
+
     // Material 3 state layers
     public static float stateFocus = 0.10f;
     public static float stateDragged = 0.16f;
@@ -1250,6 +1373,12 @@ public final class PydrudTheme {
         easingEmphasizedDecelerate = t.optString("easing_emphasized_decelerate", easingEmphasizedDecelerate);
         easingEmphasizedAccelerate = t.optString("easing_emphasized_accelerate", easingEmphasizedAccelerate);
         easingLinear   = t.optString("easing_linear", easingLinear);
+        springFastSpatial    = t.optString("spring_fast_spatial", springFastSpatial);
+        springDefaultSpatial = t.optString("spring_default_spatial", springDefaultSpatial);
+        springSlowSpatial    = t.optString("spring_slow_spatial", springSlowSpatial);
+        springFastEffects    = t.optString("spring_fast_effects", springFastEffects);
+        springDefaultEffects = t.optString("spring_default_effects", springDefaultEffects);
+        springSlowEffects    = t.optString("spring_slow_effects", springSlowEffects);
         stateFocus     = num(t, "state_focus", stateFocus);
         stateDragged   = num(t, "state_dragged", stateDragged);
         stateDisabledContent = num(t, "state_disabled_content", stateDisabledContent);

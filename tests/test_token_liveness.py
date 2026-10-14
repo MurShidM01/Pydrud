@@ -110,7 +110,11 @@ def _is_a_use(line: str, column: int, token: str) -> bool:
     stripped = line.strip()
     if not stripped or stripped.startswith(("//", "*", "/*")):
         return False
-    if f'"{token}"' in line:
+    # A theme loader reads the snake_case token name out of the `tokens`
+    # object; a name in any other position (`case "spring_fast_spatial":`
+    # in the resolver, say) is the token being *used*.
+    if re.search(r'\.(?:opt\w*|has|isNull|get\w*)\(\s*"' + re.escape(token) + r'"',
+                 line):
         return False
     assign = re.search(r"(?<![=!<>+\-*/%&|^])=(?!=)", line)
     if assign and column < assign.start():

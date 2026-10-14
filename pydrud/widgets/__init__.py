@@ -37,6 +37,7 @@ from pydrud.widgets.material import (
     BottomAppBar, FABMenu, FABMenuItem, SearchView,
     ButtonGroup, LoadingIndicator, SplitButton, Toolbar,
 )
+from pydrud.widgets.shapes import ShapeMorph, Shapes, SHAPES, SPRINGS
 from pydrud.widgets.gestures import GestureDetector, InkWell, Dismissible, Draggable
 from pydrud.widgets.animation import (
     Animation, AnimatedContainer, AnimatedOpacity, AnimatedScale,
@@ -110,6 +111,7 @@ __all__ = [
     "Image",
     "SvgPicture",
     "Icon",
+    "ShapeMorph", "Shapes", "SHAPES", "SPRINGS",
     "Checkbox",
     "Switch",
     "ProgressBar",

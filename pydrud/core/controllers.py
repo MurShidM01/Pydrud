@@ -99,6 +99,105 @@ class CubicBezier:
         return u
 
 
+class Spring:
+    """A Material 3 spring: a damping ratio and a stiffness.
+
+    Springs have no duration — they run until they settle — so the evaluator
+    works in *fractions of the settle time*: ``spring(t)`` is the position of
+    a unit mass released at rest towards 1, at ``t`` times the time it takes
+    to come to rest. The renderer does exactly this with a
+    ``TimeInterpolator``, so a spring means the same thing on both sides.
+
+    ``damping`` is ζ (0 = endless oscillation, 1 = no overshoot at all) and
+    ``stiffness`` is k with a unit mass, which the M3 tokens publish directly.
+    """
+
+    __slots__ = ("damping", "stiffness", "_settle")
+
+    def __init__(self, damping: float, stiffness: float):
+        if stiffness <= 0:
+            raise ValueError("spring stiffness must be positive")
+        if damping <= 0:
+            # No damping is an ideal oscillator: it never settles, so it can
+            # never be an easing. The renderer clamps too.
+            raise ValueError("spring damping must be positive")
+        self.damping = float(damping)
+        self.stiffness = float(stiffness)
+        self._settle = self._settle_time()
+
+    @classmethod
+    def parse(cls, text: str) -> "Spring":
+        """Parse ``"0.9, 700"`` — how a spring token is written."""
+        parts = [part.strip() for part in str(text).split(",")]
+        if len(parts) != 2:
+            raise ValueError(f"a spring is 'damping, stiffness', got {text!r}")
+        return cls(float(parts[0]), float(parts[1]))
+
+    def __call__(self, t: float) -> float:
+        if t <= 0.0:
+            return 0.0
+        if t >= 1.0:
+            return 1.0
+        return self.at(t * self.settle_ms)
+
+    def at(self, ms: float) -> float:
+        """The spring's position ``ms`` milliseconds after release."""
+        omega = math.sqrt(self.stiffness)        # unit mass: ω₀ = √k
+        zeta = self.damping
+        seconds = ms / 1000.0
+        if zeta < 1.0:
+            decayed = math.exp(-zeta * omega * seconds)
+            omega_d = omega * math.sqrt(1.0 - zeta * zeta)
+            return 1.0 - decayed * (math.cos(omega_d * seconds)
+                                    + (zeta * omega / omega_d)
+                                    * math.sin(omega_d * seconds))
+        if abs(zeta - 1.0) < 1e-6:
+            return 1.0 - (1.0 + omega * seconds) * math.exp(-omega * seconds)
+        root = omega * math.sqrt(zeta * zeta - 1.0)
+        decayed = math.exp(-zeta * omega * seconds)
+        return 1.0 - decayed * (math.cosh(root * seconds)
+                                + (zeta * omega / root) * math.sinh(root * seconds))
+
+    @property
+    def settle_ms(self) -> float:
+        """How long the spring takes to come to rest (0.1 % of the travel)."""
+        return self._settle
+
+    def _settle_time(self) -> float:
+        for ms in range(1, 8000):
+            if abs(self.at(ms) - 1.0) < 0.001:
+                settled = all(abs(self.at(later) - 1.0) < 0.001
+                              for later in (ms + 1, ms + 10, ms + 40, ms + 90))
+                if settled:
+                    return float(ms)
+        return 2000.0
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return f"Spring({self.damping}, {self.stiffness})"
+
+
+#: The Material 3 spring names, mapped to the token carrying the parameters.
+M3_SPRINGS = {
+    "spring_fast_spatial": "spring_fast_spatial",
+    "spring_default_spatial": "spring_default_spatial",
+    "spring_slow_spatial": "spring_slow_spatial",
+    "spring_fast_effects": "spring_fast_effects",
+    "spring_default_effects": "spring_default_effects",
+    "spring_slow_effects": "spring_slow_effects",
+}
+
+
+def _m3_spring(token_name: str) -> Callable[[float], float]:
+    """Read a spring token lazily, so ``Tokens.update()`` is honoured."""
+    def ease(t: float) -> float:
+        from pydrud.widgets.tokens import Tokens
+
+        return Spring.parse(getattr(Tokens, token_name))(t)
+
+    ease.__name__ = f"m3_{token_name}"
+    return ease
+
+
 #: Material 3 easing names mapped to the token that carries the curve, so a
 #: widget (or a stylesheet) can name the spec's curve and Python evaluates the
 #: same cubic-bézier the renderer will.
@@ -149,6 +248,8 @@ CURVES: dict[str, Callable[[float], float]] = {
 for _m3_name, _m3_token in M3_CURVES.items():
     CURVES.setdefault(_m3_name, _m3_curve(_m3_token))
 
+for _m3_name, _m3_token in M3_SPRINGS.items():
+    CURVES.setdefault(_m3_name, _m3_spring(_m3_token))
 
 
 def _bounce(t: float) -> float:
@@ -175,6 +276,8 @@ def curve(name: str) -> Callable[[float], float]:
     """
     if isinstance(name, str) and "cubic-bezier(" in name:
         return CubicBezier.parse(name)
+    if isinstance(name, str) and name.startswith("spring-"):
+        return _m3_spring(name.replace("-", "_"))
     if name not in CURVES:
         raise ValueError(f"Unknown curve {name!r}. Available: "
                          f"{', '.join(sorted(CURVES))}")

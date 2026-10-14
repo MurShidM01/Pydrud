@@ -153,6 +153,22 @@ class Tokens:
     easing_emphasized_accelerate: str = "cubic-bezier(0.3, 0, 0.8, 0.15)"
     easing_linear: str = "cubic-bezier(0, 0, 1, 1)"
 
+    # The Material 3 spring motion system (motionScheme / MotionScheme):
+    # a spring is a damping ratio and a stiffness, not a duration, so it
+    # adapts to the distance and to the device instead of running for a fixed
+    # number of milliseconds. `spatial` springs move something on screen and
+    # are allowed to overshoot; `effects` springs animate colour and opacity
+    # and are critically damped so a value never bounces past its target.
+    #
+    # Values are Google's (`material-components-android` Motion.md, the six
+    # `motionSpring*` theme attributes), written as "damping, stiffness".
+    spring_fast_spatial: str = "0.9, 1400"      # switches, buttons, shapes
+    spring_default_spatial: str = "0.9, 700"    # sheets, drawers, panels
+    spring_slow_spatial: str = "0.9, 300"       # full-screen movement
+    spring_fast_effects: str = "1.0, 3800"      # small colour/opacity changes
+    spring_default_effects: str = "1.0, 1600"   # medium colour/opacity changes
+    spring_slow_effects: str = "1.0, 800"       # full-screen fades
+
     press_scale: float = 0.97
     ripple_opacity: float = 0.12
     state_hover: float = 0.08       # M3: 8%
