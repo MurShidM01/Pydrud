@@ -24,7 +24,12 @@ from typing import Any, Callable, Optional, Union
 
 from pydrud.widgets.base import Widget
 
-#: Interpolators supported by the Android renderer.
+#: Interpolators the renderer understands, plus the Material 3 motion names.
+#:
+#: The M3 names resolve to the `easing_*` tokens, so a widget that asks for
+#: the spec's curve follows the theme — retune `easing_standard` and every
+#: animation that named `standard` moves with it. The older names are the
+#: platform interpolators, kept because they are what existing code writes.
 CURVES = (
     "linear",
     "ease_in",
@@ -35,16 +40,28 @@ CURVES = (
     "anticipate",
     "decelerate",
     "accelerate",
+    # Material 3 motion
+    "standard",
+    "standard_decelerate",
+    "standard_accelerate",
+    "emphasized",
+    "emphasized_decelerate",
+    "emphasized_accelerate",
 )
 
 
 class Animation:
     """A reusable animation specification."""
 
-    def __init__(self, duration: int = 250, *, curve: str = "ease_in_out",
-                 delay: int = 0, repeat: int = 0, reverse: bool = False):
+    def __init__(self, duration: Optional[int] = None, *,
+                 curve: str = "standard", delay: int = 0, repeat: int = 0,
+                 reverse: bool = False):
         if curve not in CURVES:
             raise ValueError(f"Unknown curve {curve!r}; expected one of {CURVES}")
+        if duration is None:
+            from pydrud.widgets.tokens import Tokens
+
+            duration = int(Tokens.duration_normal)
         if duration < 0 or delay < 0:
             raise ValueError("Animation duration/delay must be >= 0")
         self.duration = int(duration)
@@ -67,15 +84,15 @@ class Animation:
 
     @classmethod
     def fast(cls) -> "Animation":
-        return cls(150, curve="ease_out")
+        return cls(150, curve="standard_decelerate")
 
     @classmethod
     def normal(cls) -> "Animation":
-        return cls(250, curve="ease_in_out")
+        return cls(curve="standard")
 
     @classmethod
     def slow(cls) -> "Animation":
-        return cls(450, curve="ease_in_out")
+        return cls(450, curve="emphasized_decelerate")
 
     @classmethod
     def springy(cls) -> "Animation":

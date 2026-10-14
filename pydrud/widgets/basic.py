@@ -8,6 +8,7 @@ from typing import Optional, Union
 from pydrud.widgets.base import Widget
 from pydrud.widgets.styling import FontStyle
 from pydrud.widgets.theme import Icons
+from pydrud.widgets.theme.icons import check_icon_axes
 
 
 class Text(Widget):
@@ -397,6 +398,19 @@ class Icon(Widget):
     ``pydrud.icons.has(name)`` / ``pydrud.icons.available()`` report which
     names the renderer understands; an unknown name now logs a warning and
     is flagged by ``pydrud analyze`` instead of silently rendering "?".
+
+    Every one of Material Symbols' four variable axes is available::
+
+        Icon(Icons.FAVORITE, fill=True, weight=600)   # a bolder, filled heart
+        Icon(Icons.SEARCH, weight=300, optical=48)    # light, drawn for a hero
+
+    ``fill`` picks the outlined treatment (``fill=False``, the spec's default
+    *design*) or the shipped solid glyph; ``weight`` (100–700) thickens it;
+    ``grade`` (−50–200) shifts the weight a little for optical alignment;
+    ``optical`` (20–48) is the size the glyph is drawn *for*, which trades
+    stroke thickness for detail. Weight, grade and optical are approximations
+    on path data rather than on the variable font — the axes change the glyph
+    the way the font's would, and the docs say exactly how.
     """
 
     _widget_type = "Icon"
@@ -407,6 +421,10 @@ class Icon(Widget):
         *,
         size: Optional[float] = None,
         color: Optional[str] = None,
+        weight: Optional[int] = None,
+        fill: Optional[bool] = None,
+        grade: Optional[int] = None,
+        optical: Optional[float] = None,
         key: Optional[str] = None,
         style: Optional[dict] = None,
         expand: Optional[int] = None,
@@ -416,6 +434,8 @@ class Icon(Widget):
         super().__init__(key=key, style=style, expand=expand, visible=visible, **kwargs)
         self._icon_name = Icons.normalize(name)
         self._icon_path: Optional[str] = None
+        self._axes = check_icon_axes(weight=weight, grade=grade, optical=optical)
+        self._fill = None if fill is None else bool(fill)
         if size:
             self.style.setdefault("font", {})["size"] = size
         if color:
@@ -448,9 +468,16 @@ class Icon(Widget):
         return icon
 
     def _serialise_props(self) -> dict:
-        if self._icon_path is not None:
-            return {"path": self._icon_path}
-        return {"name": self._icon_name}
+        props: dict = ({"path": self._icon_path} if self._icon_path is not None
+                       else {"name": self._icon_name})
+        # Only the axes that were set travel: the renderer's defaults are the
+        # spec's defaults, so an unset axis costs nothing on the wire.
+        for key, value in self._axes.items():
+            if value is not None:
+                props[key] = value
+        if self._fill is not None:
+            props["fill"] = self._fill
+        return props
 
 
 class Checkbox(Widget):

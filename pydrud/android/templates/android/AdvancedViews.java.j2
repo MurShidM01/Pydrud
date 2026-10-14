@@ -399,7 +399,8 @@ public class AdvancedViews {
                 text.setTypeface(Typeface.DEFAULT_BOLD);
             } else if ("quote".equals(kind)) {
                 appendSpans(builder, block.optJSONArray("spans"), key);
-                text.setPadding(dp(12), dp(4), dp(4), dp(4));
+                // Blockquote rule sits on the leading edge.
+                text.setPaddingRelative(dp(12), dp(4), dp(4), dp(4));
                 text.setTextSize(base);
                 text.setTypeface(Typeface.defaultFromStyle(Typeface.ITALIC));
             } else if ("list".equals(kind)) {
@@ -620,6 +621,28 @@ public class AdvancedViews {
                     } catch (Exception ignored) { }
                     events.dispatch("reorder", key, data);
                     return true;
+                }
+
+                @Override
+                public void onSelectedChanged(RecyclerView.ViewHolder holder,
+                                              int actionState) {
+                    super.onSelectedChanged(holder, actionState);
+                    // M3's dragged state layer: the row being moved is tinted
+                    // for as long as it is in flight, at stateDragged (16%),
+                    // then restored when the gesture ends.
+                    if (holder == null) return;
+                    // A foreground layer sits above the row's own background
+                    // and content, so it tints without destroying either and
+                    // needs no restore bookkeeping.
+                    holder.itemView.setForeground(new android.graphics.drawable.ColorDrawable(
+                        PydrudTheme.draggedLayer()));
+                }
+
+                @Override
+                public void clearView(RecyclerView view,
+                                      RecyclerView.ViewHolder holder) {
+                    super.clearView(view, holder);
+                    if (holder != null) holder.itemView.setForeground(null);
                 }
 
                 @Override

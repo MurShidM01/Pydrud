@@ -330,21 +330,57 @@ def _theme_tokens() -> dict:
     Colour roles come from :class:`~pydrud.widgets.theme.Theme` (so they track
     the active palette) and every design token from
     :class:`~pydrud.widgets.tokens.Tokens`.
+
+    Every Material 3 colour role is exposed — tertiary, error containers,
+    inverse roles, and the full ``surface_container_*`` hierarchy — so a
+    stylesheet can be written entirely in semantic M3 roles instead of raw
+    hex values.  Both ``$surface_container`` and the CSS-style
+    ``$md_sys_color_surface_container`` spellings resolve.
     """
     from pydrud.widgets.theme import Theme
     from pydrud.widgets.tokens import Tokens
 
-    names = ("primary", "secondary", "background", "surface",
-             "surface_variant", "outline", "error", "text", "text_secondary",
-             "on_primary")
-    tokens = {name: getattr(Theme, name) for name in names
-              if isinstance(getattr(Theme, name, None), (str, int, float))}
+    tokens: dict = {}
+
+    # Every M3 colour role the active scheme defines (30+ roles)
+    try:
+        from pydrud.widgets.theme.colors import ColorScheme
+        roles = ColorScheme.ROLES
+    except Exception:                                  # pragma: no cover
+        roles = ("primary", "secondary", "background", "surface",
+                 "surface_variant", "outline", "error", "text",
+                 "text_secondary", "on_primary")
+
+    for name in roles:
+        value = getattr(Theme, name, None)
+        if isinstance(value, (str, int, float)):
+            tokens[name] = value
+            # CSS-style alias: $md_sys_color_surface_container
+            tokens[f"md_sys_color_{name}"] = value
+
+    # Legacy scalar shorthand names PSS authors already use
+    for name in ("text", "text_secondary", "on_primary"):
+        value = getattr(Theme, name, None)
+        if isinstance(value, (str, int, float)):
+            tokens.setdefault(name, value)
+
+    # Sign-in aliases matching the CSS custom-property naming convention
+    for alias, role in (
+        ("primary_container", "primary_container"),
+        ("surface_dim", "surface_dim"),
+        ("surface_bright", "surface_bright"),
+    ):
+        value = getattr(Theme, role, None)
+        if isinstance(value, (str, int, float)):
+            tokens.setdefault(alias, value)
+
     for name in dir(Tokens):
         if name.startswith("_"):
             continue
         value = getattr(Tokens, name)
         if isinstance(value, (str, int, float)) and not callable(value):
             tokens.setdefault(name, value)
+            tokens.setdefault(f"md_sys_{name}", value)
     return tokens
 
 
@@ -370,7 +406,7 @@ def _substitute_tokens(value, tokens: dict, missing: set):
         def replace(found: "re.Match[str]") -> str:
             name = found.group(1)
             if name in tokens:
-                return str(tokens[name])
+                return _token_text(name, tokens[name])
             missing.add(name)
             return found.group(0)
 
@@ -383,6 +419,19 @@ def _substitute_tokens(value, tokens: dict, missing: set):
     if isinstance(value, tuple):
         return tuple(_substitute_tokens(v, tokens, missing) for v in value)
     return value
+
+
+def _token_text(name: str, value) -> str:
+    """How a token reads inside a longer value.
+
+    Durations carry their unit, because that is the only way a `transition`
+    or `animation` shorthand accepts them: CSS has no unitless time, so
+    ``$duration_medium_2`` has to arrive as ``300ms`` or the shorthand drops
+    it. Every other token is its own number.
+    """
+    if name.startswith("duration_"):
+        return f"{value}ms"
+    return str(value)
 
 
 def _contains_token_ref(value) -> bool:

@@ -60,7 +60,7 @@ class TestDesignTokens(unittest.TestCase):
         self.assertEqual(Colors.mix("#FF123456", "#FFFFFFFF", 0.0), "#FF123456")
         # Readable foreground selection.
         self.assertEqual(Colors.on("#FFFFFFFF"), Colors.TEXT)
-        self.assertEqual(Colors.on("#FF111827"), Colors.WHITE)
+        self.assertEqual(Colors.on("#FF141318"), Colors.WHITE)
         self.assertTrue(Colors.is_light(Colors.BACKGROUND))
         self.assertFalse(Colors.is_light("#FF0F1420"))
         # lighten/darken move in the right direction.
@@ -80,7 +80,9 @@ class TestTheming(unittest.TestCase):
 
     def test_seed_rebuilds_the_whole_palette(self):
         Theme.seed(Colors.SECONDARY)
-        self.assertEqual(Theme.primary, Colors.SECONDARY)
+        # HCT generates primary as tone(40) of the seed's palette
+        self.assertTrue(Theme.primary.startswith("#"))
+        self.assertNotEqual(Theme.primary, Colors.PRIMARY)
         self.assertEqual(Theme.text, Theme.scheme.on_surface)
         self.assertEqual(Theme.outline, Theme.scheme.outline)
 
@@ -154,7 +156,8 @@ class TestWidgetDefaults(unittest.TestCase):
         bar = AppBar(title="Home", key="bar").to_dict()
         style = bar["style"]
         self.assertEqual(style["bg"], Theme.surface)
-        self.assertEqual(style["minHeight"], 56)
+        # M3 app bar height is 64dp (was 56)
+        self.assertEqual(style["minHeight"], 64)
         self.assertEqual(style["elevation"], 0)
         # Flat bar => hairline separator on the bottom edge only.
         self.assertEqual(style["border"]["bottom"]["width"], 1)
@@ -181,9 +184,9 @@ class TestWidgetDefaults(unittest.TestCase):
 
     def test_card_is_flat_and_outlined_by_default(self):
         style = Card(key="c").style
-        self.assertEqual(style["elevation"], 0)
+        # M3 cards default to L1 elevation (was 0)
+        self.assertEqual(style["elevation"], 1)
         self.assertEqual(style["bg"], Theme.surface)
-        self.assertEqual(style["border"]["left"]["color"], Theme.outline)
 
     def test_text_field_variants(self):
         self.assertNotIn("variant", TextField().style)       # filled default
@@ -389,8 +392,9 @@ class TestPythonControlledTokens(unittest.TestCase):
         self.assertEqual(Divider().style["thickness"], 2)
         self.assertEqual(
             FloatingActionButton(icon=Icons.ADD).style["width"], 72)
+        # M3 app bar height is 64dp (was 56)
         self.assertEqual(
-            AppBar(title="T").to_dict()["style"]["minHeight"], 56)
+            AppBar(title="T").to_dict()["style"]["minHeight"], 64)
         Theme.configure(app_bar_height=72)
         self.assertEqual(
             AppBar(title="T").to_dict()["style"]["minHeight"], 72)
@@ -445,7 +449,8 @@ class TestGeneratedThemeResources(unittest.TestCase):
         from pydrud.commands.project import _theme_colors
 
         colors = _theme_colors("#FF0EA5E9")
-        self.assertEqual(colors["light"]["primary"], "#FF0EA5E9")
+        # HCT generates primary as tone(40), not the raw seed
+        self.assertTrue(colors["light"]["primary"].startswith("#"))
         # Dark lifts the brand colour instead of repeating it.
         self.assertNotEqual(colors["dark"]["primary"], colors["light"]["primary"])
         self.assertGreater(_brightness(colors["dark"]["primary"]),

@@ -265,15 +265,17 @@ class TestGeneratedProject(unittest.TestCase):
         # (core.autocrlf) reports the same size as a Unix one.
         #
         # The budget is a tripwire for *accidental* bloat — bundling the CLI,
-        # templates or launcher icons adds megabytes. The complete Python-side
-        # PSS engine — parser, resolver, the CSS value evaluator and the fold
-        # pass — plus the transactional loader bring the measured runtime to
-        # 866.2 KB; keep about 50 KB of headroom for small runtime additions
-        # while retaining a tight ceiling.
+        # templates or launcher icons adds megabytes. Legitimate growth is
+        # expected and recorded here: the complete Python-side PSS engine
+        # (parser, resolver, the CSS value evaluator, the fold pass) plus the
+        # transactional loader measured 866.2 KB before 2.1.5; that release
+        # added the HCT colour system (35 KB on its own) and the M3 component
+        # set, bringing the measured runtime to 936.0 KB. Keep about 50 KB of
+        # headroom for small additions while retaining a tight ceiling.
         size_kb = bundled_runtime_size_kb(bundle)
         heaviest = "".join(f"\n  {s / 1024:6.1f} KB  {p}"
                            for s, p in bundle_files(bundle)[:5])
-        self.assertLess(size_kb, 920,
+        self.assertLess(size_kb, 990,
                         f"bundled runtime is unexpectedly large "
                         f"({size_kb:.1f} KB); heaviest modules:{heaviest}")
 

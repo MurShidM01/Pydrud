@@ -2,7 +2,9 @@
   <img src="https://img.shields.io/pypi/v/pydrud?color=6366F1&style=flat-square" alt="PyPI" />
   <img src="https://img.shields.io/pypi/pyversions/pydrud?style=flat-square" alt="Python" />
   <img src="https://img.shields.io/badge/runtimes-Pydash%20%7C%20Chaquopy-6366F1?style=flat-square" alt="Pydash and Chaquopy runtimes" />
-  <img src="https://img.shields.io/github/license/MurShidM01/Pydrud?style=flat-square" alt="License" />
+  <img src="https://img.shields.io/github/license/Sindhi-Hacker/Pydrud?style=flat-square" alt="MIT license" />
+  <img src="https://img.shields.io/github/v/release/Sindhi-Hacker/Pydrud?style=flat-square&color=6366F1" alt="Latest release" />
+  <img src="https://img.shields.io/badge/Material%20Design-3-6366F1?style=flat-square" alt="Material Design 3" />
   <img src="https://img.shields.io/pypi/dm/pydrud?style=flat-square" alt="Downloads" />
 </p>
 
@@ -15,15 +17,37 @@
 
 <p align="center">
   <strong>Congratulations, Android users — Pydash is officially live!</strong><br>
-  Download the preview client from the <a href="https://github.com/MurShidM01/Pydash/releases">Pydash releases page</a>. iOS is coming soon.
+  Download the preview client from the <a href="https://github.com/Sindhi-Hacker/Pydash/releases">Pydash releases page</a>. iOS is coming soon.
 </p>
 
 ---
 
-Pydrud is a declarative UI framework for Python with a platform-neutral widget
-tree, a keyed diff engine, and a versioned render protocol. The same screen
-code drives a host preview or native Android Views — there is no XML and no
-Java to write.
+**Pydrud** is a declarative UI framework for building **native Android apps in
+Python** — a Flutter-inspired, radically simpler alternative to writing Java or
+Kotlin, with **Material Design 3 (Material You)** built in. It is a Python GUI
+framework for Android: write the interface once as a Python widget tree, and a
+generated renderer turns it into **native Android Views** at runtime. There is
+no XML layout and no Java to write, and the widget, theme and styling layers
+stay platform-neutral, so the same screen code renders through any adapter.
+
+Pydrud ships with a platform-neutral widget tree, a keyed diff engine, and a
+versioned render protocol. The same screen code drives the host preview and the
+native Android renderer.
+
+It ships the Material 3 design system end to end: HCT-generated colour with
+all 36 semantic roles, the M3 type scale, shape and elevation systems, the
+component catalogue from buttons to side sheets, and the M3 motion tokens —
+all of it expressed once in Python and translated by the renderer.
+
+**Search terms this project answers to:** Python Android UI framework ·
+declarative Python UI · Material Design 3 in Python · Material You Python ·
+Chaquopy app · native Android Views from Python · Flutter alternative for
+Python · build an Android app without Java · PSS stylesheets.
+
+- 📦 PyPI: [pypi.org/project/pydrud](https://pypi.org/project/pydrud/)
+- 📚 Docs: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/PSS_STYLESHEETS.md](docs/PSS_STYLESHEETS.md)
+- 🐛 Issues: [github.com/Sindhi-Hacker/Pydrud/issues](https://github.com/Sindhi-Hacker/Pydrud/issues)
+- 📝 Changes: [CHANGELOG.md](CHANGELOG.md)
 
 ## Quick start
 
@@ -68,6 +92,27 @@ pydrud dev --bridge            # serve the host bridge (runs `adb reverse` for y
 All three share the same widget tree, keyed diff and protocol-v2 render
 transactions; only the transport differs.
 
+### Platform-neutral by design
+
+Android is the only renderer Pydrud ships — there is no iOS, Linux, Windows or
+web backend to configure or maintain — but the UI layer itself is
+renderer-agnostic, so the same screen code is portable:
+
+* **One widget vocabulary.** `pydrud/widgets/` imports nothing from
+  `pydrud/platforms/android/`, the generated Java templates or `android.*`.
+* **One wire format.** A plain JSON node dict (`type`, `key`, `style`,
+  `props`, `children`, `events`) with no Android types in it.
+* **Renderer facts as data.** A `RendererProfile` supplies platform-specific
+  style facts to the PSS parser/resolver, so neither ever imports a platform
+  adapter implicitly.
+* **Capability negotiation.** A renderer advertises the widgets and services it
+  supports, and unsupported widgets are substituted with documented fallbacks
+  instead of being dropped.
+
+Adding a platform later means adding one adapter under `pydrud/platforms/`
+plus its transport — not forking the design system. See
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#platform-neutrality).
+
 ## Installation
 
 ```bash
@@ -75,7 +120,7 @@ pip install pydrud                       # from PyPI
 ```
 
 ```bash
-git clone https://github.com/MurShidM01/Pydrud.git
+git clone https://github.com/Sindhi-Hacker/Pydrud.git
 cd Pydrud && pip install -e ".[dev]"     # from source
 ```
 
@@ -375,6 +420,11 @@ parsing/resolution, scaffold generation for both project shapes, generated
 Java template parsing, and end-to-end runtime tests via `pydrud.testing` —
 all without a device or emulator.
 
+`tests/test_neutrality.py` additionally proves the UI layer is
+renderer-neutral: every module under `pydrud/widgets/` is imported in a fresh
+interpreter and asserted to reach no Android adapter and no `pyjnius`, so the
+portability claim above cannot regress unnoticed.
+
 ## Roadmap
 
 | Version | Focus |
@@ -384,8 +434,9 @@ all without a device or emulator.
 | **v2.1.2** | Opt-in per-ABI APK splits (`abi_splits`) — one APK per ABI plus a universal APK for smaller downloads |
 | **v2.1.1** | PSS as a full CSS-style language, declarative `@keyframes`/`transition`/`:active`, pluggable runtime backends, Heartbeat starter, content blur, animated theming |
 | **v2.1.0** | `create`/`init android` CLI, pluggable runtime backends, PSS engine, Heartbeat starter, runtime-aware tooling |
-| **Next** | Declarative overlays, deeper Material coverage |
-| **Later** | iOS (SwiftUI), Web (WASM) and macOS desktop backends |
+| **2.1.5** | Material 3 Complete: HCT colour, 36 roles, the M3 component catalogue, M3 typography/shape/motion — Android renderers, platform-neutral UI layer |
+| **Next** | Material Symbols + dynamic colour, expressive motion (springs), container transform, predictive back |
+| **Later** | Further M3 Expressive work, then additional platform backends on top of the neutral UI layer |
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete itemised history.
 

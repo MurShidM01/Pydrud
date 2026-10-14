@@ -53,6 +53,8 @@ public class MaterialNavigationViews {
     public void setEventDispatcher(EventDispatcher d) { this.events = d; }
 
     View createBottomNav(final String key, JSONObject p) {
+        // M3 puts a navigation bar at level 0 (a tinted surface, no shadow);
+        // the token is honoured so a theme can raise it if it wants.
         if (!p.optBoolean("native", false)) {
             final PydrudNavigation.PydrudNavBar nav =
                 new PydrudNavigation.PydrudNavBar(activity);
@@ -130,8 +132,13 @@ public class MaterialNavigationViews {
     View createRail(final String key, JSONObject p) {
         LinearLayout rail = new LinearLayout(activity);
         rail.setOrientation(LinearLayout.VERTICAL);
-        rail.setPadding(m.dp(4), m.dp(8), m.dp(4), m.dp(8));
+        rail.setPaddingRelative(m.dp(4), m.dp(8), m.dp(4), m.dp(8));
         rail.setBackgroundColor(PydrudTheme.background);
+        // The rail is a fixed-width navigation surface in M3; the collapsed
+        // width is published as `rail_width`.
+        rail.setMinimumWidth(PydrudTheme.adaptive(
+            (float) p.optDouble("width", PydrudTheme.railWidth)));
+        PydrudTheme.elevate(rail, PydrudTheme.elevationNavBar);
 
         JSONArray items = p.optJSONArray("items");
         final int selected = p.optInt("selected", 0);

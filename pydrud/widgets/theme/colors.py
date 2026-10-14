@@ -1,18 +1,28 @@
 """
-Material-style colour constants and a seed-derived :class:`ColorScheme`.
+Material 3 colour system — HCT-based palettes, 30+ semantic roles,
+seed generation, dynamic colour, and the complete :class:`ColorScheme`.
+
+The old 13-role scheme is preserved for backwards compatibility; the new
+:class:`DynamicScheme` is the recommended entry point for M3 apps.
 """
 
 from __future__ import annotations
 
 from pydrud.widgets.theme._common import (
-    _argb, _ConstantsMeta, _lighten_hsl, _mix, _rgb, _rotate_hue, _tone,
+    _argb, _ConstantsMeta, _mix, _rgb,
+)
+from pydrud.widgets.theme.hct import (
+    CorePalette, DynamicScheme, Hct, TonalPalette,
+    int_to_hex, hex_to_int,
 )
 
+# ── Constants (backwards-compatible) ─────────────────────────────────────────
 
 class Colors(metaclass=_ConstantsMeta):
     """A small, opinionated Material-ish palette (ARGB strings).
 
     Names are forgiving: ``AMBER``, ``amber`` and ``deepOrange`` all work.
+    For full M3 conformance, use :class:`DynamicScheme` instead.
     """
 
     TRANSPARENT = "#00000000"
@@ -41,16 +51,72 @@ class Colors(metaclass=_ConstantsMeta):
     TEXT_SECONDARY = "#FF6B7280"
     TEXT_DISABLED = "#FF9CA3AF"
 
-    #: Material-3 role aliases — handy when styling custom components.
+    #: Material-3 role aliases
     ON_PRIMARY = "#FFFFFFFF"
     PRIMARY_CONTAINER = "#FFE0E7FF"
     ON_PRIMARY_CONTAINER = "#FF312E81"
+    ON_BACKGROUND = "#FF1F2937"
     SECONDARY_CONTAINER = "#FFCCFBF1"
     ON_SURFACE = "#FF1F2937"
     ON_SURFACE_VARIANT = "#FF6B7280"
     OUTLINE_STRONG = "#FFD1D5DB"
-    SHADOW = "#33101828"
-    SCRIM = "#99101828"
+    #: Material 3's shadow and scrim roles are both plain black. The scrim is
+    #: black *and* the component composites it at 32 %, which is where the
+    #: dimming comes from — baking the opacity into the role did both at once
+    #: and made the two roles impossible to tell apart from a tinted grey.
+    SHADOW = "#FF000000"
+    SCRIM = "#FF000000"
+
+    #: Tertiary (M3 third accent)
+    TERTIARY = "#FF7C3AED"
+    ON_TERTIARY = "#FFFFFFFF"
+    TERTIARY_CONTAINER = "#FFEDE9FE"
+    ON_TERTIARY_CONTAINER = "#FF3B0764"
+
+    #: Error container
+    ON_ERROR = "#FFFFFFFF"
+    ERROR_CONTAINER = "#FFFCE4EC"
+    ON_ERROR_CONTAINER = "#FF450A0A"
+
+    #: Secondary container
+    ON_SECONDARY = "#FFFFFFFF"
+    ON_SECONDARY_CONTAINER = "#FF002020"
+
+    #: Inverse roles
+    INVERSE_SURFACE = "#FF1F2937"
+    INVERSE_ON_SURFACE = "#FFF9FAFB"
+    INVERSE_PRIMARY = "#FF818CF8"
+
+    #: Surface container hierarchy
+    SURFACE_DIM = "#FFD5D8DC"
+    SURFACE_BRIGHT = "#FFFFFFFF"
+    SURFACE_CONTAINER_LOWEST = "#FFFFFFFF"
+    SURFACE_CONTAINER_LOW = "#FFF1F3F5"
+    SURFACE_CONTAINER = "#FFE8EAED"
+    SURFACE_CONTAINER_HIGH = "#FFE2E4E7"
+    SURFACE_CONTAINER_HIGHEST = "#FFD5D8DC"
+
+    #: Outline variant
+    OUTLINE_VARIANT = "#FFD1D5DB"
+
+    #: M3 "fixed" accent roles. These are tone-locked: the spec pins them to
+    #: the same tones in light and dark, so a colour picked from them stays
+    #: legible on any surface. Values are the published baseline scheme.
+    PRIMARY_FIXED = "#FFEADDFF"
+    PRIMARY_FIXED_DIM = "#FFCFBCFF"
+    ON_PRIMARY_FIXED = "#FF21005D"
+    ON_PRIMARY_FIXED_VARIANT = "#FF4A4458"
+    SECONDARY_FIXED = "#FFE8DEF8"
+    SECONDARY_FIXED_DIM = "#FFCCC2DC"
+    ON_SECONDARY_FIXED = "#FF1D192B"
+    ON_SECONDARY_FIXED_VARIANT = "#FF4A4458"
+    TERTIARY_FIXED = "#FFFFD8E4"
+    TERTIARY_FIXED_DIM = "#FFEFB8C8"
+    ON_TERTIARY_FIXED = "#FF31111D"
+    ON_TERTIARY_FIXED_VARIANT = "#FF633B48"
+
+    #: Surface tint — the primary tone a surface adopts when it elevates.
+    SURFACE_TINT = "#FF6750A4"
 
     RED = "#FFEF4444"
     PINK = "#FFEC4899"
@@ -66,7 +132,6 @@ class Colors(metaclass=_ConstantsMeta):
     BROWN = "#FF78716C"
     GREY = "#FF6B7280"
 
-    #: The rest of the Material-style hue names developers reach for.
     AMBER = "#FFF59E0B"
     DEEP_ORANGE = "#FFEA580C"
     DEEP_PURPLE = "#FF7C3AED"
@@ -75,19 +140,16 @@ class Colors(metaclass=_ConstantsMeta):
     BLUE_GREY = "#FF64748B"
     GREY_LIGHT = "#FF9CA3AF"
     GREY_DARK = "#FF374151"
-    #: American spellings of the same neutrals.
     GRAY = GREY
     GRAY_LIGHT = GREY_LIGHT
     GRAY_DARK = GREY_DARK
     BLUE_GRAY = BLUE_GREY
 
-    #: Default series colours for Chart and Canvas.pie().
     CHART_PALETTE = ("#FF6366F1", "#FF14B8A6", "#FFF59E0B", "#FFEF4444",
                      "#FFA855F7", "#FF3B82F6", "#FF22C55E", "#FFEC4899")
 
     @staticmethod
     def with_opacity(color: str, opacity: float) -> str:
-        """Return *color* with the given opacity (0.0 – 1.0)."""
         if not 0.0 <= opacity <= 1.0:
             raise ValueError("opacity must be between 0.0 and 1.0")
         c = color.lstrip("#")
@@ -100,7 +162,6 @@ class Colors(metaclass=_ConstantsMeta):
 
     @staticmethod
     def mix(color: str, other: str, amount: float = 0.5) -> str:
-        """Blend two colours — ``amount`` 0 keeps *color*, 1 gives *other*."""
         t = max(0.0, min(1.0, amount))
         r1, g1, b1 = _rgb(color)
         r2, g2, b2 = _rgb(other)
@@ -112,48 +173,35 @@ class Colors(metaclass=_ConstantsMeta):
 
     @classmethod
     def lighten(cls, color: str, amount: float = 0.2) -> str:
-        """Move a colour towards white."""
         return cls.mix(color, cls.WHITE, amount)
 
     @classmethod
     def darken(cls, color: str, amount: float = 0.2) -> str:
-        """Move a colour towards black."""
         return cls.mix(color, "#FF0B0F17", amount)
 
     @classmethod
     def on(cls, background: str) -> str:
-        """A readable text colour for *background* (white or near-black)."""
         r, g, b = _rgb(background)
         luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
         return cls.TEXT if luminance > 0.62 else cls.WHITE
 
     @staticmethod
     def is_light(color: str) -> bool:
-        """True when *color* is light enough to need dark content on top."""
         r, g, b = _rgb(color)
         return (0.299 * r + 0.587 * g + 0.114 * b) / 255.0 > 0.62
 
-    # ── accessibility: WCAG 2.1 contrast (PYDRUD §14.7) ──────────────────
-
     @staticmethod
     def relative_luminance(color: str) -> float:
-        """WCAG relative luminance of *color* (0.0 – 1.0)."""
         def _linear(channel: int) -> float:
             value = channel / 255.0
             return (value / 12.92 if value <= 0.03928
                     else ((value + 0.055) / 1.055) ** 2.4)
-
         r, g, b = _rgb(color)
         return (0.2126 * _linear(r) + 0.7152 * _linear(g)
                 + 0.0722 * _linear(b))
 
     @classmethod
     def contrast(cls, color: str, other: str) -> float:
-        """WCAG contrast ratio between two colours (1.0 – 21.0).
-
-        ``Colors.contrast(Colors.WHITE, Colors.BLACK)`` is 21.0; identical
-        colours give 1.0.
-        """
         a, b = cls.relative_luminance(color), cls.relative_luminance(other)
         lighter, darker = max(a, b), min(a, b)
         return (lighter + 0.05) / (darker + 0.05)
@@ -161,23 +209,19 @@ class Colors(metaclass=_ConstantsMeta):
     @classmethod
     def meets_contrast(cls, color: str, background: str, *,
                        large: bool = False) -> bool:
-        """True when *color* over *background* passes WCAG AA.
-
-        Normal text needs 4.5:1; large text (≥ 18 pt, or ≥ 14 pt bold)
-        needs 3:1. Ratios are compared at one decimal place — the precision
-        ``pydrud analyze`` reports — so a pair it prints as ``4.5:1`` is not
-        then claimed to fail ``4.5:1``.
-        """
         threshold = 3.0 if large else 4.5
-        return round(cls.contrast(color, background), 1) >= threshold
+        # FIX: compare unrounded ratio, round only for display
+        return cls.contrast(color, background) >= threshold
 
+
+# ── Legacy ColorScheme (backwards-compatible) ────────────────────────────────
 
 class ColorScheme:
     """A Material 3 colour scheme generated from a single seed colour.
 
-    Material You derives an entire palette from one colour by rotating tone.
-    This is a pragmatic approximation: it keeps the seed's hue and produces
-    the thirteen roles widgets actually reference, for both light and dark.
+    This is the legacy 13-role scheme preserved for backwards compatibility.
+    For the full 48-role M3 scheme, use :class:`DynamicScheme` from
+    ``pydrud.widgets.theme.hct``.
 
     ::
 
@@ -185,57 +229,118 @@ class ColorScheme:
         Theme.use(scheme)
     """
 
-    ROLES = ("primary", "on_primary", "primary_container", "secondary",
-             "on_secondary", "surface", "on_surface", "surface_variant",
-             "background", "on_background", "error", "on_error", "outline")
+    ROLES = (
+        "primary", "on_primary", "primary_container", "on_primary_container",
+        "secondary", "on_secondary", "secondary_container",
+        "on_secondary_container",
+        "tertiary", "on_tertiary", "tertiary_container",
+        "on_tertiary_container",
+        "surface", "on_surface", "surface_variant", "on_surface_variant",
+        "background", "on_background",
+        "error", "on_error", "error_container", "on_error_container",
+        "outline", "outline_variant",
+        "inverse_surface", "inverse_on_surface", "inverse_primary",
+        "shadow", "scrim",
+        "surface_dim", "surface_bright",
+        "surface_container_lowest", "surface_container_low",
+        "surface_container", "surface_container_high",
+        "surface_container_highest",
+        # Fixed accents — tone-locked across light and dark.
+        "primary_fixed", "primary_fixed_dim", "on_primary_fixed",
+        "on_primary_fixed_variant",
+        "secondary_fixed", "secondary_fixed_dim", "on_secondary_fixed",
+        "on_secondary_fixed_variant",
+        "tertiary_fixed", "tertiary_fixed_dim", "on_tertiary_fixed",
+        "on_tertiary_fixed_variant",
+        "surface_tint",
+    )
 
     def __init__(self, *, dark: bool = False, **roles: str):
         unknown = set(roles) - set(self.ROLES)
         if unknown:
             raise ValueError(f"Unknown colour roles: {sorted(unknown)}")
         for role in self.ROLES:
-            setattr(self, role, roles.get(role, Colors.PRIMARY))
+            # FIX: an unspecified role used to fall back to PRIMARY, a
+            # saturated indigo, so a partly-specified scheme silently painted
+            # unrelated roles indigo. Fall back to the role's own M3 default.
+            value = roles.get(role) or getattr(Colors, role.upper(), None)
+            setattr(self, role, value or Colors.PRIMARY)
         self.dark = bool(dark)
 
     @classmethod
     def from_seed(cls, seed: str = Colors.PRIMARY, *, dark: bool = False) -> "ColorScheme":
-        r, g, b = _rgb(seed)
-        # A harmonious secondary: the same colour rotated around the wheel,
-        # not a channel swap (which lands on random hues).
-        secondary = _rotate_hue(seed, 38, saturation=0.92)
-        if dark:
-            scheme = cls(
-                primary=_tone(r, g, b, 1.25),
-                on_primary="#FF111827",
-                primary_container=_tone(r, g, b, 0.45),
-                secondary=_lighten_hsl(secondary, 0.12),
-                on_secondary="#FF111827",
-                surface="#FF1F2937",
-                on_surface="#FFF9FAFB",
-                surface_variant="#FF374151",
-                background="#FF111827",
-                on_background="#FFF9FAFB",
-                error="#FFFCA5A5",
-                on_error="#FF450A0A",
-                outline="#FF4B5563",
-            )
-        else:
-            scheme = cls(
-                primary=_argb(f"{r:02X}{g:02X}{b:02X}"),
-                on_primary=Colors.WHITE,
-                primary_container=_tone(r, g, b, 1.75),
-                secondary=secondary,
-                on_secondary=Colors.WHITE,
-                surface=Colors.SURFACE,
-                on_surface=Colors.TEXT,
-                surface_variant="#FFF3F4F6",
-                background=Colors.BACKGROUND,
-                on_background=Colors.TEXT,
-                error=Colors.ERROR,
-                on_error=Colors.WHITE,
-                outline=Colors.OUTLINE,
-            )
-        scheme.dark = dark
+        """Generate a scheme using HCT tonal palettes (M3-correct)."""
+        seed_int = hex_to_int(seed)
+        dyn = DynamicScheme.from_seed(seed_int, dark=dark)
+        return cls._from_dynamic(dyn)
+
+    @classmethod
+    def from_seed_variant(
+        cls, seed: str = Colors.PRIMARY, *, variant: str = "tonal_spot", dark: bool = False
+    ) -> "ColorScheme":
+        """Generate using a specific M3 variant."""
+        seed_int = hex_to_int(seed)
+        dyn = DynamicScheme.from_seed_variant(seed_int, variant=variant, dark=dark)
+        return cls._from_dynamic(dyn)
+
+    @classmethod
+    def _from_dynamic(cls, dyn: DynamicScheme) -> "ColorScheme":
+        """Convert a DynamicScheme to a legacy ColorScheme."""
+        scheme = cls(
+            dark=dyn.dark,
+            primary=int_to_hex(dyn.primary),
+            on_primary=int_to_hex(dyn.on_primary),
+            primary_container=int_to_hex(dyn.primary_container),
+            secondary=int_to_hex(dyn.secondary),
+            on_secondary=int_to_hex(dyn.on_secondary),
+            secondary_container=int_to_hex(dyn.secondary_container),
+            tertiary=int_to_hex(dyn.tertiary),
+            on_tertiary=int_to_hex(dyn.on_tertiary),
+            tertiary_container=int_to_hex(dyn.tertiary_container),
+            surface=int_to_hex(dyn.surface),
+            on_surface=int_to_hex(dyn.on_surface),
+            surface_variant=int_to_hex(dyn.surface_variant),
+            on_surface_variant=int_to_hex(dyn.on_surface_variant),
+            background=int_to_hex(dyn.background),
+            on_background=int_to_hex(dyn.on_background),
+            error=int_to_hex(dyn.error),
+            on_error=int_to_hex(dyn.on_error),
+            error_container=int_to_hex(dyn.error_container),
+            on_error_container=int_to_hex(dyn.on_error_container),
+            outline=int_to_hex(dyn.outline),
+            outline_variant=int_to_hex(dyn.outline_variant),
+            inverse_surface=int_to_hex(dyn.inverse_surface),
+            inverse_on_surface=int_to_hex(dyn.inverse_on_surface),
+            inverse_primary=int_to_hex(dyn.inverse_primary),
+            shadow=int_to_hex(dyn.shadow),
+            scrim=int_to_hex(dyn.scrim),
+            surface_dim=int_to_hex(dyn.surface_dim),
+            surface_bright=int_to_hex(dyn.surface_bright),
+            surface_container_lowest=int_to_hex(dyn.surface_container_lowest),
+            surface_container_low=int_to_hex(dyn.surface_container_low),
+            surface_container=int_to_hex(dyn.surface_container),
+            surface_container_high=int_to_hex(dyn.surface_container_high),
+            surface_container_highest=int_to_hex(dyn.surface_container_highest),
+            primary_fixed=int_to_hex(dyn.primary_fixed),
+            primary_fixed_dim=int_to_hex(dyn.primary_fixed_dim),
+            on_primary_fixed=int_to_hex(dyn.on_primary_fixed),
+            on_primary_fixed_variant=int_to_hex(dyn.on_primary_fixed_variant),
+            secondary_fixed=int_to_hex(dyn.secondary_fixed),
+            secondary_fixed_dim=int_to_hex(dyn.secondary_fixed_dim),
+            on_secondary_fixed=int_to_hex(dyn.on_secondary_fixed),
+            on_secondary_fixed_variant=int_to_hex(dyn.on_secondary_fixed_variant),
+            tertiary_fixed=int_to_hex(dyn.tertiary_fixed),
+            tertiary_fixed_dim=int_to_hex(dyn.tertiary_fixed_dim),
+            on_tertiary_fixed=int_to_hex(dyn.on_tertiary_fixed),
+            on_tertiary_fixed_variant=int_to_hex(dyn.on_tertiary_fixed_variant),
+            surface_tint=int_to_hex(dyn.surface_tint),
+        )
+        # FIX: the three "on container" roles exist on the scheme and are
+        # consumed by the Java theme + the web stylesheet, but were never
+        # copied across — every consumer saw the placeholder default.
+        scheme.on_primary_container = int_to_hex(dyn.on_primary_container)
+        scheme.on_secondary_container = int_to_hex(dyn.on_secondary_container)
+        scheme.on_tertiary_container = int_to_hex(dyn.on_tertiary_container)
         return scheme
 
     def to_dict(self) -> dict:
@@ -244,13 +349,7 @@ class ColorScheme:
         return d
 
     @classmethod
-    def lerp(cls, start: "ColorScheme", end: "ColorScheme",
-             t: float) -> "ColorScheme":
-        """Blend two schemes role-by-role — the frame between two palettes.
-
-        Every role (and the light/dark flag) moves through the same fraction,
-        so a theme change can be animated instead of snapping.
-        """
+    def lerp(cls, start: "ColorScheme", end: "ColorScheme", t: float) -> "ColorScheme":
         k = max(0.0, min(1.0, float(t)))
         roles = {role: _mix(getattr(start, role), getattr(end, role), k)
                  for role in cls.ROLES}
@@ -259,3 +358,9 @@ class ColorScheme:
 
     def __repr__(self) -> str:
         return f"<ColorScheme primary={self.primary} dark={self.dark}>"
+
+
+__all__ = [
+    "Colors", "ColorScheme", "DynamicScheme", "CorePalette",
+    "TonalPalette", "Hct",
+]

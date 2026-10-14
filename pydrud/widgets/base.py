@@ -47,7 +47,51 @@ def _serialise_value(value):
     return value
 
 
-class Widget:
+def _camel(name: str) -> str:
+    """``border_radius`` → ``borderRadius``."""
+    head, *rest = name.split("_")
+    return head + "".join(part.capitalize() for part in rest)
+
+
+class _StyleDict(dict):
+    """A widget's style dict while the widget is still being built."""
+
+    __slots__ = ("_protected",)
+
+    def __init__(self, initial=None, protected=()):
+        super().__init__(initial or {})
+        self._protected = frozenset(protected)
+
+    def __setitem__(self, key, value):
+        if key in self._protected and key in self:
+            return
+        super().__setitem__(key, value)
+
+
+class _WidgetMeta(type):
+    """Record which style keys a caller set explicitly (see the class body)."""
+
+    def __call__(cls, *args, **kwargs):
+        supplied = dict(kwargs)
+        inline = supplied.pop("style", None) or {}
+        obj = super().__call__(*args, **kwargs)
+        aliases = getattr(cls, "_style_kwarg_aliases", {})
+        explicit = {key.split(".")[0] for key in inline}
+        for name in supplied:
+            target = aliases.get(name, _camel(name))
+            explicit.add(target.split(".")[0])
+            # ``column_gap`` and ``columnGap`` are the same request.
+            explicit.add(name)
+        obj._explicit_style_keys = explicit
+        # Construction is over: the widget's own defaults may no longer be
+        # overwritten by the caller's inline values, so normal writes resume.
+        style = getattr(obj, "style", None)
+        if isinstance(style, _StyleDict):
+            style._protected = frozenset()
+        return obj
+
+
+class Widget(metaclass=_WidgetMeta):
     """Base class for all Pydrud widgets.
 
     Each widget has:
@@ -88,7 +132,12 @@ class Widget:
         #: Unique identifier; auto-generated if omitted.
         self.key: str = key or _gen_key()
         #: Inline style dictionary (see pydrud.widgets.styling for helpers).
-        self.style: dict = dict(style) if style else {}
+        #: Protected against the widget's own defaults while it is built.
+        self.style: dict = _StyleDict(style, protected=style or ())
+        #: Style keys the caller set explicitly. Set by :class:`_WidgetMeta`;
+        #: ``None`` means "unknown", which treats every key as explicit so a
+        #: widget built outside a constructor call behaves as it always did.
+        self._explicit_style_keys = None
         #: CSS-like classes used by the Python-side stylesheet resolver only.
         #: They are deliberately separate from ``style`` and never go on wire.
         if isinstance(class_, str):
@@ -187,13 +236,20 @@ class Widget:
         self.style.update(props)
         return self
 
-    def _effective_style(self) -> dict:
-        """Return PSS declarations overlaid by inline widget styles.
+    def _split_style(self):
+        """Split ``style`` into ``(widget defaults, caller values)``."""
+        explicit = getattr(self, "_explicit_style_keys", None)
+        if explicit is None:
+            return {}, dict(self.style)
+        derived, inline = {}, {}
+        for key, value in self.style.items():
+            (inline if key in explicit else derived)[key] = value
+        return derived, inline
 
-        The PSS result is kept separately from ``style`` so an edited sheet
-        can remove a declaration cleanly and inline values always win.
-        """
-        return {**self._resolved_style, **self.style}
+    def _effective_style(self) -> dict:
+        """Return the three-layer style: widget defaults, PSS, then caller values."""
+        derived, inline = self._split_style()
+        return {**derived, **self._resolved_style, **inline}
 
     def _serialise_style(self):
         """Return the effective style without Python-only class markers."""

@@ -47,7 +47,9 @@ public class LayoutEngine {
         if (view == null) return;
         int top = spec[2] + (spec[0] == 1 ? PydrudTheme.insetTop : 0);
         int bottom = spec[3] + (spec[1] == 1 ? PydrudTheme.insetBottom : 0);
-        view.setPadding(view.getPaddingLeft(), top, view.getPaddingRight(), bottom);
+        // Relative, or applying the insets would flatten RTL padding that was
+        // set logically.
+        view.setPaddingRelative(view.getPaddingStart(), top, view.getPaddingEnd(), bottom);
     }
 
     void applySafeArea(View view, JSONObject s) {
@@ -147,7 +149,7 @@ public class LayoutEngine {
             sv.setFillViewport(true);
             sv.setVerticalScrollBarEnabled(false);
             sv.setClipToPadding(false);
-            sv.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+            sv.setOverScrollMode(PydrudTheme.overScrollMode());
             sv.addView(ll, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT));
@@ -157,7 +159,7 @@ public class LayoutEngine {
         hsv.setFillViewport(true);
         hsv.setHorizontalScrollBarEnabled(false);
         hsv.setClipToPadding(false);
-        hsv.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        hsv.setOverScrollMode(PydrudTheme.overScrollMode());
         hsv.addView(ll, new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT,
             FrameLayout.LayoutParams.MATCH_PARENT));
@@ -381,7 +383,9 @@ public class LayoutEngine {
         }
         if ("Divider".equals(type)) {
             JSONObject ds = json.optJSONObject("style");
-            h = vf.mStyler.dp(ds != null ? ds.optInt("thickness", 1) : 1);
+            h = Math.max(1, vf.mStyler.dp(ds != null
+                ? (float) ds.optDouble("thickness", PydrudTheme.dividerThickness)
+                : PydrudTheme.dividerThickness));
         }
 
         JSONObject s = json.optJSONObject("style");

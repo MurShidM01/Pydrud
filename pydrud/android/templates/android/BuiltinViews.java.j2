@@ -68,6 +68,7 @@ static final int VIRTUALIZE_THRESHOLD = 24;
                 case "Positioned":
                 case "Card":
                 case "Stack":
+                case "ShapeMorph":
                     view = createBox(json); break;
                 case "Column":
                     view = vf.mLayout.createLinear(json, LinearLayout.VERTICAL); break;
@@ -176,9 +177,16 @@ static final int VIRTUALIZE_THRESHOLD = 24;
         }
     }
 
+    /** Copy a prop under its stylesheet name, when the prop was set. */
+    static void copyIfPresent(JSONObject from, JSONObject to, String prop,
+                              String styleKey) throws JSONException {
+        if (from != null && from.has(prop)) to.put(styleKey, from.get(prop));
+    }
+
     FrameLayout createBox(JSONObject json) throws JSONException {
-        FrameLayout fl = new FrameLayout(vf.activity);
         String type = json.optString("type", "");
+        FrameLayout fl = "ShapeMorph".equals(type)
+            ? new PydrudShapes.MorphView(vf.activity) : new FrameLayout(vf.activity);
         JSONObject s = json.optJSONObject("style");
 
         String alignment = (s != null) ? s.optString("alignment", "") : "";
@@ -186,6 +194,35 @@ static final int VIRTUALIZE_THRESHOLD = 24;
         int grav = alignment.isEmpty() ? Gravity.NO_GRAVITY : vf.mStyler.gravity(alignment);
 
         if ("Card".equals(type)) vf.mStyler.styleCard(fl, s);
+
+        // Shape morphing (Material 3 `shape-morph`): the widget's props carry
+        // the two shapes and how far between them to sit, and a stylesheet can
+        // retune all five — `ShapeMorph.tile { shape-to: cookie_9; }`.
+        if ("ShapeMorph".equals(type)) {
+            JSONObject p = vf.props(json);
+            JSONObject morphStyle = new JSONObject();
+            if (p != null) {
+                copyIfPresent(p, morphStyle, "from", "shapeFrom");
+                copyIfPresent(p, morphStyle, "to", "shapeTo");
+                copyIfPresent(p, morphStyle, "progress", "shapeProgress");
+                copyIfPresent(p, morphStyle, "rotation", "shapeRotation");
+                copyIfPresent(p, morphStyle, "spring", "shapeSpring");
+            }
+            if (s != null) {
+                for (String key : new String[]{"shapeFrom", "shapeTo",
+                        "shapeProgress", "shapeRotation", "shapeSpring",
+                        "bg"}) {
+                    if (s.has(key)) morphStyle.put(key, s.get(key));
+                }
+            }
+            if (!morphStyle.has("shapeFrom")) morphStyle.put("shapeFrom", "circle");
+            if (!morphStyle.has("shapeTo")) {
+                morphStyle.put("shapeTo", morphStyle.optString("shapeFrom"));
+            }
+            // First paint only: the drawable is built already at the current
+            // progress, so nothing animates until a later patch moves it.
+            vf.mStyler.shapeMorphDrawable(morphStyle, fl);
+        }
 
         JSONArray arr = json.optJSONArray("children");
         if (arr != null) {
@@ -442,8 +479,51 @@ static final int VIRTUALIZE_THRESHOLD = 24;
         JSONObject s = json.optJSONObject("style");
         iv.setScaleType(vf.mStyler.scaleType(s != null ? s.optString("fit", "contain") : "contain"));
         iv.setAdjustViewBounds(true);
+        // M3's default image shape is the medium corner; a styled
+        // `borderRadius` or `circular` still overrides it in ViewStyler.
+        float radius = s != null && s.has("borderRadius")
+            ? vf.mStyler.dp(s.optInt("borderRadius", 0))
+            : PydrudTheme.dp(PydrudTheme.radiusImage);
+        boolean circle = s != null && s.optBoolean("circular", false);
+        if (circle) radius = PydrudTheme.dp(999);
+        if (radius > 0f) {
+            iv.setBackground(PydrudTheme.shape(android.graphics.Color.TRANSPARENT, radius));
+            iv.setClipToOutline(true);
+        }
         vf.mImageLoader.loadImageInto(iv, src, s);
         return iv;
+    }
+
+    /**
+     * Collect the Material Symbols axes for an icon.
+     *
+     * <p>Props are the widget's own values; the camel-case style keys are the
+     * stylesheet's, so a `.nav-icon { iconWeight: 600 }` rule reaches every
+     * icon in the class exactly as a constructor argument would.
+     */
+    static JSONObject iconAxes(JSONObject props, JSONObject style) {
+        JSONObject axes = new JSONObject();
+        try {
+            if (props != null) {
+                if (props.has("weight")) axes.put("weight", props.optInt("weight", 400));
+                if (props.has("grade")) axes.put("grade", props.optInt("grade", 0));
+                if (props.has("optical")) axes.put("optical", props.optDouble("optical", 24));
+                if (props.has("fill")) axes.put("fill", props.optBoolean("fill", true));
+            }
+            if (style != null) {
+                if (style.has("iconWeight")) axes.put("iconWeight", style.optInt("iconWeight", 400));
+                if (style.has("iconGrade")) axes.put("iconGrade", style.optInt("iconGrade", 0));
+                if (style.has("iconOptical")) axes.put("iconOptical", style.optDouble("iconOptical", 24));
+                if (style.has("iconFill")) axes.put("iconFill", style.optBoolean("iconFill", true));
+            }
+            // The style wins: a stylesheet restyles a component that a caller
+            // already configured, which is the same order as every other key.
+            if (axes.has("iconWeight")) axes.put("weight", axes.optInt("iconWeight", 400));
+            if (axes.has("iconGrade")) axes.put("grade", axes.optInt("iconGrade", 0));
+            if (axes.has("iconOptical")) axes.put("optical", axes.optDouble("iconOptical", 24));
+            if (axes.has("iconFill")) axes.put("fill", axes.optBoolean("iconFill", true));
+        } catch (Exception ignored) {}
+        return axes;
     }
 
     ImageView createIconView(JSONObject json) {
@@ -461,11 +541,15 @@ static final int VIRTUALIZE_THRESHOLD = 24;
             tint = vf.mStyler.parseColor(f.optString("color", ""), tint);
         }
         int px = PydrudTheme.adaptive(size);
+        // The Material Symbols axes: props carry what the widget asked for,
+        // a stylesheet can retune any of them for a class or an id, and the
+        // drawable applies them to the glyph.
+        JSONObject axes = iconAxes(p, s);
         // Icon.svg(...) ships raw path data; a named icon resolves via the
         // catalogue. Both render through the same vector drawable (PYDRUD §16.2).
         iv.setImageDrawable(path.isEmpty()
-            ? PydrudIcons.drawable(name, tint, px)
-            : PydrudIcons.drawablePath(path, tint, px));
+            ? PydrudIcons.drawable(name, tint, px, axes)
+            : PydrudIcons.drawablePath(path, tint, px, axes));
         iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
         iv.setLayoutParams(new ViewGroup.LayoutParams(px, px));
         return iv;
@@ -473,6 +557,7 @@ static final int VIRTUALIZE_THRESHOLD = 24;
 
     CheckBox createCheckbox(JSONObject json) {
         CheckBox cb = new androidx.appcompat.widget.AppCompatCheckBox(vf.activity);
+        PydrudTheme.sizeToggle(cb, PydrudTheme.checkboxSize);
         JSONObject p = json.optJSONObject("props");
         if (p != null) {
             cb.setText(p.optString("label", ""));
@@ -485,6 +570,8 @@ static final int VIRTUALIZE_THRESHOLD = 24;
     CompoundButton createSwitchView(JSONObject json) {
         androidx.appcompat.widget.SwitchCompat sw =
             new androidx.appcompat.widget.SwitchCompat(vf.activity);
+        sw.setSwitchMinWidth(PydrudTheme.dp(PydrudTheme.switchWidth));
+        PydrudTheme.sizeToggle(sw, PydrudTheme.switchHeight);
         JSONObject p = json.optJSONObject("props");
         if (p != null) {
             sw.setText(p.optString("label", ""));
@@ -521,6 +608,7 @@ static final int VIRTUALIZE_THRESHOLD = 24;
 
     RadioButton createRadio(JSONObject json) {
         RadioButton rb = new androidx.appcompat.widget.AppCompatRadioButton(vf.activity);
+        PydrudTheme.sizeToggle(rb, PydrudTheme.radioSize);
         JSONObject p = json.optJSONObject("props");
         if (p != null) {
             rb.setText(p.optString("label", ""));
@@ -744,6 +832,9 @@ static final int VIRTUALIZE_THRESHOLD = 24;
         int color = vf.mStyler.parseColor(s != null ? s.optString("color", "") : "",
                                PydrudTheme.outline);
         v.setBackgroundColor(color);
+        // A Divider carries the theme's hairline thickness unless the caller
+        // asked for another one, so retuning the token moves every rule.
+        v.setMinimumHeight(PydrudTheme.dp(PydrudTheme.dividerThickness));
         return v;
     }
 

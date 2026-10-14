@@ -32,7 +32,7 @@ and drives the native Views directly over the local bridge.
 | `pydrud/runtime/` | `App`, `Page`, the Python UI actor, app lifecycle, host/embedded event handling, render transactions, and hot reload integration |
 | `pydrud/core/` | Platform-neutral machinery: renderer protocol/bridge, preview handshake data and server, keyed `diff`, widget `elements`, events, results, responsive metrics, tasks, watcher, and PSS style engine |
 | `pydrud/core/styles/` | Shared style-key schema, PSS lexer/parser, selector model, style resolution, renderer-profile data contract, and stylesheet discovery/reload manager |
-| `pydrud/platforms/android/` | Android-only adapter data (`AndroidRendererProfile`), the embedded development/source-sync server, and logcat output adapter |
+| `pydrud/platforms/android/` | Android-only adapter data (`AndroidRendererProfile`), the embedded development/source-sync server, and logcat output adapter. This is the only platform adapter that ships today |
 | `pydrud/widgets/` | The widget vocabulary, styling helpers, theme, responsive widgets, and composites; `class_` is local stylesheet metadata, not wire data |
 | `pydrud/services/` | APIs for optional client/device services and the cross-platform HTTP client |
 | `pydrud/android/` | Build-time templates for the generated Android app and static Java-template checks; never imported by the PSS resolver |
@@ -85,6 +85,28 @@ imports the Android adapter implicitly.
 These semantics are shared by the host preview and the generated Android
 renderer. Pydash's preview-protocol handshake sits outside the renderer-v2
 transaction envelope.
+
+## Platform neutrality
+
+Android is the only renderer Pydrud ships, but the widget, theme and styling
+layers are deliberately renderer-agnostic so a second one can be added without
+touching application code:
+
+* `pydrud/widgets/` holds the vocabulary, the M3 design system and the styling
+  helpers, and imports nothing from `pydrud/platforms/android/`, the generated
+  Java templates or `android.*`;
+* the wire format is a plain JSON node dict (`type`, `key`, `style`, `props`,
+  `children`, `events`) with no Android types in it;
+* renderer-specific style facts live in a profile supplied as *data*
+  (`RendererProfile` in `pydrud/core/styles/resolver.py`), so the parser and
+  resolver never import a platform adapter implicitly;
+* capability negotiation (`pydrud/runtime/_capabilities.py`) lets a renderer
+  advertise the widget vocabulary and services it supports, and every
+  unsupported widget is substituted with a documented fallback rather than
+  dropped.
+
+Adding a platform therefore means adding one adapter package under
+`pydrud/platforms/` plus its transport — not forking the design system.
 
 ## Python-side stylesheets
 

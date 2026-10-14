@@ -1,22 +1,9 @@
 """
 Design tokens — the single Python source of truth for how an app looks.
 
-Everything the native renderer draws (corner radii, control heights, bar
-heights, depth, motion, the type ramp, even the typeface) is a value in
-this class.  The whole set is serialised into the ``theme`` bridge command
-and applied by ``PydrudTheme`` on the device, so Java never decides what
-the UI looks like — it only draws what Python sends::
-
-    from pydrud import Theme, Tokens
-
-    Theme.configure(radius_card=24, app_bar_height=64, font_family="serif")
-    Theme.configure(button_height_md=52, ripple_opacity=0.18)
-
-    Tokens.radius_card          # 24 — widgets read the same values
-    Theme.configure_reset()     # back to the Pydrud defaults
-
-Changing a token re-themes the running app the next time a frame is sent
-(``app.apply_theme()`` pushes it immediately).
+Every metric the renderer draws with: M3 elevation levels (L0–L5),
+tonal elevation, motion durations, the shape scale, spacing and an
+uncapped font scale.
 """
 
 from __future__ import annotations
@@ -27,81 +14,183 @@ from typing import Any, Dict
 class Tokens:
     """Mutable design constants shared by the Python widgets and Android.
 
-    Every attribute is a plain number, string or bool so the whole class
-    can travel over the bridge as JSON.  Set them directly or, preferably,
-    through :meth:`Theme.configure`, which validates names.
+    Every metric the renderer draws with lives here.
+    The whole set is serialised into the ``theme`` bridge command and applied
+    by ``PydrudTheme`` on the device.
     """
 
     # ── shape ────────────────────────────────────────────────────────────
-    radius_button: float = 14
-    radius_card: float = 16
-    radius_input: float = 14
-    radius_chip: float = 999          # pill
-    radius_sheet: float = 24
-    radius_dialog: float = 24
-    radius_fab: float = 28
-    radius_image: float = 12
+    radius_button: float = 20       # M3: rounded rectangle
+    radius_card: float = 12         # M3: medium
+    radius_input: float = 4         # M3: extra-small (top corners for filled)
+    radius_chip: float = 8          # M3: small (NOT pill)
+    radius_sheet: float = 28        # M3: extra-large
+    radius_dialog: float = 28       # M3: extra-large
+    radius_fab: float = 16          # M3: large
+    radius_image: float = 12        # M3: medium
+    radius_menu: float = 4          # M3: extra-small
+    radius_snackbar: float = 4      # M3: extra-small
+    radius_tooltip: float = 4       # M3: extra-small
+    radius_toolbar: float = 32      # M3: docked toolbar is a full pill
+
+    # M3 corner-radius scale — the named steps a designer works from, as
+    # opposed to the per-component radii above.
+    corner_none: float = 0
+    corner_extra_small: float = 4
+    corner_small: float = 8
+    corner_medium: float = 12
+    corner_large: float = 16
+    corner_large_increased: float = 20
+    corner_extra_large: float = 28
+    corner_extra_large_increased: float = 32
+    corner_extra_extra_large: float = 48
+    corner_full: float = 999        # rendered as height / 2 (a pill)
 
     # ── size ─────────────────────────────────────────────────────────────
-    app_bar_height: float = 56
-    nav_height: float = 64
+    app_bar_height: float = 64      # M3: 64dp (was 56)
+    app_bar_height_medium: float = 112  # M3: medium top app bar
+    app_bar_height_large: float = 152   # M3: large top app bar
+    nav_height: float = 80          # M3: navigation bar is 80dp
     rail_width: float = 80
     fab_size: float = 56
-    input_height: float = 52
-    button_height_sm: float = 38
-    button_height_md: float = 48
-    button_height_lg: float = 56
-    touch_target: float = 48
+    toolbar_height: float = 64      # M3: docked toolbar
+    side_sheet_width: float = 360   # M3: side sheet default width
+    input_height: float = 56        # M3: 56dp (was 52)
+    button_height_sm: float = 40    # M3: small button
+    button_height_md: float = 40    # M3: default button height
+    button_height_lg: float = 40    # M3: large button
+    touch_target: float = 48        # M3: minimum 48dp
     icon_size: float = 24
     avatar_size: float = 40
     divider_thickness: float = 1
     border_width: float = 1
     list_tile_height: float = 56
     list_tile_height_two_line: float = 72
+    list_tile_height_three_line: float = 88
+    chip_height: float = 32         # M3: 32dp
+    switch_width: float = 52        # M3: 52×32 track
+    switch_height: float = 32
+    checkbox_size: float = 18       # M3: 18dp box in 40dp state layer
+    radio_size: float = 20          # M3: 20dp radio in 40dp state layer
 
     # ── spacing ──────────────────────────────────────────────────────────
-    gutter: float = 20                # page side padding
-    section: float = 24               # gap between sections
+    gutter: float = 16              # M3: 16dp compact, 24dp medium+
+    section: float = 24
     card_padding: float = 16
-    content_max_width: float = 0      # 0 = unconstrained
+    content_max_width: float = 0
 
-    # ── depth ────────────────────────────────────────────────────────────
-    elevation_card: float = 0
-    elevation_button: float = 1.5
-    elevation_fab: float = 6
-    elevation_app_bar: float = 0
-    elevation_sheet: float = 12
-    elevation_dialog: float = 16
-    # Soft drop shadow used by the generic ``shadow`` style property when it
-    # is given as a plain number. ``shadow_color`` empty = derive from the
-    # surface (dark mode tints instead of casting a shadow).
+    # ── depth — M3 elevation levels L0–L5 ────────────────────────────────
+    elevation_level_0: float = 0    # L0: no shadow
+    elevation_level_1: float = 1    # L1: 1dp
+    elevation_level_2: float = 3    # L2: 3dp (M3 correct, was 2)
+    elevation_level_3: float = 6    # L3: 6dp
+    elevation_level_4: float = 8    # L4: 8dp (was missing)
+    elevation_level_5: float = 12   # L5: 12dp
+
+    # Component-specific elevations (mapped to M3 levels)
+    elevation_card: float = 1       # L1 (was 0 — M3 cards are elevated by default)
+    elevation_button: float = 1     # L1 (was 1.5 — not an M3 level)
+    elevation_fab: float = 3        # L3 (was 6)
+    elevation_app_bar: float = 0    # L0
+    elevation_sheet: float = 1      # L1 (bottom sheet)
+    elevation_dialog: float = 3     # L3 (was 16 — not an M3 level)
+    elevation_nav_bar: float = 0    # L0 (M3 nav bar has no shadow)
+    elevation_menu: float = 2       # L2
+
+    # Tonal elevation: primary tint percentage per level (M3 dark mode)
+    tonal_elevation_0: float = 0.0
+    tonal_elevation_1: float = 0.05
+    tonal_elevation_2: float = 0.08
+    tonal_elevation_3: float = 0.11
+    tonal_elevation_4: float = 0.12
+    tonal_elevation_5: float = 0.14
+
+    # Shadow
     shadow_color: str = ""
     shadow_offset_x: float = 0
     shadow_offset_y: float = 2
     shadow_blur: float = 8
     shadow_spread: float = 0
 
-    # ── motion ───────────────────────────────────────────────────────────
-    duration_fast: int = 140
-    duration_normal: int = 220
-    duration_slow: int = 320
+    # ── motion — M3 durations and curves ─────────────────────────────────
+    duration_short_1: int = 50
+    duration_short_2: int = 100
+    duration_short_3: int = 150
+    duration_short_4: int = 200
+    duration_medium_1: int = 250
+    duration_medium_2: int = 300
+    duration_medium_3: int = 350
+    duration_medium_4: int = 400
+    duration_long_1: int = 450
+    duration_long_2: int = 500
+    duration_long_3: int = 550
+    duration_long_4: int = 600
+    duration_extra_long_1: int = 700
+    duration_extra_long_2: int = 800
+    duration_extra_long_3: int = 900
+    duration_extra_long_4: int = 1000
+
+    # Legacy aliases
+    duration_fast: int = 150
+    duration_normal: int = 250
+    duration_slow: int = 400
+
+    # Easing curves — the Material 3 motion spec's cubic-béziers, written the
+    # way CSS writes them so a stylesheet, a widget and the renderer all read
+    # the same string.
+    #
+    # These used to hold the names of platform interpolators (`ease_in_out`,
+    # `overshoot`), which are approximations of these curves rather than the
+    # curves themselves: the M3 standard curve starts fast and eases out
+    # steeply, and nothing resembling that can be said with a keyword. The
+    # keyword names still work everywhere a curve can be named — they are
+    # resolved as the platform curves they always were.
+    easing_standard: str = "cubic-bezier(0.2, 0, 0, 1)"
+    easing_standard_decelerate: str = "cubic-bezier(0, 0, 0, 1)"
+    easing_standard_accelerate: str = "cubic-bezier(0.3, 0, 1, 1)"
+    easing_emphasized: str = "cubic-bezier(0.2, 0, 0, 1)"
+    easing_emphasized_decelerate: str = "cubic-bezier(0.05, 0.7, 0.1, 1)"
+    easing_emphasized_accelerate: str = "cubic-bezier(0.3, 0, 0.8, 0.15)"
+    easing_linear: str = "cubic-bezier(0, 0, 1, 1)"
+
+    # The Material 3 spring motion system (motionScheme / MotionScheme):
+    # a spring is a damping ratio and a stiffness, not a duration, so it
+    # adapts to the distance and to the device instead of running for a fixed
+    # number of milliseconds. `spatial` springs move something on screen and
+    # are allowed to overshoot; `effects` springs animate colour and opacity
+    # and are critically damped so a value never bounces past its target.
+    #
+    # Values are Google's (`material-components-android` Motion.md, the six
+    # `motionSpring*` theme attributes), written as "damping, stiffness".
+    spring_fast_spatial: str = "0.9, 1400"      # switches, buttons, shapes
+    spring_default_spatial: str = "0.9, 700"    # sheets, drawers, panels
+    spring_slow_spatial: str = "0.9, 300"       # full-screen movement
+    spring_fast_effects: str = "1.0, 3800"      # small colour/opacity changes
+    spring_default_effects: str = "1.0, 1600"   # medium colour/opacity changes
+    spring_slow_effects: str = "1.0, 800"       # full-screen fades
+
     press_scale: float = 0.97
     ripple_opacity: float = 0.12
-    state_hover: float = 0.08
-    state_pressed: float = 0.12
-    state_disabled: float = 0.38
+    state_hover: float = 0.08       # M3: 8%
+    state_focus: float = 0.10       # M3: 10%
+    state_pressed: float = 0.10     # M3: 10% (was 0.12)
+    state_dragged: float = 0.16     # M3: 16%
+    state_disabled_content: float = 0.38  # M3: 38%
+    state_disabled_container: float = 0.12  # M3: 12%
     animate_layout: bool = True
 
     # ── type ─────────────────────────────────────────────────────────────
-    font_family: str = ""             # "" = platform default (Roboto)
+    font_family: str = ""
     font_scale: float = 1.0
-    text_display: float = 34
-    text_headline: float = 24
-    text_title: float = 18
-    text_subtitle: float = 16
-    text_body: float = 15
-    text_label: float = 14
-    text_caption: float = 12
+    # font_scale_max REMOVED — text scales freely per user preference
+    # Clamp layout density instead if needed
+    text_display: float = 57        # M3 display-large
+    text_headline: float = 32       # M3 headline-large
+    text_title: float = 22          # M3 title-large
+    text_subtitle: float = 16       # M3 title-medium
+    text_body: float = 16           # M3 body-large
+    text_label: float = 14          # M3 label-large
+    text_caption: float = 12        # M3 body-small
     weight_regular: int = 400
     weight_medium: int = 500
     weight_bold: int = 700
@@ -109,8 +198,8 @@ class Tokens:
     line_height: float = 1.32
 
     # ── behaviour ────────────────────────────────────────────────────────
-    haptics: bool = True              # tap feedback on buttons/list rows
-    overscroll_glow: bool = False     # Material 3 drops the blue glow
+    haptics: bool = True
+    overscroll_glow: bool = False
 
     #: Snapshot of the shipped defaults, filled in below.
     _DEFAULTS: Dict[str, Any] = {}
@@ -119,23 +208,19 @@ class Tokens:
 
     @classmethod
     def names(cls) -> tuple:
-        """Every configurable token name."""
         return tuple(sorted(cls._DEFAULTS))
 
     @classmethod
     def as_dict(cls) -> Dict[str, Any]:
-        """The full token set, ready to be sent to the device."""
         return {name: getattr(cls, name) for name in cls._DEFAULTS}
 
     @classmethod
     def changed(cls) -> Dict[str, Any]:
-        """Only the tokens that differ from the shipped defaults."""
         return {name: getattr(cls, name) for name, default
                 in cls._DEFAULTS.items() if getattr(cls, name) != default}
 
     @classmethod
     def update(cls, **values: Any) -> None:
-        """Set tokens by name, rejecting typos instead of ignoring them."""
         for name, value in values.items():
             if name not in cls._DEFAULTS:
                 suggestion = _closest(name, cls._DEFAULTS)
@@ -146,8 +231,6 @@ class Tokens:
                 value = bool(value)
             elif expected is str:
                 value = str(value)
-            elif expected is int and isinstance(value, float):
-                value = int(value)
             elif expected in (int, float) and not isinstance(value, (int, float)):
                 raise ValueError(
                     f"Design token '{name}' expects a number, got {value!r}")
@@ -155,13 +238,11 @@ class Tokens:
 
     @classmethod
     def reset(cls) -> None:
-        """Restore every token to the Pydrud default."""
         for name, default in cls._DEFAULTS.items():
             setattr(cls, name, default)
 
     @classmethod
     def button_height(cls, size: str = "md") -> float:
-        """Height for a ``sm`` / ``md`` / ``lg`` button."""
         return {
             "sm": cls.button_height_sm,
             "lg": cls.button_height_lg,
@@ -175,9 +256,7 @@ Tokens._DEFAULTS = {
 
 
 def _closest(name: str, options) -> str:
-    """Cheap suggestion for a mistyped token name."""
     import difflib
-
     matches = difflib.get_close_matches(name, list(options), n=1, cutoff=0.6)
     return matches[0] if matches else ""
 
