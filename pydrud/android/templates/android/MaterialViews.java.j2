@@ -688,7 +688,10 @@ public class MaterialViews {
 
             android.animation.ValueAnimator sweep =
                 android.animation.ValueAnimator.ofFloat(-1f, 2f);
-            sweep.setDuration(1150);
+            // One pass of the loading waveform is the slowest step on the
+            // spec's duration scale — an ambient animation, not a response to
+            // a touch — resolved through the tokens rather than a literal.
+            sweep.setDuration(PydrudTheme.durationMs("extra_long_4"));
             sweep.setStartDelay(i * 90L);
             sweep.setRepeatCount(android.animation.ValueAnimator.INFINITE);
             sweep.setInterpolator(new android.view.animation.LinearInterpolator());

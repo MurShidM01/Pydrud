@@ -274,6 +274,12 @@ class TestRenderedTokensAreHonoured(unittest.TestCase):
         resolver = self._body(self.theme, "public static long durationMs(Object value)")
         self.assertIn("durationNormal", resolver)
 
+    def test_no_animation_duration_is_a_bare_millisecond_literal(self):
+        # The loading waveform's sweep used to be `setDuration(1150)`.
+        views = _java_files()["MaterialViews.java.j2"]
+        self.assertIn('sweep.setDuration(PydrudTheme.durationMs(', views)
+        self.assertNotIn("sweep.setDuration(1150)", views)
+
     def test_text_scale_endpoints_are_honoured(self):
         body = self._body(self.theme, "float snapTextSize(")
         self.assertIn("textBody", body)
