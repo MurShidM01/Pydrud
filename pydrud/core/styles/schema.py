@@ -95,6 +95,8 @@ VALID_STYLE_KEYS: frozenset[str] = frozenset({
     "transition", "transform", "filter",
     # `:active`/`:hover`/`:focus` rules become these renderer sub-specs
     "press", "hover", "focus",
+    # Material Symbols variable axes, settable on any icon from a stylesheet
+    "iconWeight", "iconGrade", "iconOptical", "iconFill",
     "fontSize", "fontWeight", "fontFamily", "letterSpacing", "lineHeight",
     "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
     "marginTop", "marginRight", "marginBottom", "marginLeft",
@@ -200,6 +202,11 @@ KEY_KIND: dict[str, str] = {
     "press": "composite",
     "hover": "composite",
     "focus": "composite",
+    # `iconFill` is a boolean, which the keyword kind accepts.
+    "iconWeight": "number",
+    "iconGrade": "number",
+    "iconOptical": "number",
+    "iconFill": "keyword",
     "fontSize": "number",
     "fontWeight": "number",
     "fontFamily": "keyword",
@@ -272,6 +279,11 @@ _KEBAB_CANONICAL: dict[str, str] = {
     "border-color": "borderColor",
     "border-width": "borderWidth",
     "border-style": "borderStyle",
+    # ── Material Symbols variable axes ──────────────────────────────────
+    "icon-weight": "iconWeight",
+    "icon-grade": "iconGrade",
+    "icon-optical": "iconOptical",
+    "icon-fill": "iconFill",
     # ── other CSS spellings ─────────────────────────────────────────────
     "z-index": "zIndex",
     "aspect-ratio": "aspectRatio",

@@ -181,6 +181,35 @@ other platforms without any of them shipping yet.
 * `tests/test_m3_motion.py` (29 tests, 82 subtests) pins the spec tables, the
   curve evaluation, the shorthand vocabulary and every consumer.
 
+### Icons — the Material Symbols axes reach the glyph
+
+* **Every icon drew at its defaults.** The catalogue ships 2,148 Material
+  Symbols, and Material Symbols is a *variable font*: weight, fill, grade and
+  optical size are the axes that make the set worth using. Nothing read them,
+  so a 400-weight outlined glyph was the only icon Pydrud could draw.
+* **The widget takes them.** `Icon(Icons.FAVORITE, fill=True, weight=600)`,
+  `Icon(Icons.SEARCH, weight=300, optical=48)` and the same axes on
+  `Icon.svg(...)`. Only the axes a widget set travel over the bridge, so an
+  untouched icon serialises exactly as before.
+* **They are clamped, not rejected.** `weight` 100–700, `grade` −50–200 and
+  `optical` 20–48 are the font's ranges; `weight=900` renders the boldest
+  glyph the set has rather than failing. A non-numeric axis is a `TypeError`,
+  because a mistyped weight is a bug, not a design choice.
+* **The renderer models them on the shipped paths.** The bundled outlines are
+  the 400-weight solid designs at optical 24. `fill=False` strokes that
+  silhouette (`OUTLINE_STROKE`), an effective weight above 400 thickens at
+  `WEIGHT_STROKE` per 400 units, grade folds in at `GRADE_AS_WEIGHT` 1.5
+  (one grade step is one-and-a-half weight steps, per the spec) and
+  `opticalFactor` is `24 / optical` — drawn large, the strokes thin, exactly
+  as the font's optical axis does.
+* **A stylesheet can retune any of them.** `icon-weight`, `icon-grade`,
+  `icon-optical` and `icon-fill` are registered PSS keys with native
+  consumers, and a stylesheet wins over the widget it restyles, as every
+  other key does: `.nav-icon { icon-weight: 600 }` reaches every icon in the
+  class.
+* `tests/test_icon_axes.py` (21 tests, 39 subtests) pins the ranges, the
+  clamping, the serialisation, the stylesheet keys and the generated Java.
+
 ### Fixed — shadow and scrim are the spec's black, and both are used
 
 * **The two roles had drifted to a tinted grey** (`#33101828`, `#99101828`).

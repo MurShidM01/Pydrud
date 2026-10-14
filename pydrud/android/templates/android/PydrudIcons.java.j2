@@ -16,6 +16,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import org.json.JSONObject;
 
 /**
  * PydrudIcons — crisp vector icons, drawn from path data.
@@ -78,6 +79,17 @@ public final class PydrudIcons {
         return new IconDrawable(data, color, sizePx);
     }
 
+    /** {@link #drawable(String, int, int)} with the Material Symbols axes. */
+    public static Drawable drawable(String name, int color, int sizePx,
+                                    JSONObject axes) {
+        String data = pathData(name);
+        if (data == null) {
+            warnUnknown(name);
+            data = PATHS.get("help");
+        }
+        return new IconDrawable(data, color, sizePx, axes);
+    }
+
     /**
      * A drawable for arbitrary 24x24 SVG path data.
      *
@@ -93,6 +105,16 @@ public final class PydrudIcons {
         return new IconDrawable(data, color, sizePx);
     }
 
+    /** {@link #drawablePath(String, int, int)} with the variable axes. */
+    public static Drawable drawablePath(String data, int color, int sizePx,
+                                        JSONObject axes) {
+        if (data == null || data.trim().isEmpty()) {
+            warnUnknown("<empty svg path>");
+            data = PATHS.get("help");
+        }
+        return new IconDrawable(data, color, sizePx, axes);
+    }
+
     private static void warnUnknown(String name) {
         String key = name == null ? "" : name.trim().toLowerCase();
         if (!WARNED.add(key)) return;   // once per name, per process
@@ -100,6 +122,38 @@ public final class PydrudIcons {
             + "Call pydrud.icons.has(name) (Python) or PydrudIcons.has(name) "
             + "(Java) for the supported set.");
     }
+
+    // ── Material Symbols ─────────────────────────────────────────────────
+    //
+    // The four axes, applied to path data rather than to a variable font.
+    // The bundled glyphs are the 400-weight solid designs at optical size 24,
+    // so that is the reference every axis is measured against:
+    //
+    // * `fill` picks the solid glyph (the shipped design, and the default) or
+    //   an outlined treatment — the silhouette stroked with the outline width
+    //   the spec's outlined icons use.
+    // * `weight` (100-700) thickens the glyph in proportion: at 700 the
+    //   stroke is ~0.06 em wider than at 400, which is the span the font's
+    //   weight axis covers.
+    // * `grade` (-50-200) shifts the weight slightly for optical alignment;
+    //   Material's grade steps are finer than its weight steps.
+    // * `optical` (20-48) is the size the glyph was drawn for. A smaller
+    //   optical size keeps strokes proportionally heavier and a larger one
+    //   thins them, which is what the axis does to the font.
+    //
+    // Weight and grade cannot thin a solid fill below the reference design —
+    // there is no lighter path to interpolate towards — so a negative
+    // adjustment is clamped there while an outlined glyph, whose strokes are
+    // ours, thins freely.
+
+    /** The stroke an outlined glyph uses, as a share of the icon size. */
+    private static final float OUTLINE_STROKE = 0.0625f;
+    /** The stroke the weight axis adds from 400 to 700, as a share. */
+    private static final float WEIGHT_STROKE = 0.08f;
+    /** How much of a grade step acts like a weight step. */
+    private static final float GRADE_AS_WEIGHT = 1.5f;
+    /** The optical size the bundled paths were drawn for. */
+    private static final float OPTICAL_REFERENCE = 24f;
 
     /** Drawable that rasterises 24x24 path data at any size. */
     public static final class IconDrawable extends Drawable {
@@ -110,12 +164,28 @@ public final class PydrudIcons {
         private final Matrix matrix = new Matrix();
         private final int size;
         private int tint;
+        private final int weight;
+        private final boolean filled;
+        private final int grade;
+        private final float optical;
 
         IconDrawable(String data, int color, int sizePx) {
+            this(data, color, sizePx, null);
+        }
+
+        IconDrawable(String data, int color, int sizePx, JSONObject axes) {
             this.size = sizePx > 0 ? sizePx : 1;
             this.tint = color;
-            paint.setStyle(Paint.Style.FILL);
+            this.weight = axes == null ? 400 : axes.optInt("weight", 400);
+            this.grade = axes == null ? 0 : axes.optInt("grade", 0);
+            this.optical = axes == null ? OPTICAL_REFERENCE
+                : (float) axes.optDouble("optical", OPTICAL_REFERENCE);
+            this.filled = axes == null || axes.optBoolean("fill", true);
             paint.setColor(color);
+            paint.setStrokeJoin(Paint.Join.ROUND);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStrokeMiter(4f);
+            paint.setStyle(filled ? Paint.Style.FILL_AND_STROKE : Paint.Style.STROKE);
             try {
                 Path parsed = androidx.core.graphics.PathParser
                     .createPathFromPathData(data);
@@ -127,15 +197,32 @@ public final class PydrudIcons {
         @Override public int getIntrinsicWidth()  { return size; }
         @Override public int getIntrinsicHeight() { return size; }
 
+        /** The stroke width this glyph is drawn with, in pixels. */
+        float strokeWidth(float side) {
+            float opticalFactor = OPTICAL_REFERENCE
+                / Math.max(1f, optical <= 0f ? OPTICAL_REFERENCE : optical);
+            float stroke = filled ? 0f : OUTLINE_STROKE * opticalFactor;
+            float effective = weight + grade * GRADE_AS_WEIGHT;
+            if (filled) effective = Math.max(400f, effective);
+            stroke += (effective - 400f) / 400f * WEIGHT_STROKE * opticalFactor;
+            return Math.max(0f, stroke) * side;
+        }
+
         @Override public void draw(Canvas canvas) {
             Rect b = getBounds();
             float side = Math.min(b.width(), b.height());
             if (side <= 0) side = size;
-            float scale = side / 24f;
+            float stroke = strokeWidth(side);
+            paint.setStrokeWidth(stroke);
+            // A stroke grows outwards, so the glyph is laid out inside the
+            // box the stroke needs: the icon keeps its declared size instead
+            // of bleeding past its bounds as the weight grows.
+            float inner = Math.max(1f, side - stroke);
+            float scale = inner / 24f;
             matrix.reset();
             matrix.setScale(scale, scale);
-            matrix.postTranslate(b.left + (b.width() - side) / 2f,
-                                 b.top + (b.height() - side) / 2f);
+            matrix.postTranslate(b.left + (b.width() - inner) / 2f + stroke / 2f,
+                                 b.top + (b.height() - inner) / 2f + stroke / 2f);
             source.transform(matrix, scaled);
             canvas.drawPath(scaled, paint);
         }
@@ -146,6 +233,12 @@ public final class PydrudIcons {
             paint.setColor(color);
             invalidateSelf();
         }
+
+        /** The axes this drawable was built with, for tests and diagnostics. */
+        public int weight()  { return weight; }
+        public int grade()   { return grade; }
+        public float optical() { return optical; }
+        public boolean filled() { return filled; }
 
         public int tintColor() { return tint; }
 
