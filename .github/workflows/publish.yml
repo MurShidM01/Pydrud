@@ -1,8 +1,9 @@
 name: Publish
 
-# Publishing a GitHub Release is the one action that ships to PyPI. The
-# build and the upload are separate jobs so the exact distributions the
-# publish step sends are the ones CI produced, not a rebuild.
+# One release, one version, both places. Publishing a GitHub Release is the
+# only action that ships: this workflow builds the distributions, uploads
+# them to PyPI over OIDC and attaches the same files to the release, so the
+# tag, the PyPI version and the release assets cannot drift apart.
 on:
   release:
     types: [published]
@@ -28,6 +29,22 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
           cache-dependency-path: pyproject.toml
+
+      # The release tag and the package version must agree. Without this the
+      # two sides silently diverge: a tag of v2.1.6 over a pyproject still
+      # reading 2.1.5 either publishes the wrong version to PyPI or fails
+      # there with "File already exists".
+      - name: Verify the tag matches the package version
+        if: github.event_name == 'release'
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version=$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "release tag: $RELEASE_TAG   package version: $version"
+          if [ "v$version" != "$RELEASE_TAG" ]; then
+            echo "::error::release tag $RELEASE_TAG does not match pyproject version $version"
+            exit 1
+          fi
 
       - name: Build sdist and wheel
         run: |
@@ -56,8 +73,8 @@ jobs:
       name: pypi
       url: https://pypi.org/p/pydrud
     # Trusted publishing: no API token is stored anywhere. The id-token
-    # permission lets the action exchange the workflow's OIDC identity for
-    # a short-lived PyPI credential. Remove it and the upload 403s.
+    # permission lets the action exchange the workflow's OIDC identity for a
+    # short-lived PyPI credential. Remove it and the upload 403s.
     permissions:
       id-token: write
     steps:
@@ -67,7 +84,30 @@ jobs:
           name: dist
           path: dist/
 
-      # PyPI versions are immutable: if pyproject.toml still names a version
-      # that is already published, this step fails rather than overwriting.
+      # PyPI versions are immutable, so a duplicate version fails here rather
+      # than being overwritten.
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  attach:
+    name: Attach artifacts to the release
+    needs: [build, publish]
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+      # --clobber keeps a re-run idempotent: the CI-built files replace any
+      # earlier ones, so the release always carries exactly what PyPI got.
+      - name: Upload to the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" dist/* --clobber
