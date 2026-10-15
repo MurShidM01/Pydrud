@@ -2,8 +2,8 @@
   <img src="https://img.shields.io/pypi/v/pydrud?color=6366F1&style=flat-square" alt="PyPI" />
   <img src="https://img.shields.io/pypi/pyversions/pydrud?style=flat-square" alt="Python" />
   <img src="https://img.shields.io/badge/runtimes-Pydash%20%7C%20Chaquopy-6366F1?style=flat-square" alt="Pydash and Chaquopy runtimes" />
-  <img src="https://img.shields.io/github/license/Sindhi-Hacker/Pydrud?style=flat-square" alt="MIT license" />
-  <img src="https://img.shields.io/github/v/release/Sindhi-Hacker/Pydrud?style=flat-square&color=6366F1" alt="Latest release" />
+  <img src="https://img.shields.io/github/license/MurShidM01/Pydrud?style=flat-square" alt="MIT license" />
+  <img src="https://img.shields.io/github/v/release/MurShidM01/Pydrud?style=flat-square&color=6366F1" alt="Latest release" />
   <img src="https://img.shields.io/badge/Material%20Design-3-6366F1?style=flat-square" alt="Material Design 3" />
   <img src="https://img.shields.io/pypi/dm/pydrud?style=flat-square" alt="Downloads" />
 </p>
@@ -17,7 +17,7 @@
 
 <p align="center">
   <strong>Congratulations, Android users — Pydash is officially live!</strong><br>
-  Download the preview client from the <a href="https://github.com/Sindhi-Hacker/Pydash/releases">Pydash releases page</a>. iOS is coming soon.
+  Download the preview client from the <a href="https://github.com/MurShidM01/Pydash/releases">Pydash releases page</a>. iOS is coming soon.
 </p>
 
 ---
@@ -46,7 +46,7 @@ Python · build an Android app without Java · PSS stylesheets.
 
 - 📦 PyPI: [pypi.org/project/pydrud](https://pypi.org/project/pydrud/)
 - 📚 Docs: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/PSS_STYLESHEETS.md](docs/PSS_STYLESHEETS.md)
-- 🐛 Issues: [github.com/Sindhi-Hacker/Pydrud/issues](https://github.com/Sindhi-Hacker/Pydrud/issues)
+- 🐛 Issues: [github.com/MurShidM01/Pydrud/issues](https://github.com/MurShidM01/Pydrud/issues)
 - 📝 Changes: [CHANGELOG.md](CHANGELOG.md)
 
 ## Quick start
@@ -120,7 +120,7 @@ pip install pydrud                       # from PyPI
 ```
 
 ```bash
-git clone https://github.com/Sindhi-Hacker/Pydrud.git
+git clone https://github.com/MurShidM01/Pydrud.git
 cd Pydrud && pip install -e ".[dev]"     # from source
 ```
 

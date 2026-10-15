@@ -109,7 +109,7 @@ class QRCodeEncoderTests(unittest.TestCase):
         payloads = [
             "A",
             "pydrud",
-            "https://github.com/Sindhi-Hacker/Pydrud",
+            "https://github.com/MurShidM01/Pydrud",
             "pydrud://preview/connect?host=192.168.1.24&port=8597"
             "&session=b8d3ccf1-0902-4e4d-b24f-3d1ce1af2423"
             "&token=cLE5V-ksANHidzBKFXbkmkIs8qYZ3HrcjKfI8l6SOaQ"

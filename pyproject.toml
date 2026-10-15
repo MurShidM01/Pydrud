@@ -59,12 +59,12 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Sindhi-Hacker/Pydrud"
-Repository = "https://github.com/Sindhi-Hacker/Pydrud"
-Documentation = "https://github.com/Sindhi-Hacker/Pydrud/blob/main/docs/ARCHITECTURE.md"
-"Bug Tracker" = "https://github.com/Sindhi-Hacker/Pydrud/issues"
-Changelog = "https://github.com/Sindhi-Hacker/Pydrud/blob/main/CHANGELOG.md"
-"Stylesheet guide" = "https://github.com/Sindhi-Hacker/Pydrud/blob/main/docs/PSS_STYLESHEETS.md"
+Homepage = "https://github.com/MurShidM01/Pydrud"
+Repository = "https://github.com/MurShidM01/Pydrud"
+Documentation = "https://github.com/MurShidM01/Pydrud/blob/main/docs/ARCHITECTURE.md"
+"Bug Tracker" = "https://github.com/MurShidM01/Pydrud/issues"
+Changelog = "https://github.com/MurShidM01/Pydrud/blob/main/CHANGELOG.md"
+"Stylesheet guide" = "https://github.com/MurShidM01/Pydrud/blob/main/docs/PSS_STYLESHEETS.md"
 
 [project.scripts]
 pydrud = "pydrud.commands.cli:main"
