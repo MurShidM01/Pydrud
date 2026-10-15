@@ -46,7 +46,8 @@ class TestNoV3Naming(unittest.TestCase):
     def test_no_v3_version_labels_anywhere(self):
         offences = []
         for path in _scanned_files():
-            relative = str(path.relative_to(ROOT))
+            # POSIX form so the ALLOWED entries match on every platform.
+            relative = path.relative_to(ROOT).as_posix()
             if any(allowed in relative for allowed in ALLOWED):
                 continue
             try:
