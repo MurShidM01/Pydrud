@@ -340,12 +340,19 @@ class TestDeclarativeAnimationCoverage(unittest.TestCase):
     def test_interpolator_understands_the_css_curves(self):
         from tests import all_java_templates
 
-        body = re.search(r"android.view.animation.Interpolator interpolator\(.*?\n    \}",
-                         all_java_templates(), re.S).group(0)
-        for curve in ('"ease"', '"ease_in"', '"ease_out"', '"ease_in_out"'):
-            self.assertIn(curve, body, f"the CSS {curve} timing must be mapped")
-        self.assertIn("cubic-bezier(", body)
-        self.assertIn("PathInterpolator", all_java_templates())
+        java = all_java_templates()
+        # The mapping lives in one place now — `PydrudTheme.easing` — so a
+        # stylesheet curve and a widget curve cannot drift apart.
+        body = re.search(r"public static android\.view\.animation\.Interpolator easing\(.*?\n    \}",
+                         java, re.S).group(0)
+        builder = re.search(r"private static android\.view\.animation\.Interpolator "
+                            r"buildEasing\(.*?\n    \}", java, re.S).group(0)
+        for curve in ('"ease"', '"ease-in"', '"ease-out"', '"ease-in-out"'):
+            self.assertIn(curve, builder, f"the CSS {curve} timing must be mapped")
+        self.assertIn("cubic-bezier(", builder)
+        self.assertIn("PathInterpolator", java)
+        self.assertIn("easingStandard", body,
+                      "the M3 names resolve through the easing tokens")
 
     def test_transition_spec_tweens_a_property_change(self):
         from tests import all_java_templates

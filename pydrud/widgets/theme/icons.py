@@ -26,6 +26,30 @@ class _IconsMeta(_ConstantsMeta):
             raise
 
 
+#: The Material Symbols variable axes and the range each accepts, as the
+#: font declares them. A value outside the range is clamped rather than
+#: rejected: an axis is a design knob, not a contract, and a theme that says
+#: ``weight=800`` should get the boldest glyph the set has, not an exception.
+ICON_AXES = {
+    "weight": (100, 700),
+    "grade": (-50, 200),
+    "optical": (20, 48),
+}
+
+
+def check_icon_axes(*, weight=None, grade=None, optical=None) -> dict:
+    """Clamp and validate the axis values an :class:`Icon` was given."""
+    values = {"weight": weight, "grade": grade, "optical": optical}
+    for name, value in values.items():
+        if value is None:
+            continue
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise TypeError(f"icon {name} must be a number, got {value!r}")
+        low, high = ICON_AXES[name]
+        values[name] = int(min(max(value, low), high))
+    return values
+
+
 class Icons(metaclass=_IconsMeta):
     """Icon names understood by the Android ``ViewFactory``.
 

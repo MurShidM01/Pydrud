@@ -1,18 +1,9 @@
 """
 Material Design 3 component library.
 
-Everything here maps onto a real Android view in ``ViewFactory``:
-``ListTile`` becomes a ``LinearLayout`` with the standard 16dp/72dp metrics,
-``Tabs`` and ``BottomNavigationBar`` become Pydrud's own ``PydrudTabBar``
-and ``PydrudNavBar`` views, which honour every style property Python
-sends instead of only the ones a Material theme attribute exposes.
-
-The Python side stays declarative: build the widget, hand it a callback,
-return it from your page builder.
-
-The widgets are grouped by concern into sibling modules; this package
-re-exports them so ``from pydrud.widgets.material import ListTile`` keeps
-working.
+The complete M3 component set including Snackbar, DatePicker, TimePicker,
+SideSheet, BottomAppBar, FABMenu, SearchView, StandardBottomSheet,
+FullScreenDialog, LoadingIndicator, ButtonGroup, SplitButton, Toolbar.
 """
 
 from pydrud.widgets.material.lists import (
@@ -36,6 +27,18 @@ from pydrud.widgets.material.bottom_nav import (
 from pydrud.widgets.material.rail import Drawer, NavigationRail, SegmentedButton
 from pydrud.widgets.material.media import Chart, VideoPlayer, WebView
 from pydrud.widgets.material.overlays import AlertDialog, Dialog, ModalBottomSheet
+# Material 3 components
+from pydrud.widgets.material.snackbar import Snackbar
+from pydrud.widgets.material.pickers import DatePicker, DateRangePicker, TimePicker
+from pydrud.widgets.material.sheets import (
+    StandardBottomSheet, SideSheet, FullScreenDialog,
+)
+from pydrud.widgets.material.nav_components import (
+    BottomAppBar, FABMenu, FABMenuItem, SearchView,
+)
+from pydrud.widgets.material.expressive import (
+    ButtonGroup, LoadingIndicator, SplitButton, Toolbar,
+)
 
 __all__ = [
     # lists
@@ -56,4 +59,14 @@ __all__ = [
     "WebView", "VideoPlayer", "Chart",
     # overlays
     "AlertDialog", "Dialog", "ModalBottomSheet",
+    # Snackbar
+    "Snackbar",
+    # Date and time pickers
+    "DatePicker", "DateRangePicker", "TimePicker",
+    # Sheets
+    "StandardBottomSheet", "SideSheet", "FullScreenDialog",
+    # Navigation components
+    "BottomAppBar", "FABMenu", "FABMenuItem", "SearchView",
+    # Expressive components
+    "ButtonGroup", "LoadingIndicator", "SplitButton", "Toolbar",
 ]

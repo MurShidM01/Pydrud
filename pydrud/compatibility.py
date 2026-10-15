@@ -59,14 +59,14 @@ class Compatibility:
 #: Cross-platform — valid on both host and device. The runtime reads this
 #: to verify that the host and APK agree on the protocol.
 HOST_COMPATIBILITY = HostCompatibility(
-    framework_version="2.1.4",
+    framework_version="2.1.5",
     protocol_version=2,
     python_version="3.11",
 )
 
 #: Android toolchain pins — only consumed during scaffolding / sync.
 COMPATIBILITY = Compatibility(
-    android_runtime_version="2.1.4",
+    android_runtime_version="2.1.5",
     protocol_version=2,
     agp_version="8.13.2",
     gradle_version="8.14.4",
@@ -96,4 +96,6 @@ NATIVE_IGNORED_PROPS: dict[str, tuple[str, ...]] = {
     "Markdown": ("linkColor",),
     "Rating": ("half",),
     "ReorderableList": ("handle", "longPress"),
+    # new Material 3 components
+    "LoadingIndicator": ("waveform",),
 }

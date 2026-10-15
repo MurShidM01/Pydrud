@@ -1,6 +1,9 @@
 """
 The Material 3 type scale: named :class:`TextTheme` roles and
 :class:`Typography` sizes.
+
+Exact M3 baseline weights, line-heights and letter-spacing for
+all 15 roles.
 """
 
 from __future__ import annotations
@@ -30,7 +33,6 @@ class _TextStyle(dict):
         return self["font"]["weight"]
 
     def with_(self, **overrides) -> "_TextStyle":
-        """A copy with some font fields overridden (colour, family, …)."""
         font = {**self["font"], **overrides}
         copy = _TextStyle(font.pop("size", self.size),
                           font.pop("weight", self.weight))
@@ -39,8 +41,6 @@ class _TextStyle(dict):
 
 
 class _TextThemeMeta(type):
-    """Resolve ``TextTheme.titleLarge`` / ``.TITLE_LARGE`` / ``.title_large``."""
-
     def __getattr__(cls, name: str):
         if name.startswith("__"):
             raise AttributeError(name)
@@ -54,54 +54,69 @@ class _TextThemeMeta(type):
 
 
 class TextTheme(metaclass=_TextThemeMeta):
-    """Named text styles, by role instead of magic numbers.
+    """Named text styles — the complete M3 type scale.
 
-    Mirrors Flutter's ``TextTheme`` / Material 3's type scale::
+    Exact M3 baseline metrics (size/weight/line-height/letter-spacing)
+    for all 15 roles.  Previously headline and title weights deviated.
 
-        from pydrud import Text, TextTheme
+    ::
 
         Text("Title", style=TextTheme.title_large)
-        Text("Body", style=TextTheme.BODY_MEDIUM)      # any spelling works
-
-    Each role is a ``style=`` dict, so it can be passed straight to
-    :class:`~pydrud.Text` and refined with :meth:`_TextStyle.with_`.
+        Text("Body", style=TextTheme.BODY_MEDIUM)
     """
 
-    DISPLAY_LARGE = _TextStyle(57, 400, letter_spacing=-0.25)
-    DISPLAY_MEDIUM = _TextStyle(45, 400)
-    DISPLAY_SMALL = _TextStyle(36, 400)
-    HEADLINE_LARGE = _TextStyle(32, 500)
-    HEADLINE_MEDIUM = _TextStyle(28, 500)
-    HEADLINE_SMALL = _TextStyle(24, 500)
-    TITLE_LARGE = _TextStyle(22, 500)
-    TITLE_MEDIUM = _TextStyle(16, 600)
-    TITLE_SMALL = _TextStyle(14, 600)
-    BODY_LARGE = _TextStyle(16, 400)
-    BODY_MEDIUM = _TextStyle(14, 400)
-    BODY_SMALL = _TextStyle(12, 400)
-    LABEL_LARGE = _TextStyle(14, 500)
-    LABEL_MEDIUM = _TextStyle(12, 500)
-    LABEL_SMALL = _TextStyle(11, 500)
+    # M3 baseline: Display — 57/45/36 sp, w400, tight tracking
+    DISPLAY_LARGE = _TextStyle(57, 400, letter_spacing=-0.25, line_height=64)
+    DISPLAY_MEDIUM = _TextStyle(45, 400, line_height=52)
+    DISPLAY_SMALL = _TextStyle(36, 400, line_height=44)
+
+    # M3 baseline: Headline — 32/28/24 sp, w400 (NOT w500)
+    HEADLINE_LARGE = _TextStyle(32, 400, line_height=40)
+    HEADLINE_MEDIUM = _TextStyle(28, 400, line_height=36)
+    HEADLINE_SMALL = _TextStyle(24, 400, line_height=32)
+
+    # M3 baseline: Title — 22/16/14 sp
+    #   Large: w400 (NOT w500)
+    #   Medium: w500 (NOT w600)
+    #   Small: w500 (NOT w600)
+    TITLE_LARGE = _TextStyle(22, 400, line_height=28)
+    TITLE_MEDIUM = _TextStyle(16, 500, letter_spacing=0.15, line_height=24)
+    TITLE_SMALL = _TextStyle(14, 500, letter_spacing=0.1, line_height=20)
+
+    # M3 baseline: Body — 16/14/12 sp, w400
+    BODY_LARGE = _TextStyle(16, 400, letter_spacing=0.5, line_height=24)
+    BODY_MEDIUM = _TextStyle(14, 400, letter_spacing=0.25, line_height=20)
+    BODY_SMALL = _TextStyle(12, 400, letter_spacing=0.4, line_height=16)
+
+    # M3 baseline: Label — 14/12/11 sp, w500
+    LABEL_LARGE = _TextStyle(14, 500, letter_spacing=0.1, line_height=20)
+    LABEL_MEDIUM = _TextStyle(12, 500, letter_spacing=0.5, line_height=16)
+    LABEL_SMALL = _TextStyle(11, 500, letter_spacing=0.5, line_height=16)
 
 
 class Typography:
-    """The Material 3 type scale, in sp."""
+    """The Material 3 type scale, in sp.
 
-    DISPLAY = {"size": 45, "weight": 400}
-    HEADLINE = {"size": 32, "weight": 600}
-    TITLE = {"size": 22, "weight": 600}
-    TITLE_SMALL = {"size": 16, "weight": 600}
-    BODY = {"size": 16, "weight": 400}
-    BODY_SMALL = {"size": 14, "weight": 400}
-    LABEL = {"size": 14, "weight": 500}
-    CAPTION = {"size": 12, "weight": 400}
+    Updated to match the M3 baseline exactly.
+    """
+
+    DISPLAY = {"size": 45, "weight": 400, "lineHeight": 52}
+    HEADLINE = {"size": 32, "weight": 400, "lineHeight": 40}
+    TITLE = {"size": 22, "weight": 400, "lineHeight": 28}
+    TITLE_SMALL = {"size": 16, "weight": 500, "lineHeight": 24}
+    BODY = {"size": 16, "weight": 400, "lineHeight": 24}
+    BODY_SMALL = {"size": 14, "weight": 400, "lineHeight": 20}
+    LABEL = {"size": 14, "weight": 500, "lineHeight": 20}
+    CAPTION = {"size": 12, "weight": 400, "lineHeight": 16}
 
     @classmethod
     def scale(cls, factor: float) -> dict:
-        """Return the whole scale multiplied by *factor* (accessibility)."""
         out = {}
         for name, spec in vars(cls).items():
             if name.isupper() and isinstance(spec, dict):
-                out[name.lower()] = {"size": round(spec["size"] * factor, 1),
-                                     "weight": spec["weight"]}
+                out[name.lower()] = {
+                    "size": round(spec["size"] * factor, 1),
+                    "weight": spec["weight"],
+                    "lineHeight": round(spec.get("lineHeight", spec["size"] * 1.32) * factor, 1),
+                }
         return out

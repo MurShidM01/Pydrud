@@ -211,6 +211,30 @@ public class TreePatcher {
             }
         }
 
+        // A shape morph owns its background, so a new `progress` (or a new
+        // pair of shapes) is a repaint on a spring rather than a property of
+        // some child view. Handled before the generic prop ladder so the
+        // progress is never treated as an unknown key and dropped.
+        if (view.getBackground() instanceof PydrudShapes.MorphDrawable
+                && (p.has("progress") || p.has("from") || p.has("to")
+                    || p.has("rotation") || p.has("spring"))) {
+            PydrudShapes.MorphDrawable morph =
+                (PydrudShapes.MorphDrawable) view.getBackground();
+            if (p.has("from") || p.has("to")) {
+                String from = p.has("from") ? p.optString("from", "circle")
+                                            : morph.fromShape();
+                String to = p.has("to") ? p.optString("to", from)
+                                        : morph.toShape();
+                morph.setShapes(from, to);
+            }
+            if (p.has("rotation")) morph.setRotation((float) p.optDouble("rotation", 0));
+            if (p.has("spring")) morph.setSpring(p.optString("spring", ""));
+            if (p.has("progress")) {
+                morph.animateTo((float) p.optDouble("progress", 1.0));
+            }
+            return true;
+        }
+
         if (view instanceof AdvancedViews.PydrudCanvas) {
             // Canvas ops arrive as props. Re-apply them in place so a game
             // board, gauge or chart animates instead of freezing after its

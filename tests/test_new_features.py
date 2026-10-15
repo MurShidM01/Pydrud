@@ -100,13 +100,14 @@ class TestNewWidgets(unittest.TestCase):
         self.assertEqual(pos["style"]["top"], 4)
 
     def test_card_defaults(self):
-        """Flat + outlined by default; raised cards drop the hairline."""
+        """M3 cards default to L1 elevation (no outline)."""
         card = Card(child=Text("hi")).to_dict()
-        self.assertEqual(card["style"]["elevation"], 0)
-        self.assertEqual(card["style"]["borderRadius"], 16)
+        self.assertEqual(card["style"]["elevation"], 1)
+        self.assertEqual(card["style"]["borderRadius"], 12)
         self.assertEqual(card["style"]["padding"],
                          {"left": 16, "top": 16, "right": 16, "bottom": 16})
-        self.assertIn("border", card["style"])
+        # M3 elevated cards have no outline border
+        self.assertNotIn("border", card["style"])
 
         raised = Card(child=Text("hi"), elevation=3).to_dict()
         self.assertEqual(raised["style"]["elevation"], 3)
@@ -336,7 +337,9 @@ class TestThemeHelpers(unittest.TestCase):
         self.assertTrue(Theme.dark_mode)
         Theme.light()
         self.assertFalse(Theme.dark_mode)
-        self.assertEqual(Theme.as_dict()["background"], Colors.BACKGROUND)
+        # HCT-generated background is derived from seed, not hardcoded
+        self.assertIn("background", Theme.as_dict())
+        self.assertTrue(Theme.as_dict()["background"].startswith("#"))
 
 
 class TestWidgetBaseExtras(unittest.TestCase):

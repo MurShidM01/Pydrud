@@ -24,6 +24,210 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
+class CubicBezier:
+    """A CSS ``cubic-bezier(x1, y1, x2, y2)`` timing function.
+
+    The Material 3 easing tokens are cubic-béziers, and they have to mean the
+    same thing on both sides of the bridge: the renderer animates with a
+    ``PathInterpolator`` built from the same four numbers, so a value the
+    device would ease into has to ease the same way in Python. Solving for
+    ``t`` at a given ``x`` is Newton's method with a bisection fallback, which
+    is what the platform does internally.
+    """
+
+    __slots__ = ("x1", "y1", "x2", "y2")
+
+    def __init__(self, x1: float, y1: float, x2: float, y2: float):
+        if not 0.0 <= x1 <= 1.0 or not 0.0 <= x2 <= 1.0:
+            raise ValueError("cubic-bezier control x values must be in 0..1")
+        self.x1, self.y1, self.x2, self.y2 = float(x1), float(y1), float(x2), float(y2)
+
+    @classmethod
+    def parse(cls, text: str) -> "CubicBezier":
+        """Parse ``cubic-bezier(0.2, 0, 0, 1)`` (whitespace is free-form)."""
+        inner = text[text.index("(") + 1:]
+        inner = inner[: inner.index(")")] if ")" in inner else inner
+        parts = [part.strip() for part in inner.split(",")]
+        if len(parts) != 4:
+            raise ValueError(f"cubic-bezier needs four numbers, got {text!r}")
+        return cls(*(float(part) for part in parts))
+
+    def __call__(self, t: float) -> float:
+        if t <= 0.0:
+            return 0.0
+        if t >= 1.0:
+            return 1.0
+        x = self._solve(t)
+        return self._bezier(x, self.y1, self.y2)
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return (f"cubic-bezier({self.x1}, {self.y1}, {self.x2}, {self.y2})")
+
+    @staticmethod
+    def _bezier(u: float, p1: float, p2: float) -> float:
+        """The cubic Bézier with endpoints 0 and 1 at parameter ``u``."""
+        v = 1.0 - u
+        return 3.0 * v * v * u * p1 + 3.0 * v * u * u * p2 + u * u * u
+
+    @staticmethod
+    def _slope(u: float, p1: float, p2: float) -> float:
+        v = 1.0 - u
+        return (3.0 * v * v * p1 + 6.0 * v * u * (p2 - p1)
+                + 3.0 * u * u * (1.0 - p2))
+
+    def _solve(self, x: float) -> float:
+        u = x
+        for _ in range(8):
+            error = self._bezier(u, self.x1, self.x2) - x
+            if abs(error) < 1e-6:
+                return u
+            slope = self._slope(u, self.x1, self.x2)
+            if abs(slope) < 1e-6:
+                break
+            u -= error / slope
+        low, high = 0.0, 1.0
+        u = x
+        for _ in range(40):
+            error = self._bezier(u, self.x1, self.x2) - x
+            if abs(error) < 1e-7:
+                break
+            if error < 0:
+                low = u
+            else:
+                high = u
+            u = (low + high) / 2.0
+        return u
+
+
+class Spring:
+    """A Material 3 spring: a damping ratio and a stiffness.
+
+    Springs have no duration — they run until they settle — so the evaluator
+    works in *fractions of the settle time*: ``spring(t)`` is the position of
+    a unit mass released at rest towards 1, at ``t`` times the time it takes
+    to come to rest. The renderer does exactly this with a
+    ``TimeInterpolator``, so a spring means the same thing on both sides.
+
+    ``damping`` is ζ (0 = endless oscillation, 1 = no overshoot at all) and
+    ``stiffness`` is k with a unit mass, which the M3 tokens publish directly.
+    """
+
+    __slots__ = ("damping", "stiffness", "_settle")
+
+    def __init__(self, damping: float, stiffness: float):
+        if stiffness <= 0:
+            raise ValueError("spring stiffness must be positive")
+        if damping <= 0:
+            # No damping is an ideal oscillator: it never settles, so it can
+            # never be an easing. The renderer clamps too.
+            raise ValueError("spring damping must be positive")
+        self.damping = float(damping)
+        self.stiffness = float(stiffness)
+        self._settle = self._settle_time()
+
+    @classmethod
+    def parse(cls, text: str) -> "Spring":
+        """Parse ``"0.9, 700"`` — how a spring token is written."""
+        parts = [part.strip() for part in str(text).split(",")]
+        if len(parts) != 2:
+            raise ValueError(f"a spring is 'damping, stiffness', got {text!r}")
+        return cls(float(parts[0]), float(parts[1]))
+
+    def __call__(self, t: float) -> float:
+        if t <= 0.0:
+            return 0.0
+        if t >= 1.0:
+            return 1.0
+        return self.at(t * self.settle_ms)
+
+    def at(self, ms: float) -> float:
+        """The spring's position ``ms`` milliseconds after release."""
+        omega = math.sqrt(self.stiffness)        # unit mass: ω₀ = √k
+        zeta = self.damping
+        seconds = ms / 1000.0
+        if zeta < 1.0:
+            decayed = math.exp(-zeta * omega * seconds)
+            omega_d = omega * math.sqrt(1.0 - zeta * zeta)
+            return 1.0 - decayed * (math.cos(omega_d * seconds)
+                                    + (zeta * omega / omega_d)
+                                    * math.sin(omega_d * seconds))
+        if abs(zeta - 1.0) < 1e-6:
+            return 1.0 - (1.0 + omega * seconds) * math.exp(-omega * seconds)
+        root = omega * math.sqrt(zeta * zeta - 1.0)
+        decayed = math.exp(-zeta * omega * seconds)
+        return 1.0 - decayed * (math.cosh(root * seconds)
+                                + (zeta * omega / root) * math.sinh(root * seconds))
+
+    @property
+    def settle_ms(self) -> float:
+        """How long the spring takes to come to rest (0.1 % of the travel)."""
+        return self._settle
+
+    def _settle_time(self) -> float:
+        for ms in range(1, 8000):
+            if abs(self.at(ms) - 1.0) < 0.001:
+                settled = all(abs(self.at(later) - 1.0) < 0.001
+                              for later in (ms + 1, ms + 10, ms + 40, ms + 90))
+                if settled:
+                    return float(ms)
+        return 2000.0
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return f"Spring({self.damping}, {self.stiffness})"
+
+
+#: The Material 3 spring names, mapped to the token carrying the parameters.
+M3_SPRINGS = {
+    "spring_fast_spatial": "spring_fast_spatial",
+    "spring_default_spatial": "spring_default_spatial",
+    "spring_slow_spatial": "spring_slow_spatial",
+    "spring_fast_effects": "spring_fast_effects",
+    "spring_default_effects": "spring_default_effects",
+    "spring_slow_effects": "spring_slow_effects",
+}
+
+
+def _m3_spring(token_name: str) -> Callable[[float], float]:
+    """Read a spring token lazily, so ``Tokens.update()`` is honoured."""
+    def ease(t: float) -> float:
+        from pydrud.widgets.tokens import Tokens
+
+        return Spring.parse(getattr(Tokens, token_name))(t)
+
+    ease.__name__ = f"m3_{token_name}"
+    return ease
+
+
+#: Material 3 easing names mapped to the token that carries the curve, so a
+#: widget (or a stylesheet) can name the spec's curve and Python evaluates the
+#: same cubic-bézier the renderer will.
+M3_CURVES = {
+    "standard": "easing_standard",
+    "standard_decelerate": "easing_standard_decelerate",
+    "standard_accelerate": "easing_standard_accelerate",
+    "emphasized": "easing_emphasized",
+    "emphasized_decelerate": "easing_emphasized_decelerate",
+    "emphasized_accelerate": "easing_emphasized_accelerate",
+    "linear": "easing_linear",
+}
+
+
+def _m3_curve(token_name: str) -> Callable[[float], float]:
+    """Read a curve token lazily, so ``Tokens.update()`` is honoured."""
+    def ease(t: float) -> float:
+        from pydrud.widgets.tokens import Tokens
+
+        raw = getattr(Tokens, token_name)
+        return CubicBezier.parse(raw)(t) if "cubic-bezier(" in raw else _keyword(raw)(t)
+
+    ease.__name__ = f"m3_{token_name}"
+    return ease
+
+
+def _keyword(name: str) -> Callable[[float], float]:
+    return CURVES.get(name, lambda t: t)
+
+
 #: Easing functions shared with renderers that animate these values.
 CURVES: dict[str, Callable[[float], float]] = {
     "linear": lambda t: t,
@@ -41,6 +245,13 @@ CURVES: dict[str, Callable[[float], float]] = {
 }
 
 
+for _m3_name, _m3_token in M3_CURVES.items():
+    CURVES.setdefault(_m3_name, _m3_curve(_m3_token))
+
+for _m3_name, _m3_token in M3_SPRINGS.items():
+    CURVES.setdefault(_m3_name, _m3_spring(_m3_token))
+
+
 def _bounce(t: float) -> float:
     n, d = 7.5625, 2.75
     if t < 1 / d:
@@ -56,7 +267,17 @@ def _bounce(t: float) -> float:
 
 
 def curve(name: str) -> Callable[[float], float]:
-    """Look up an easing function by name."""
+    """Look up an easing function by name.
+
+    Accepts the platform curve names Pydrud has always used
+    (``ease_in_out``, ``overshoot``, …), the Material 3 motion names
+    (``standard``, ``emphasized_decelerate``, …) and a raw CSS
+    ``cubic-bezier(...)``, which is what the easing tokens hold.
+    """
+    if isinstance(name, str) and "cubic-bezier(" in name:
+        return CubicBezier.parse(name)
+    if isinstance(name, str) and name.startswith("spring-"):
+        return _m3_spring(name.replace("-", "_"))
     if name not in CURVES:
         raise ValueError(f"Unknown curve {name!r}. Available: "
                          f"{', '.join(sorted(CURVES))}")

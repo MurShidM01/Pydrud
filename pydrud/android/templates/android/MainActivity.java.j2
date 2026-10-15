@@ -32,6 +32,8 @@ public class {{ app_name }}Activity extends AppCompatActivity {
     private volatile boolean awaitingBackResult = false;
     private Runnable pendingBack;
     private volatile boolean drawerOpen = false;
+    /** The dimming layer behind an open modal drawer, or null. */
+    private android.view.View drawerScrim;
 {% if camera | default(false) %}
 
     /** Live CameraX previews, keyed by widget key. */
@@ -279,18 +281,101 @@ public class {{ app_name }}Activity extends AppCompatActivity {
             }
             float width = drawer.getWidth() > 0 ? drawer.getWidth() : 600f;
             boolean fromEnd = "end".equals(side);
+            boolean modal = drawerWantsScrim(drawer);
             if (open) {
+                // M3 motion: a surface enters by decelerating into place and
+                // leaves by accelerating away, so the drawer does too.
                 drawer.setTranslationX(fromEnd ? width : -width);
                 drawer.setVisibility(android.view.View.VISIBLE);
-                drawer.animate().translationX(0f).setDuration(220).start();
+                drawer.animate().translationX(0f)
+                      .setDuration(PydrudTheme.durationMs("medium_2"))
+                      .setInterpolator(PydrudTheme.easing("emphasized_decelerate"))
+                      .start();
+                if (modal) showDrawerScrim(drawer, side);
             } else {
                 drawer.animate().translationX(fromEnd ? width : -width)
-                      .setDuration(200)
+                      .setDuration(PydrudTheme.durationMs("medium_1"))
+                      .setInterpolator(PydrudTheme.easing("emphasized_accelerate"))
                       .withEndAction(() -> drawer.setVisibility(android.view.View.GONE))
                       .start();
+                hideDrawerScrim();
             }
             drawerOpen = open;
         });
+    }
+
+    /**
+     * Does this drawer dim what is behind it?
+     *
+     * <p>An M3 modal drawer composites the scrim role over the content;
+     * a permanent (standard) drawer does not, and a widget can opt out.
+     */
+    private boolean drawerWantsScrim(android.view.View drawer) {
+        if (viewFactory == null || !(drawer.getTag() instanceof String)) return true;
+        org.json.JSONObject node = viewFactory.getNode((String) drawer.getTag());
+        org.json.JSONObject props = node != null ? node.optJSONObject("props") : null;
+        return props == null || props.optBoolean("scrim", true);
+    }
+
+    /**
+     * Dim the content behind a modal drawer.
+     *
+     * <p>The scrim is a sibling of the drawer in the drawer's own host, so a
+     * theme that retunes the scrim role (or its opacity) retunes every modal
+     * drawer at once. Tapping it closes the drawer, which is what a modal
+     * surface does everywhere else.
+     */
+    private void showDrawerScrim(final android.view.View drawer, final String side) {
+        if (!(drawer.getParent() instanceof android.view.ViewGroup)) return;
+        final android.view.ViewGroup host = (android.view.ViewGroup) drawer.getParent();
+        if (drawerScrim == null || drawerScrim.getParent() != host) {
+            drawerScrim = new android.view.View(this);
+            drawerScrim.setBackgroundColor(PydrudTheme.scrimOverlay());
+            drawerScrim.setAlpha(0f);
+            drawerScrim.setOnClickListener(v -> setDrawerOpen(false, side));
+            host.addView(drawerScrim, drawerScrimParams(host));
+        }
+        drawerScrim.bringToFront();
+        drawer.bringToFront();
+        drawerScrim.setVisibility(android.view.View.VISIBLE);
+        drawerScrim.animate().alpha(1f)
+            .setDuration(PydrudTheme.durationMs("medium_1"))
+            .setInterpolator(PydrudTheme.easing("standard"))
+            .start();
+    }
+
+    private void hideDrawerScrim() {
+        if (drawerScrim == null) return;
+        final android.view.View scrim = drawerScrim;
+        drawerScrim = null;
+        scrim.animate().alpha(0f)
+             .setDuration(PydrudTheme.durationMs("medium_1"))
+             .setInterpolator(PydrudTheme.easing("standard"))
+             .withEndAction(() -> {
+                 if (drawerScrim == scrim) return;
+                 scrim.setVisibility(android.view.View.GONE);
+                 if (scrim.getParent() instanceof android.view.ViewGroup) {
+                     ((android.view.ViewGroup) scrim.getParent()).removeView(scrim);
+                 }
+             }).start();
+    }
+
+    /** Layout params a scrim can be added with, whatever the host is. */
+    private android.view.ViewGroup.LayoutParams drawerScrimParams(
+            android.view.ViewGroup host) {
+        if (host instanceof android.widget.FrameLayout) {
+            return new android.widget.FrameLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT);
+        }
+        if (host instanceof android.widget.LinearLayout) {
+            return new android.widget.LinearLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT);
+        }
+        return new android.view.ViewGroup.LayoutParams(
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT);
     }
 
     public boolean isDrawerOpen() { return drawerOpen; }

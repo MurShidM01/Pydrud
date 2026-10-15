@@ -75,7 +75,13 @@ Interaction pseudo-classes split in two:
 * **Transient** — `:active`, `:hover`, `:focus`. A rule using one is captured
   as a renderer sub-spec (`press`, `hover`, `focus`) and applied by the native
   renderer at the right moment. `.fab:active { transform: scale(.92) }` shrinks
-  the button on touch-down.
+  the button on touch-down. `:hover` follows a mouse, trackpad, stylus or TV
+  remote; `:focus` follows a keyboard, D-pad or accessibility traversal, and a
+  view styled with `:focus` is made focusable so traversal can reach it.
+  Leaving the state restores the rule's base declarations. A state rule that
+  sets no colour of its own is drawn as a Material 3 *state layer*: the base
+  colour blended toward the label colour at the role's published opacity
+  (`stateHover` 0.08, `stateFocus` 0.10).
 * **Persistent** — `:disabled`, `:checked`, `:selected`, `:enabled`. These
   match against the state a widget reports (`_pseudo_states`, or `state` /
   `disabled` / `checked` props) and apply as ordinary declarations.
@@ -135,10 +141,23 @@ renderer-specific.
 
 Matching rules follow CSS-like precedence: selector specificity first, then
 source order. For a widget with multiple classes, all matching rules
-participate. Its inline `style=` values are merged last and therefore override
-PSS declarations. PSS declarations are kept separately from inline styles, so
-removing a declaration from a stylesheet removes its effect on the next build
-instead of leaving a stale value behind.
+participate.
+
+There are three layers, weakest first:
+
+1. **Widget defaults** — what a widget derives from the design tokens and the
+   theme when it is built: a `Card`'s surface colour and radius, a `Column`'s
+   axis and spacing, the sizes a layout needs.
+2. **PSS declarations** — every matching rule, resolved in specificity order.
+3. **Caller values** — anything passed as a keyword argument (`spacing=4`,
+   `bg="#FF0000"`) or in `style={...}`.
+
+So a stylesheet can restyle any component without touching Python —
+`Card { bg: $surface_container_high; }` and `Column { spacing: 24; }` both
+take effect — while a deliberately hand-styled widget keeps the value its
+author gave it. PSS declarations are kept separately from `style`, so removing
+a declaration from a stylesheet removes its effect on the next build instead of
+leaving a stale value behind.
 
 ## Theme tokens (`$token`)
 
@@ -254,6 +273,92 @@ direction fill`); the native renderer runs the timeline, repeating it for
 `infinite`. `transition` tweens a property change when the value changes.
 `transform` is decomposed into Pydrud's `scale`/`rotation`; translation is
 layout and is dropped.
+
+### Naming a duration or a curve
+
+Three spellings work in either shorthand, and they all end up as the same
+tokens on the device:
+
+```pss
+.one   { transition: background 300ms cubic-bezier(.2, 0, 0, 1); }
+.two   { transition: background $duration_medium_2 $easing_emphasized; }
+.three { transition: background medium-2 emphasized-decelerate; }
+```
+
+* A **CSS time** (`300ms`, `.3s`) is milliseconds.
+* A **token reference** — `$duration_medium_2`, `$easing_emphasized` — resolves
+  to the theme's value, so retuning the token in Python moves the animation.
+  Duration tokens carry their unit when they expand (`300ms`).
+* A **Material 3 name** — `short-1` … `extra-long-4`, `fast`, `normal`, `slow`
+  for durations; `standard`, `standard-decelerate`, `standard-accelerate`,
+  `emphasized`, `emphasized-decelerate`, `emphasized-accelerate` for curves —
+  names the spec's step directly. The curve names resolve through the
+  `easing_*` tokens, which hold the spec's cubic-béziers.
+
+A transition that names no curve uses the M3 standard curve
+(`cubic-bezier(.2, 0, 0, 1)`). The CSS keywords (`ease`, `ease-in`,
+`ease-out`, `ease-in-out`, `linear`) and the platform curve names
+(`overshoot`, `bounce`, `anticipate`) still work unchanged.
+
+### Springs, for motion that is not a curve
+
+Material's second motion vocabulary is the spring: a **damping ratio and a
+stiffness** rather than a curve and a duration. A spring has no duration — it
+runs until it settles — so it takes as long as the distance needs, which is
+what makes a shape morph, a sheet or a drawer feel physical.
+
+```pss
+.card   { transition: scale spring-fast-spatial; }
+.chip   { shape-from: circle; shape-to: cookie_9; shape-spring: spring-slow-spatial; }
+```
+
+The six spec springs are available by name, or referenced as tokens:
+
+| Spring | Damping / stiffness | For |
+|--------|--------------------|-----|
+| `spring-fast-spatial` | 0.9 / 1400 | switches, buttons, shape changes |
+| `spring-default-spatial` | 0.9 / 700 | sheets, drawers, panels |
+| `spring-slow-spatial` | 0.9 / 300 | full-screen movement |
+| `spring-fast-effects` | 1.0 / 3800 | small colour and opacity changes |
+| `spring-default-effects` | 1.0 / 1600 | medium colour and opacity changes |
+| `spring-slow-effects` | 1.0 / 800 | full-screen fades |
+
+*Spatial* springs move something and may overshoot slightly; *effects* springs
+animate colour or opacity and are critically damped, so a value never bounces
+past its target. A spring named where a curve is expected (a `transition`
+timing function, an `animation` curve) is resolved to its settle time and its
+step response — `$spring_fast_spatial` and `spring-fast-spatial` are the same
+curve. Pick the speed by the distance covered, as Material does.
+
+### Shape morphing
+
+`ShapeMorph` draws a Material shape and morphs between two of them. The shape
+*is* the container's background, so its children sit inside it exactly as they
+would inside a Card:
+
+```python
+ShapeMorph(
+    Shapes.CIRCLE, Shapes.COOKIE_9,
+    progress=1 if selected else 0, rotation=90, size=96,
+    bg=Theme.primary_container, child=Icon(Icons.FAVORITE),
+)
+```
+
+`progress` is the whole animation: 0 paints the first shape, 1 the second, and
+every value between is a real member of the shape family rather than a tangle
+of crossing curves. Changing it springs the shape instead of snapping it, and
+a stylesheet can retune the whole morph for a class:
+
+```pss
+ShapeMorph.badge { shape-from: circle; shape-to: sunny; shape-progress: 1;
+                   shape-rotation: 45; shape-spring: spring-default-spatial; }
+```
+
+The family is the Material shape catalogue: `circle`, `square`,
+`puffy_square`, `diamond`, `puffy_diamond`, `pentagon`, `hexagon`, `octagon`,
+`gem`, `clover_4/6/8/12`, `cookie_4/6/9/12`, `burst`, `soft_burst`, `flower`
+and `sunny`. Names are forgiving — `COOKIE-9`, `cookie9` and `cookie_9` all
+mean the same shape.
 
 ## CSS long-hands and shorthands
 

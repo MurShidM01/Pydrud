@@ -3,7 +3,7 @@
 from pydrud.widgets.base import Widget, assign_stable_keys, validate_tree_keys
 from pydrud.widgets.styling import (
     Style, EdgeInsets, Alignment, FontStyle, Border, BorderSide, BorderRadius,
-    LinearGradient, RadialGradient, SweepGradient,
+    LinearGradient, RadialGradient, SweepGradient, Shape,
 )
 from pydrud.widgets.layout import (
     Container, Column, Row, Center, Spacer, Divider,
@@ -17,7 +17,8 @@ from pydrud.widgets.basic import (
 )
 from pydrud.widgets.theme import (Colors, Icons, Theme, ColorScheme, Typography,
                                   Spacing, Radius, Elevation, Motion,
-                                  TextTheme, ThemeExtension)
+                                  TextTheme, ThemeExtension,
+                                  DynamicScheme, CorePalette, TonalPalette, Hct)
 from pydrud.widgets.tokens import Tokens
 from pydrud.widgets.material import (
     ListTile, ExpansionTile, ExpansionPanel, ExpansionPanelList,
@@ -30,7 +31,13 @@ from pydrud.widgets.material import (
     RefreshIndicator, Stepper, WebView, VideoPlayer, Chart,
     MenuItem, MenuDivider, PopupMenu, PopupMenuButton, DropdownMenu,
     AlertDialog, Dialog, ModalBottomSheet,
+    # Material 3 components
+    Snackbar, DatePicker, DateRangePicker, TimePicker,
+    StandardBottomSheet, SideSheet, FullScreenDialog,
+    BottomAppBar, FABMenu, FABMenuItem, SearchView,
+    ButtonGroup, LoadingIndicator, SplitButton, Toolbar,
 )
+from pydrud.widgets.shapes import ShapeMorph, Shapes, SHAPES, SPRINGS
 from pydrud.widgets.gestures import GestureDetector, InkWell, Dismissible, Draggable
 from pydrud.widgets.animation import (
     Animation, AnimatedContainer, AnimatedOpacity, AnimatedScale,
@@ -104,6 +111,7 @@ __all__ = [
     "Image",
     "SvgPicture",
     "Icon",
+    "ShapeMorph", "Shapes", "SHAPES", "SPRINGS",
     "Checkbox",
     "Switch",
     "ProgressBar",
@@ -124,6 +132,7 @@ __all__ = [
     "Border",
     "BorderSide",
     "BorderRadius",
+    "Shape",
     "LinearGradient",
     "RadialGradient",
     "SweepGradient",
@@ -136,6 +145,10 @@ __all__ = [
     "Icons",
     "Theme",
     "ColorScheme",
+    "DynamicScheme",
+    "CorePalette",
+    "TonalPalette",
+    "Hct",
     "Typography",
     "TextTheme",
     "ThemeExtension",
@@ -177,6 +190,26 @@ __all__ = [
     "AlertDialog",
     "Dialog",
     "ModalBottomSheet",
+    # Snackbar
+    "Snackbar",
+    # Date and time pickers
+    "DatePicker",
+    "DateRangePicker",
+    "TimePicker",
+    # Sheets
+    "StandardBottomSheet",
+    "SideSheet",
+    "FullScreenDialog",
+    # Navigation components
+    "BottomAppBar",
+    "FABMenu",
+    "FABMenuItem",
+    "SearchView",
+    # Expressive components
+    "ButtonGroup",
+    "LoadingIndicator",
+    "SplitButton",
+    "Toolbar",
     # menus
     "MenuItem",
     "MenuDivider",

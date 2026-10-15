@@ -1,0 +1,363 @@
+package {{ package }};
+
+import android.graphics.Canvas;
+import android.graphics.ColorFilter;
+import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.PixelFormat;
+import android.graphics.drawable.Drawable;
+import android.view.View;
+
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * PydrudShapes — the Material 3 shape family and the morph between members.
+ *
+ * <p>Material's shapes are not ten bitmaps; they are a small parametric
+ * family — circles, rounded polygons, puffy squircles and the "cookie",
+ * "clover", "burst" and "flower" waves — and shape morphing interpolates
+ * between two members of that family by matching their vertices. This class
+ * does the same thing in the same way: every shape is a radius function
+ * {@code r(θ)} sampled at the same angle set, so any two shapes have
+ * corresponding vertices, and a morph is a per-angle interpolation plus a
+ * rotation.
+ *
+ * <p>The radius functions are the three ingredients Material's catalogue is
+ * built from:
+ *
+ * <ul>
+ *   <li>a <b>superellipse</b> {@code (|cosθ|ᵖ + |sinθ|ᵖ)^(-1/p)} — the circle
+ *       at {@code p = 2}, a rounded square as {@code p} grows and a diamond
+ *       as it drops towards 1;</li>
+ *   <li>a <b>regular polygon</b> with a roundness blend, for the pentagon,
+ *       hexagon and gem shapes;</li>
+ *   <li>a <b>wave</b> {@code 1 + amplitude·cos(nθ)}, which is what the
+ *       cookie, clover, burst, flower and sunny shapes are — a circle whose
+ *       edge is pushed in and out {@code n} times.</li>
+ * </ul>
+ *
+ * <p>Morphing is driven by a spring ({@code PydrudTheme.springEasing}), not
+ * by a curve and a duration: a shape change is spatial motion, and Material
+ * says spatial motion is springy.
+ */
+public final class PydrudShapes {
+
+    private PydrudShapes() {}
+
+    /** A view that owns one morph and can re-aim it on any update. */
+    public static final class MorphView extends android.widget.FrameLayout {
+        private MorphDrawable morph;
+
+        public MorphView(android.content.Context context) { super(context); }
+
+        public void setMorph(MorphDrawable drawable) {
+            this.morph = drawable;
+            setBackground(drawable);
+        }
+
+        public MorphDrawable morph() { return morph; }
+
+        /**
+         * Move to a new point between the two shapes.
+         *
+         * <p>Retargeting is a change of {@code progress}, and progress moves
+         * on a spring — so a tap springs the shape rather than snapping it.
+         */
+        public void setProgress(float progress) {
+            if (morph == null) return;
+            morph.setProgress(progress);
+        }
+
+        /** Retarget the morph itself (a different pair of shapes). */
+        public void setShapes(String from, String to) {
+            if (morph == null || morph.sameAs(from, to)) return;
+            setMorph(new MorphDrawable(from, to, morph.progress(),
+                morph.rotation(), morph.fillColor()));
+        }
+    }
+
+    /** The spring a shape change runs on when the widget did not name one. */
+    static String defaultSpring() { return "spring_fast_spatial"; }
+
+    /** How many points a shape is sampled at. Two shapes must share this. */
+    static final int SAMPLES = 240;
+
+    private static final Map<String, float[]> CACHE = new HashMap<>();
+
+    /** Every shape name the morph understands, sorted, for diagnostics. */
+    public static java.util.Set<String> names() {
+        java.util.Set<String> all = new java.util.TreeSet<>();
+        all.addAll(java.util.Arrays.asList(
+            "circle", "square", "puffy_square", "diamond", "puffy_diamond",
+            "pentagon", "hexagon", "octagon", "gem",
+            "clover_4", "clover_6", "clover_8", "clover_12",
+            "cookie_4", "cookie_6", "cookie_9", "cookie_12",
+            "burst", "soft_burst", "flower", "sunny"));
+        return all;
+    }
+
+    /** @return true when a morph can start or end at this shape. */
+    public static boolean has(String name) {
+        return name != null && names().contains(name.trim().toLowerCase(
+            java.util.Locale.US));
+    }
+
+    /** The radius of {@code name} at angle {@code theta} (radians). */
+    static float radiusAt(String name, float theta) {
+        String key = name == null ? "circle"
+            : name.trim().toLowerCase(java.util.Locale.US).replace('-', '_');
+        switch (key) {
+            case "square":        return squircle(theta, 6f);
+            case "puffy_square":  return squircle(theta, 3.2f);
+            case "diamond":       return squircle(theta, 1.15f);
+            case "puffy_diamond": return squircle(theta, 1.6f);
+            case "pentagon":      return polygon(theta, 5, 0.14f);
+            case "hexagon":       return polygon(theta, 6, 0.12f);
+            case "octagon":       return polygon(theta, 8, 0.12f);
+            case "gem":           return polygon(theta, 6, 0.4f);
+            case "clover_4":      return wave(theta, 4, 0.22f);
+            case "clover_6":      return wave(theta, 6, 0.18f);
+            case "clover_8":      return wave(theta, 8, 0.16f);
+            case "clover_12":     return wave(theta, 12, 0.13f);
+            case "cookie_4":      return wave(theta, 4, 0.05f);
+            case "cookie_6":      return wave(theta, 6, 0.05f);
+            case "cookie_9":      return wave(theta, 9, 0.04f);
+            case "cookie_12":     return wave(theta, 12, 0.035f);
+            case "burst":         return wave(theta, 12, 0.26f);
+            case "soft_burst":    return wave(theta, 10, 0.14f);
+            case "flower":        return wave(theta, 8, 0.3f);
+            case "sunny":         return wave(theta, 16, 0.12f);
+            case "circle":
+            default:              return 1f;
+        }
+    }
+
+    /** {@code (|cosθ|ᵖ + |sinθ|ᵖ)^(-1/p)} — circle at 2, square as p grows. */
+    static float squircle(float theta, float p) {
+        float c = Math.abs((float) Math.cos(theta));
+        float s = Math.abs((float) Math.sin(theta));
+        return (float) Math.pow(Math.pow(c, p) + Math.pow(s, p), -1f / p);
+    }
+
+    /** A regular polygon, blended towards its circumcircle by {@code round}. */
+    static float polygon(float theta, int sides, float round) {
+        float step = (float) (2 * Math.PI / sides);
+        float wrapped = ((theta + step / 2f) % step + step) % step - step / 2f;
+        float sharp = (float) (Math.cos(Math.PI / sides) / Math.cos(wrapped));
+        return sharp * (1f - round) + round;
+    }
+
+    /** {@code 1 + amplitude·cos(nθ)} — the cookie, clover and burst family. */
+    static float wave(float theta, int n, float amplitude) {
+        return 1f + amplitude * (float) Math.cos(n * theta);
+    }
+
+    /** The sampled radius function for {@code name}, cached. */
+    static float[] radii(String name) {
+        String key = name == null ? "circle"
+            : name.trim().toLowerCase(java.util.Locale.US).replace('-', '_');
+        float[] cached = CACHE.get(key);
+        if (cached != null) return cached;
+        float[] values = new float[SAMPLES];
+        for (int i = 0; i < SAMPLES; i++) {
+            float theta = (float) (2 * Math.PI * i / SAMPLES);
+            values[i] = radiusAt(key, theta);
+        }
+        CACHE.put(key, values);
+        return values;
+    }
+
+    /**
+     * A shape at {@code progress} between two members of the family.
+     *
+     * <p>{@code progress} 0 is {@code from} and 1 is {@code to}; the two are
+     * interpolated per sample angle, so the vertices stay matched and the
+     * intermediate shape is always a valid member of the family rather than a
+     * tangle of crossing curves. {@code rotationDeg} turns the result, which
+     * is what makes a morph read as a turn as well as a reshape.
+     */
+    public static Path path(String from, String to, float progress,
+                            float sizePx, float rotationDeg) {
+        return path(radii(from), radii(to), progress, sizePx, rotationDeg);
+    }
+
+    /**
+     * A shape at {@code progress}, for the common case of morphing one
+     * shape's outline towards another's — the two are the same call.
+     */
+    public static Path path(String from, String to, float progress, float sizePx) {
+        return path(from, to, progress, sizePx, 0f);
+    }
+
+    static Path path(float[] from, float[] to, float progress,
+                     float sizePx, float rotationDeg) {
+        float t = Math.max(0f, Math.min(1f, progress));
+        float[] start = from != null ? from : radii("circle");
+        float[] end = to != null ? to : start;
+        float max = 0f;
+        float[] blended = new float[SAMPLES];
+        for (int i = 0; i < SAMPLES; i++) {
+            blended[i] = start[i] + (end[i] - start[i]) * t;
+            if (blended[i] > max) max = blended[i];
+        }
+        float half = Math.max(1f, sizePx) / 2f;
+        // Fit the box: a wave shape momentarily reaches past a plain circle,
+        // and a shape that grew past its bounds would clip its own stroke.
+        float scale = half / Math.max(1f, max);
+        float rotation = (float) Math.toRadians(rotationDeg);
+        Path path = new Path();
+        for (int i = 0; i < SAMPLES; i++) {
+            float theta = (float) (2 * Math.PI * i / SAMPLES) + rotation;
+            float r = blended[i] * scale;
+            float x = half + r * (float) Math.cos(theta);
+            float y = half + r * (float) Math.sin(theta);
+            if (i == 0) path.moveTo(x, y); else path.lineTo(x, y);
+        }
+        path.close();
+        return path;
+    }
+
+    /**
+     * Give a morphing view the standard press ripple.
+     *
+     * <p>A shape is a surface, and a surface answers a touch: this hands the
+     * view a bounded ripple tinted the way every other Pydrud surface is
+     * (the theme's state layer on the shape's own fill), so a morphing chip
+     * still reads as pressable.
+     */
+    public static void pressFeedback(View view, int fill) {
+        if (view == null) return;
+        PydrudTheme.addRipple(view, PydrudTheme.rippleOn(fill),
+                              Math.max(view.getWidth(), view.getHeight()) / 2f);
+    }
+
+    /** A drawable that paints a morphed shape and can be re-progressed. */
+    public static final class MorphDrawable extends Drawable {
+
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path path = new Path();
+        private String from;
+        private String to;
+        private float progress;
+        private float rotation;
+        private int color;
+        private String spring = "spring_fast_spatial";
+        private android.animation.ValueAnimator running;
+
+        public MorphDrawable(String from, String to, float progress,
+                             float rotation, int color) {
+            this.from = has(from) ? from : "circle";
+            this.to = has(to) ? to : this.from;
+            this.progress = Math.max(0f, Math.min(1f, progress));
+            this.rotation = rotation;
+            this.color = color;
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(color);
+            paint.setStrokeJoin(Paint.Join.ROUND);
+        }
+
+        /** Move to a new point between the two shapes, immediately. */
+        public void setProgress(float value) {
+            this.progress = Math.max(0f, Math.min(1f, value));
+            invalidateSelf();
+        }
+
+        /**
+         * Spring to a new point between the two shapes.
+         *
+         * <p>This is the difference between a shape that changes and a shape
+         * that <em>morphs</em>: the motion is a spring, so it takes as long as
+         * the distance needs, and a retarget mid-flight carries the current
+         * progress with it instead of restarting from the old shape.
+         */
+        public void animateTo(float value) {
+            float to = Math.max(0f, Math.min(1f, value));
+            if (Math.abs(to - progress) < 1e-4f) { setProgress(to); return; }
+            if (running != null) running.cancel();
+            final android.animation.ValueAnimator anim =
+                android.animation.ValueAnimator.ofFloat(progress, to);
+            anim.setDuration(durationMs());
+            anim.setInterpolator(interpolator());
+            anim.addUpdateListener(a ->
+                setProgress(((Number) a.getAnimatedValue()).floatValue()));
+            running = anim;
+            anim.start();
+        }
+
+        /** Stop any morph in flight. */
+        public void cancelAnimation() {
+            if (running != null) { running.cancel(); running = null; }
+        }
+
+        public float progress() { return progress; }
+
+        /** Turn the morph; a shape change often reads as a rotation too. */
+        public void setRotation(float degrees) {
+            this.rotation = degrees;
+            invalidateSelf();
+        }
+
+        public String fromShape() { return from; }
+        public String toShape() { return to; }
+
+        /** The Material 3 spring this morph runs on. */
+        public void setSpring(String name) {
+            if (name != null && !name.trim().isEmpty()) this.spring = name.trim();
+        }
+
+        public String spring() { return spring; }
+
+        /** The spring as an interpolator, over the spring's own settle time. */
+        public android.view.animation.Interpolator interpolator() {
+            return PydrudTheme.springEasing(spring);
+        }
+
+        /** How long this morph takes, in milliseconds. */
+        public long durationMs() {
+            return PydrudTheme.springDurationMs(spring);
+        }
+
+        /** Whether this morph already has the given two ends, for reuse. */
+        boolean sameAs(String fromShape, String toShape) {
+            return from.equals(fromShape) && to.equals(toShape);
+        }
+
+        /** Current rotation, in degrees. */
+        public float rotation() { return rotation; }
+
+        /** Re-aim the morph at a different pair of shapes, keeping progress. */
+        public void setShapes(String fromShape, String toShape) {
+            String a = fromShape == null ? from : fromShape;
+            String b = toShape == null ? a : toShape;
+            if (a.equals(from) && b.equals(to)) return;
+            this.from = a;
+            this.to = b;
+            if (running != null) running.cancel();
+            invalidateSelf();
+        }
+
+        @Override public void draw(Canvas canvas) {
+            android.graphics.Rect b = getBounds();
+            float side = Math.min(b.width(), b.height());
+            if (side <= 0) return;
+            path.set(PydrudShapes.path(from, to, progress, side, rotation));
+            path.offset(b.left + (b.width() - side) / 2f,
+                        b.top + (b.height() - side) / 2f);
+            canvas.drawPath(path, paint);
+        }
+
+        /** The fill this morph paints with. */
+        public int fillColor() { return color; }
+
+        public void setFill(int color) {
+            this.color = color;
+            paint.setColor(color);
+            invalidateSelf();
+        }
+
+        @Override public void setAlpha(int alpha) { paint.setAlpha(alpha); }
+        @Override public void setColorFilter(ColorFilter cf) { paint.setColorFilter(cf); }
+        @Override public int getOpacity() { return PixelFormat.TRANSLUCENT; }
+    }
+}
