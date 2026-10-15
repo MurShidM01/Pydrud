@@ -1,0 +1,73 @@
+name: Publish
+
+# Publishing a GitHub Release is the one action that ships to PyPI. The
+# build and the upload are separate jobs so the exact distributions the
+# publish step sends are the ones CI produced, not a rebuild.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Kept in step with ci.yml: one place to bump the interpreter.
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install -U pip build
+          python -m build
+
+      # A wheel that ships without android/templates/** installs cleanly and
+      # then cannot scaffold anything, so refuse to publish one.
+      - name: Verify the templates ship in the wheel
+        run: python tools/check_wheel.py
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Must match the environment named on the PyPI trusted publisher.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/pydrud
+    # Trusted publishing: no API token is stored anywhere. The id-token
+    # permission lets the action exchange the workflow's OIDC identity for
+    # a short-lived PyPI credential. Remove it and the upload 403s.
+    permissions:
+      id-token: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+      # PyPI versions are immutable: if pyproject.toml still names a version
+      # that is already published, this step fails rather than overwriting.
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
