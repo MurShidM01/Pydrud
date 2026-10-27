@@ -52,7 +52,9 @@ class DatePicker(Widget):
         if on_change is not None:
             self.event_handlers["change"] = on_change
         if on_dismiss is not None:
+            # The native pickers report a dismissal as ``cancel``.
             self.event_handlers["dismiss"] = on_dismiss
+            self.event_handlers["cancel"] = on_dismiss
 
     def _serialise_props(self) -> dict:
         props = dict(self._extra)
@@ -99,7 +101,9 @@ class DateRangePicker(Widget):
         if on_change is not None:
             self.event_handlers["change"] = on_change
         if on_dismiss is not None:
+            # The native pickers report a dismissal as ``cancel``.
             self.event_handlers["dismiss"] = on_dismiss
+            self.event_handlers["cancel"] = on_dismiss
 
     def _serialise_props(self) -> dict:
         props = dict(self._extra)
@@ -152,7 +156,9 @@ class TimePicker(Widget):
         if on_change is not None:
             self.event_handlers["change"] = on_change
         if on_dismiss is not None:
+            # The native pickers report a dismissal as ``cancel``.
             self.event_handlers["dismiss"] = on_dismiss
+            self.event_handlers["cancel"] = on_dismiss
 
     def _serialise_props(self) -> dict:
         props = dict(self._extra)
@@ -160,6 +166,6 @@ class TimePicker(Widget):
             "hour": self.hour,
             "minute": self.minute,
             "mode": self.mode,
-            "is24hour": self.is_24hour or None,
+            "is24hour": self.is_24hour,
         }))
         return props

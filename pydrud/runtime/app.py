@@ -137,6 +137,10 @@ class App(RenderMixin, BridgeMixin, LifecycleMixin, HotReloadMixin):
         self._shutdown_event = threading.Event()
         self._reader_thread: Optional[threading.Thread] = None
         self._running = False
+        #: The thread currently serving a renderer, so a restarted Activity
+        #: can wait for the previous loop instead of running two at once.
+        self._run_thread: Optional[threading.Thread] = None
+        self._run_lock = threading.Lock()
         self._lock = threading.Lock()
         # ── Router support ─────────────────────────────────────────
         self._router: Optional[Any] = None
@@ -239,7 +243,28 @@ class App(RenderMixin, BridgeMixin, LifecycleMixin, HotReloadMixin):
             max_retries: Maximum connection attempts before giving up.
             use_platform_logging: Install the Android log adapter for the
                 direct Chaquopy bridge (disable for neutral test renderers).
+
+        Callable more than once. On Android the interpreter outlives an
+        Activity: pressing BACK destroys the Activity (and its bridge
+        socket) but not the process, so relaunching the app calls this again
+        on the *same* :class:`App`. The previous event loop is unwound first,
+        which keeps one client per renderer and preserves app state.
         """
+        with self._run_lock:
+            previous = self._run_thread
+            if (previous is not None and previous is not threading.current_thread()
+                    and previous.is_alive()):
+                self._halt_run()
+                previous.join(timeout=5.0)
+            self._run_thread = threading.current_thread()
+            # Drop whatever the previous renderer left queued — most
+            # importantly its "stop" sentinel, which would otherwise end the
+            # new event loop on its first iteration.
+            while True:
+                try:
+                    self._event_queue.get_nowait()
+                except queue.Empty:
+                    break
         # The direct local bridge is the Chaquopy target. Host preview uses
         # serve_transport and never installs a platform logging adapter.
         if use_platform_logging:
@@ -256,6 +281,32 @@ class App(RenderMixin, BridgeMixin, LifecycleMixin, HotReloadMixin):
             self._start_dev_server()
 
         self._start_bridge(retry=retry, retry_delay=retry_delay, max_retries=max_retries)
+
+    def _halt_run(self) -> None:
+        """Stop the current renderer loop without tearing the app down.
+
+        Unlike :meth:`stop` this leaves the task pool, subscriptions and
+        stylesheets intact, so the same :class:`App` can serve the next
+        Activity.
+        """
+        self._running = False
+        self._shutdown_event.set()
+        transport = self._transport
+        self._transport = None
+        self._connected = False
+        if transport is not None:
+            try:
+                transport.shutdown(socket.SHUT_RDWR)
+            except Exception:
+                pass
+            try:
+                transport.close()
+            except Exception:
+                pass
+        try:
+            self._event_queue.put_nowait(None)
+        except queue.Full:
+            pass
 
     def _start_dev_server(self) -> None:
         """Start on-device DevServer for hot reload."""
@@ -632,7 +683,13 @@ def start_app():
     Invoked from Java via::
 
         Python.getInstance().getModule("app.main").callAttr("start_app")
+
+    Safe to call after an Activity restart: the interpreter survives BACK,
+    so the existing app is reused rather than rebuilding a second one.
     """
     from app.main import main
 
-    App(target=main).run()
+    app = App.current()
+    if app is None:
+        app = App(target=main)
+    app.run()

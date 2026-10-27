@@ -29,15 +29,19 @@ public class ChaquopyRuntime implements PythonRuntime {
     public void start(Context context) {
         // Chaquopy extracts the bundled sources into a cache directory; after
         // an upgrade a stale cache shadows the newly bundled code, so clear it
-        // before the interpreter looks at it.
-        try {
-            java.io.File cacheDir = new java.io.File(
-                context.getFilesDir(), "chaquopy/AssetFinder/app");
-            if (cacheDir.exists()) {
-                deleteDir(cacheDir);
+        // before the interpreter looks at it. Never touch it while the
+        // interpreter is live: an Activity restart reuses the running
+        // interpreter, and deleting its imported sources breaks the app.
+        if (!Python.isStarted()) {
+            try {
+                java.io.File cacheDir = new java.io.File(
+                    context.getFilesDir(), "chaquopy/AssetFinder/app");
+                if (cacheDir.exists()) {
+                    deleteDir(cacheDir);
+                }
+            } catch (Throwable ignored) {
+                // A missing or unreadable cache is not fatal — Chaquopy rebuilds it.
             }
-        } catch (Throwable ignored) {
-            // A missing or unreadable cache is not fatal — Chaquopy rebuilds it.
         }
 
         if (!Python.isStarted()) {

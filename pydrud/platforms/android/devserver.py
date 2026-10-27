@@ -58,22 +58,28 @@ class DevServer:
         if self._running:
             return True
 
-        # Try requested port, then a few sequential ports if occupied
+        # Try requested port, then a few sequential ports if occupied. A
+        # failed bind must close its candidate socket, otherwise every retry
+        # leaks a file descriptor (and the last one keeps the port reserved).
         bound = False
         port_range = [self.requested_port] if self.requested_port == 0 else range(self.requested_port, self.requested_port + 5)
         for p in port_range:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 sock.bind((self.host, p))
                 sock.listen(5)
                 sock.settimeout(0.5)
-                self._server_socket = sock
-                self.port = sock.getsockname()[1]
-                bound = True
-                break
             except OSError:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
                 continue
+            self._server_socket = sock
+            self.port = sock.getsockname()[1]
+            bound = True
+            break
 
         if not bound or self._server_socket is None:
             logger.warning("Could not bind DevServer to port %s", self.requested_port)

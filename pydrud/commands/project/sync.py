@@ -239,7 +239,7 @@ def _sync_context(project_dir: str, found: dict) -> dict:
         "camera": camera,
         "camera_inherited": camera_inherited,
         "shrink": "true" if _config_bool(config, "shrink", False) else "false",
-        "pip_packages": Requirements(project_dir).requirement_strings(),
+        "pip_packages": Requirements(project_dir).requirement_strings(device=True),
         "seed_color": seed,
     }
 

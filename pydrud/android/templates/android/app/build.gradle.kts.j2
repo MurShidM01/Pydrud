@@ -132,9 +132,9 @@ chaquopy {
         // Managed by `pydrud pip add` — edit pydrud.toml, not this block.
         pip {
             // pydrud:pip:begin
-{%- for requirement in pip_packages | default([]) %}
+{% for requirement in pip_packages | default([]) %}
             install("{{ requirement }}")
-{%- endfor %}
+{% endfor %}
             // pydrud:pip:end
         }
     }

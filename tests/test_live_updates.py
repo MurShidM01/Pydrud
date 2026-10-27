@@ -148,8 +148,12 @@ TEMPLATES = (pathlib.Path(__file__).resolve().parent.parent
 
 
 def _java(name: str) -> str:
-    """The raw Java template source (Jinja placeholders and all)."""
-    return (TEMPLATES / f"{name}.java.j2").read_text()
+    """The raw Java template source (Jinja placeholders and all).
+
+    The templates are UTF-8: they contain box-drawing separators that the
+    Windows ANSI code page cannot decode, so the encoding must be explicit.
+    """
+    return (TEMPLATES / f"{name}.java.j2").read_text(encoding="utf-8")
 
 
 class TestViewFactoryTemplate(unittest.TestCase):
@@ -205,7 +209,7 @@ class TestViewFactoryTemplate(unittest.TestCase):
             self.factory, re.S).group(1)
         java_types = set(re.findall(r'case "([^"]+)"', java))
         preview_src = (TEMPLATES.parent.parent.parent.parent
-                       / "tools" / "preview_ui.py").read_text()
+                       / "tools" / "preview_ui.py").read_text(encoding="utf-8")
         python = re.search(
             r"FILL_BY_DEFAULT = \{(.*?)\}", preview_src, re.S).group(1)
         python_types = set(re.findall(r'"([^"]+)"', python))

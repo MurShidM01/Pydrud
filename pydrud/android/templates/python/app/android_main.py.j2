@@ -25,16 +25,23 @@ def start_app():
 
     Importing ``app.main`` above has already applied the palette
     (``theme.use_light()``), so the screen is themed before the first frame.
+
+    The interpreter outlives an Activity: pressing BACK finishes the screen
+    but not the process. Reuse the running app in that case — the framework
+    unwinds the old bridge loop and re-renders — instead of creating a
+    second app that fights the first for the bridge port.
     """
-    app = bind(App(
-        target=router.build_root(),
-        title=APP_NAME,
-        stylesheet=os.path.join(os.path.dirname(__file__), "theme.pss"),
-    ))
-    app.attach_router(router)
-    # Deep links ({{ scheme }}://details), launcher shortcuts and push
-    # notification taps all arrive here and are routed automatically.
-    app.on_deep_link(lambda url: print(f"[{APP_NAME}] link:", url))
+    app = App.current()
+    if app is None:
+        app = bind(App(
+            target=router.build_root(),
+            title=APP_NAME,
+            stylesheet=os.path.join(os.path.dirname(__file__), "theme.pss"),
+        ))
+        app.attach_router(router)
+        # Deep links ({{ scheme }}://details), launcher shortcuts and push
+        # notification taps all arrive here and are routed automatically.
+        app.on_deep_link(lambda url: print(f"[{APP_NAME}] link:", url))
     app.run()
 
 

@@ -90,7 +90,7 @@ def main() -> int:
     names = sys.argv[1:]
     if not names:
         names = sorted(
-            str(p.relative_to(TEMPLATES))
+            p.relative_to(TEMPLATES).as_posix()
             for p in TEMPLATES.rglob("*.java.j2"))
     failures = 0
     for variant in VARIANTS:

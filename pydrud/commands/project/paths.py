@@ -192,7 +192,8 @@ def _detect_ndk(sdk_dir: str) -> str:
 _JAVA_TEMPLATES = (
     "BridgeService", "ViewFactory", "EventDispatcher", "WidgetRegistry",
     "ViewCreator", "MaterialViews", "PydrudTheme", "PydrudIcons",
-    "PydrudNavigation", "GestureBinder", "NativeServices", "PlatformServices", "AdvancedViews",
+    "PydrudShapes", "PydrudNavigation", "GestureBinder", "NativeServices",
+    "PlatformServices", "AdvancedViews",
     "PydrudWorker", "PydrudForegroundService",
     "CaptureServices", "ConnectivityServices",
     # ViewFactory collaborators (extracted to keep every renderer file small).

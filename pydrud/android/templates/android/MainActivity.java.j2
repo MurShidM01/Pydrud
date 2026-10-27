@@ -1063,9 +1063,12 @@ public class {{ app_name }}Activity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
-        sendLifecycle("destroy");
+        boolean recreating = isChangingConfigurations();
+        if (!recreating) sendLifecycle("destroy");
         if (bridge != null) bridge.stop();
-        if (runtime != null) runtime.shutdown();
+        // A configuration change destroys this Activity but keeps the
+        // interpreter; only a real exit releases the runtime.
+        if (runtime != null && !recreating) runtime.shutdown();
         if (viewFactory != null) viewFactory.clear();
 {% if camera | default(false) %}
         stopCamera();

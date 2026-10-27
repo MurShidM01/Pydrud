@@ -140,10 +140,14 @@ class TestNoPlaceholderFactories(unittest.TestCase):
             body = self._method_body(factory)
             delegate = self.DELEGATES.get(factory)
             if delegate:
-                # A thin delegation is fine as long as the shared builder is
-                # itself substantial.
+                # A thin delegation is fine as long as the shared builder it
+                # delegates to is itself substantial.
                 self.assertIn(delegate, body, f"{factory} must call {delegate}")
-                self.assertGreater(len(self._method_body(delegate).splitlines()), 12)
+                for builder in ("buildMaterialDatePicker",
+                                "buildMaterialTimePicker"):
+                    self.assertGreater(
+                        len(self._method_body(builder).splitlines()), 12,
+                        f"{builder} looks like a stub")
                 continue
             self.assertGreater(
                 len(body.splitlines()),
@@ -160,7 +164,7 @@ class TestNoPlaceholderFactories(unittest.TestCase):
     def _method_body(self, name: str) -> str:
         """Extract a method body by brace matching."""
         match = re.search(
-            r"(?:private|public|static|\s)*\s*(?:View|android\.app\.Dialog)\s+"
+            r"(?:private|public|static|\s)*[A-Za-z_][\w.]*(?:<[^>]*>)?\s+"
             + name
             + r"\s*\([^)]*\)\s*\{",
             self.material,

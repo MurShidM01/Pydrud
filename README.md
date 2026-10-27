@@ -429,12 +429,13 @@ portability claim above cannot regress unnoticed.
 
 | Version | Focus |
 |---------|-------|
+| **v2.1.6** | Lifecycle fixes: relaunch after BACK no longer shows a blank window, one app per process, a rebindable bridge port; real Material date/time pickers; host-only packages filtered out of the APK |
+| **v2.1.5** | Material 3 Complete: HCT colour, 36 roles, the M3 component catalogue, M3 typography/shape/motion — Android renderers, platform-neutral UI layer |
 | **v2.1.4** | Per-ABI APKs rebuilt with a product flavor dimension (Chaquopy rejects `splits.abi`); `pydrud build` collects the flavor APKs |
 | **v2.1.3** | `pydrud build` discovers per-ABI APKs (prints them all, returns the universal one); `--output` copies every split |
 | **v2.1.2** | Opt-in per-ABI APK splits (`abi_splits`) — one APK per ABI plus a universal APK for smaller downloads |
 | **v2.1.1** | PSS as a full CSS-style language, declarative `@keyframes`/`transition`/`:active`, pluggable runtime backends, Heartbeat starter, content blur, animated theming |
 | **v2.1.0** | `create`/`init android` CLI, pluggable runtime backends, PSS engine, Heartbeat starter, runtime-aware tooling |
-| **2.1.5** | Material 3 Complete: HCT colour, 36 roles, the M3 component catalogue, M3 typography/shape/motion — Android renderers, platform-neutral UI layer |
 | **Next** | Material Symbols + dynamic colour, expressive motion (springs), container transform, predictive back |
 | **Later** | Further M3 Expressive work, then additional platform backends on top of the neutral UI layer |
 

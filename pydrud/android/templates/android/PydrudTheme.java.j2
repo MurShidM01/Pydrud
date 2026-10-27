@@ -20,6 +20,7 @@ import android.util.DisplayMetrics;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.CompoundButton;
+import android.widget.ImageView;
 import android.widget.TextView;
 
 import org.json.JSONObject;
@@ -955,7 +956,7 @@ public final class PydrudTheme {
             TextView tv = (TextView) view;
             tv.setTextColor(alpha(tv.getCurrentTextColor(), stateDisabledContent));
         } else if (view instanceof ImageView) {
-            view.setImageAlpha(
+            ((ImageView) view).setImageAlpha(
                 Math.round(255f * stateDisabledContent));
         }
     }
@@ -1567,7 +1568,15 @@ public final class PydrudTheme {
             android.animation.LayoutTransition transition =
                 new android.animation.LayoutTransition();
             transition.setDuration(durationMs("short_4"));
-            transition.setInterpolator(easing("standard"));
+            // LayoutTransition.setInterpolator needs a transition type; apply
+            // the same curve to every kind of change.
+            for (int type : new int[]{
+                    android.animation.LayoutTransition.APPEARING,
+                    android.animation.LayoutTransition.DISAPPEARING,
+                    android.animation.LayoutTransition.CHANGE_APPEARING,
+                    android.animation.LayoutTransition.CHANGE_DISAPPEARING}) {
+                transition.setInterpolator(type, easing("standard"));
+            }
             transition.enableTransitionType(android.animation.LayoutTransition.CHANGING);
             transition.setAnimateParentHierarchy(false);
             group.setLayoutTransition(transition);

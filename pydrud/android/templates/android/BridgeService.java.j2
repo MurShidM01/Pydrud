@@ -63,10 +63,10 @@ public class BridgeService {
     private volatile Socket clientSocket;
     private volatile OutputStreamWriter writer;
     private volatile boolean running = false;
-    private final CountDownLatch listeningLatch = new CountDownLatch(1);
+    private volatile CountDownLatch listeningLatch = new CountDownLatch(1);
     /** Last metrics payload we sent, so identical updates are dropped. */
     private volatile String lastMetrics = "";
-    private final ExecutorService writeExecutor = Executors.newSingleThreadExecutor();
+    private volatile ExecutorService writeExecutor = Executors.newSingleThreadExecutor();
 
     /**
      * The host backend has no on-device interpreter, so the app dials out to
@@ -109,6 +109,13 @@ public class BridgeService {
     public void start() {
         if (running) return;
         running = true;
+        // A new Activity creates a new BridgeService, but the service may
+        // also be restarted after stop(); both the latch and the writer
+        // pool have to be usable again.
+        listeningLatch = new CountDownLatch(1);
+        if (writeExecutor.isShutdown()) {
+            writeExecutor = Executors.newSingleThreadExecutor();
+        }
         Runnable worker = clientMode ? this::runClient : this::runServer;
         bridgeThread = new Thread(worker, "pydrud-bridge");
         bridgeThread.start();
@@ -136,10 +143,15 @@ public class BridgeService {
     public void stop() {
         running = false;
         Thread worker = bridgeThread;
+        bridgeThread = null;
         if (worker != null) worker.interrupt();
         closeClient();
-        try { if (serverSocket != null) serverSocket.close(); } catch (Exception ignored) {}
+        ServerSocket server = serverSocket;
+        serverSocket = null;
+        try { if (server != null) server.close(); } catch (Exception ignored) {}
         writeExecutor.shutdownNow();
+        listeningLatch.countDown();
+        if (instance == this) instance = null;
     }
 
     private void closeClient() {
@@ -202,18 +214,50 @@ public class BridgeService {
     // ── Server loop ───────────────────────────────────────────────────────
 
     private void runServer() {
+        final CountDownLatch latch = listeningLatch;
+        ServerSocket server = null;
         try {
-            serverSocket = new ServerSocket(
-                PORT, 4, java.net.InetAddress.getByName("127.0.0.1"));
-            serverSocket.setReuseAddress(true);
+            // SO_REUSEADDR must be set *before* bind(). The previous
+            // Activity's connection can leave the port in TIME_WAIT, and
+            // binding without it fails with EADDRINUSE until the kernel
+            // times the socket out — which is exactly what made relaunching
+            // after BACK show a blank window.
+            for (int attempt = 0; attempt < 10 && running; attempt++) {
+                ServerSocket candidate = new ServerSocket();
+                try {
+                    candidate.setReuseAddress(true);
+                    candidate.bind(new java.net.InetSocketAddress(
+                        java.net.InetAddress.getByName("127.0.0.1"), PORT), 4);
+                    server = candidate;
+                    break;
+                } catch (java.net.BindException e) {
+                    try { candidate.close(); } catch (Exception ignored) {}
+                    if (attempt == 9) throw e;
+                    Log.w(TAG, "Bridge port busy, retrying: " + e.getMessage());
+                    try {
+                        Thread.sleep(150L);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                } catch (Exception e) {
+                    try { candidate.close(); } catch (Exception ignored) {}
+                    throw e;
+                }
+            }
+            if (server == null) {
+                Log.e(TAG, "Bridge could not bind 127.0.0.1:" + PORT);
+                return;
+            }
+            serverSocket = server;
             Log.i(TAG, "Bridge listening on 127.0.0.1:" + PORT);
-            listeningLatch.countDown();
+            latch.countDown();
 
             // Accept reconnections (hot restart re-runs the Python side).
-            while (running) {
+            while (running && serverSocket == server) {
                 Socket socket;
                 try {
-                    socket = serverSocket.accept();
+                    socket = server.accept();
                 } catch (Exception e) {
                     if (running) Log.e(TAG, "accept failed", e);
                     break;
@@ -232,7 +276,7 @@ public class BridgeService {
         } catch (Exception e) {
             if (running) Log.e(TAG, "Bridge error", e);
         } finally {
-            listeningLatch.countDown();
+            latch.countDown();
         }
     }
 
@@ -259,7 +303,7 @@ public class BridgeService {
         try {
             JSONObject data = collectMetrics();
             data.put("protocol_version", PROTOCOL_VERSION);
-            data.put("renderer_version", "{{ pydrud_runtime_version | default('2.1.5') }}");
+            data.put("renderer_version", "{{ pydrud_runtime_version | default('2.1.6') }}");
             JSONObject capabilities = new JSONObject();
             capabilities.put("transactional_render", true);
             capabilities.put("revisioned_render", true);

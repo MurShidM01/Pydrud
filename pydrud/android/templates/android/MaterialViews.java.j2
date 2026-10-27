@@ -1375,50 +1375,122 @@ public class MaterialViews {
     // Material 3 pickers — real MaterialDatePicker / MaterialTimePicker
     // ══════════════════════════════════════════════════════════════════════
     //
-    // These used to render a placeholder label. They now open the official
-    // Material Components dialogs, which is what gives Pydrud a real
-    // calendar grid with month/year navigation and a real clock dial with
-    // keyboard toggle — both themed by the host Theme.Material3.xxx parent
-    // so they pick up the scheme colours automatically.
-    //
-    // The wrapper stays in the tree (so layout, patching and removal all
-    // behave normally) and owns the dialog's lifetime: attaching opens it,
-    // detaching dismisses it, and cancelling reports back to Python.
+    // Both Material pickers are DialogFragments rather than Dialogs, so the
+    // host talks to a small adapter instead of a raw dialog: it can show
+    // either backing, dismiss it, and report one dismiss callback. The
+    // wrapper view stays in the tree (so layout, patching and removal all
+    // behave normally) and owns the picker's lifetime: attaching opens it,
+    // detaching dismisses it. The platform DatePickerDialog and
+    // TimePickerDialog remain the fallback when Material is unavailable.
+
+    /** A live picker, backed by either a Dialog or a DialogFragment. */
+    private static final class ShownPicker {
+        private final android.app.Dialog dialog;
+        private final androidx.fragment.app.DialogFragment fragment;
+        private final Runnable opener;
+        private Runnable onDismissed;
+
+        ShownPicker(android.app.Dialog dialog) {
+            this.dialog = dialog;
+            this.fragment = null;
+            this.opener = null;
+        }
+
+        ShownPicker(androidx.fragment.app.DialogFragment fragment, Runnable opener) {
+            this.dialog = null;
+            this.fragment = fragment;
+            this.opener = opener;
+        }
+
+        void setOnDismissed(Runnable callback) {
+            onDismissed = callback;
+        }
+
+        void show() {
+            if (fragment != null) {
+                // Material pickers create their dialog asynchronously through
+                // the FragmentManager; their own listeners report the result,
+                // so there is no dialog to attach to here.
+                if (opener != null) opener.run();
+            } else if (dialog != null) {
+                dialog.setOnDismissListener(ignored -> {
+                    if (onDismissed != null) onDismissed.run();
+                });
+                dialog.show();
+            }
+        }
+
+        void dismiss() {
+            if (fragment != null) {
+                try {
+                    fragment.dismiss();
+                } catch (Exception ignored) {}
+            } else if (dialog != null) {
+                dialog.dismiss();
+            }
+        }
+    }
+
+    /** Owns one picker's lifetime for as long as its host view is attached. */
+    private final class PickerHost implements View.OnAttachStateChangeListener {
+        private final String key;
+        private final String kind;
+        private final JSONObject props;
+        private ShownPicker picker;
+        private boolean selfClosing;
+        private boolean settled;
+
+        PickerHost(String key, String kind, JSONObject props) {
+            this.key = key;
+            this.kind = kind;
+            this.props = props;
+        }
+
+        /** The user picked a value or explicitly cancelled the picker. */
+        void markSettled() {
+            settled = true;
+        }
+
+        @Override public void onViewAttachedToWindow(View v) {
+            if (picker != null) return;
+            settled = false;
+            picker = "time".equals(kind)
+                ? buildMaterialTimePicker(key, props, this)
+                : buildMaterialDatePicker(key, props, this);
+            if (picker == null) return;
+            picker.setOnDismissed(this::onPickerDismissed);
+            picker.show();
+        }
+
+        @Override public void onViewDetachedFromWindow(View v) {
+            close();
+        }
+
+        private void onPickerDismissed() {
+            picker = null;
+            // A confirmed or cancelled picker already reported itself.
+            if (selfClosing || settled) return;
+            JSONObject data = new JSONObject();
+            try { data.put("dismissed", true); } catch (Exception ignored) {}
+            if (events != null) events.dispatch("cancel", key, data);
+        }
+
+        void close() {
+            ShownPicker current = picker;
+            if (current == null) return;
+            selfClosing = true;
+            picker = null;
+            current.dismiss();
+            selfClosing = false;
+        }
+    }
 
     /** Shared host for any dialog-backed picker. */
     private View pickerHost(final String key, final String kind, final JSONObject p) {
         final FrameLayout host = new FrameLayout(activity);
         host.setMinimumWidth(0);
         host.setMinimumHeight(0);
-        host.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
-            android.app.Dialog dialog;
-            boolean selfClosing;
-
-            @Override public void onViewAttachedToWindow(View v) {
-                if (dialog != null) return;
-                dialog = "time".equals(kind)
-                    ? buildMaterialTimePicker(key, p)
-                    : buildMaterialDatePicker(key, p);
-                if (dialog == null) return;
-                dialog.setOnDismissListener(d -> {
-                    dialog = null;
-                    if (!selfClosing) {
-                        JSONObject data = new JSONObject();
-                        try { data.put("dismissed", true); } catch (Exception ignored) {}
-                        if (events != null) events.dispatch("cancel", key, data);
-                    }
-                });
-                dialog.show();
-            }
-
-            @Override public void onViewDetachedFromWindow(View v) {
-                if (dialog == null) return;
-                selfClosing = true;
-                dialog.dismiss();
-                selfClosing = false;
-                dialog = null;
-            }
-        });
+        host.addOnAttachStateChangeListener(new PickerHost(key, kind, p));
         return host;
     }
 
@@ -1442,83 +1514,170 @@ public class MaterialViews {
         return pickerHost(key, "time", p);
     }
 
-    private android.app.Dialog buildMaterialDatePicker(final String key, JSONObject p) {
-        try {
-            boolean range = p.optBoolean("range", false);
-            com.google.android.material.datepicker.MaterialDatePicker.Builder<?> builder =
-                range
-                    ? com.google.android.material.datepicker.MaterialDatePicker
-                        .dateRangePicker()
-                    : com.google.android.material.datepicker.MaterialDatePicker
-                        .datePicker();
-
-            String title = p.optString("title", "");
-            if (!title.isEmpty()) builder.setTitleText(title);
-
-            // MaterialDatePicker ships a calendar grid; M3's "input" mode is
-            // the same dialog with the text-entry toggle surfaced.
-            if ("input".equals(p.optString("mode", "calendar"))) {
-                builder.setInputMode(
-                    com.google.android.material.datepicker.MaterialDatePicker.INPUT_MODE);
+    /** Show a Material picker fragment and adapt it to the host. */
+    private ShownPicker materialFragment(
+            final androidx.fragment.app.DialogFragment fragment, final String tag) {
+        if (!(activity instanceof androidx.fragment.app.FragmentActivity)) {
+            return null;
+        }
+        final androidx.fragment.app.FragmentActivity host =
+            (androidx.fragment.app.FragmentActivity) activity;
+        return new ShownPicker(fragment, () -> {
+            try {
+                androidx.fragment.app.FragmentManager manager =
+                    host.getSupportFragmentManager();
+                // A unique tag per instance: a re-render can kill and rebuild
+                // a picker while the previous fragment is still dismissing.
+                fragment.show(manager, tag + "_"
+                    + Integer.toHexString(System.identityHashCode(fragment)));
+            } catch (Throwable t) {
+                Log.e(TAG, "Could not show the Material picker", t);
             }
+        });
+    }
 
-            long today = com.google.android.material.datepicker.MaterialDatePicker
-                .todayInUtcMilliseconds();
-            long selection = p.optLong("selection", today);
-            builder.setSelection(range ? new androidx.core.util.Pair<>(
-                    p.optLong("start", selection),
-                    p.optLong("end", selection))
-                : selection);
+    /** Title, input mode and calendar bounds shared by both date pickers. */
+    private static void configureDateBuilder(
+            com.google.android.material.datepicker.MaterialDatePicker.Builder<?> builder,
+            JSONObject p, long selection) {
+        String title = p.optString("title", "");
+        if (!title.isEmpty()) builder.setTitleText(title);
 
-            if (p.optBoolean("dismissible", true)) {
-                builder.setCancelable(true);
-            } else {
-                // A non-dismissible picker keeps only its confirm button.
-                builder.setCancelable(false);
-                builder.setNegativeButtonText(null);
+        // MaterialDatePicker ships a calendar grid; M3's "input" mode is the
+        // same dialog with the text-entry toggle surfaced.
+        if ("input".equals(p.optString("mode", "calendar"))) {
+            builder.setInputMode(
+                com.google.android.material.datepicker.MaterialDatePicker.INPUT_MODE_TEXT);
+        }
+
+        // ``firstDate`` / ``lastDate`` become real calendar constraints.
+        String firstDate = p.optString("firstDate", "");
+        String lastDate = p.optString("lastDate", "");
+        if (!firstDate.isEmpty() || !lastDate.isEmpty()) {
+            com.google.android.material.datepicker.CalendarConstraints.Builder
+                constraints =
+                    new com.google.android.material.datepicker.CalendarConstraints.Builder();
+            if (!firstDate.isEmpty()) {
+                constraints.setStart(isoDateMillis(firstDate, selection));
             }
-
-            final com.google.android.material.datepicker.MaterialDatePicker<?> picker =
-                builder.build();
-
-            picker.addOnPositiveButtonClickListener(sel -> {
-                if (events == null) return;
-                JSONObject data = new JSONObject();
-                try {
-                    if (sel instanceof androidx.core.util.Pair) {
-                        androidx.core.util.Pair<?, ?> span =
-                            (androidx.core.util.Pair<?, ?>) sel;
-                        data.put("start", ((Number) span.first).longValue());
-                        data.put("end", ((Number) span.second).longValue());
-                        data.put("days", ((Number) span.first).longValue()
-                            != ((Number) span.second).longValue());
-                    } else {
-                        data.put("value", ((Number) sel).longValue());
-                    }
-                    data.put("confirmed", true);
-                } catch (Exception ignored) {}
-                events.dispatch("change", key, data);
-            });
-            picker.addOnNegativeButtonClickListener(v -> {
-                if (events != null) events.dispatch("cancel", key, null);
-            });
-            return picker;
-        } catch (Throwable t) {
-            // Never take the app down: fall back to a plain system dialog.
-            Log.e(TAG, "MaterialDatePicker unavailable, using fallback", t);
-            return buildFallbackDateDialog(key, p);
+            if (!lastDate.isEmpty()) {
+                constraints.setEnd(isoDateMillis(lastDate, selection));
+            }
+            builder.setCalendarConstraints(constraints.build());
         }
     }
 
-    private android.app.Dialog buildMaterialTimePicker(final String key, JSONObject p) {
+    /** Cancel handling shared by both date pickers. */
+    private void wireDateDismiss(
+            com.google.android.material.datepicker.MaterialDatePicker<?> picker,
+            final String key, final PickerHost host) {
+        picker.addOnNegativeButtonClickListener(v -> {
+            host.markSettled();
+            if (events != null) events.dispatch("cancel", key, null);
+        });
+        picker.addOnCancelListener(d -> {
+            // Back press or a tap outside the sheet.
+            host.markSettled();
+            if (events != null) events.dispatch("cancel", key, null);
+        });
+    }
+
+    private ShownPicker buildMaterialDatePicker(
+            final String key, JSONObject p, final PickerHost host) {
         try {
+            boolean range = p.optBoolean("range", false);
+            long today = com.google.android.material.datepicker.MaterialDatePicker
+                .todayInUtcMilliseconds();
+            // ``selected`` is the ISO date the Python widget serialises;
+            // ``selection`` (epoch millis) stays supported for raw payloads.
+            long selection = isoDateMillis(
+                p.optString("selected", p.optString("initial", "")),
+                p.optLong("selection", today));
+
+            final com.google.android.material.datepicker.MaterialDatePicker<?> picker;
+            // ``setSelection`` takes the builder's own type parameter, so each
+            // selection shape needs its concrete builder — a ``Builder<?>``
+            // cannot be called with a typed selection.
+            if (range) {
+                com.google.android.material.datepicker.MaterialDatePicker.Builder<
+                        androidx.core.util.Pair<Long, Long>> builder =
+                    com.google.android.material.datepicker.MaterialDatePicker.Builder
+                        .dateRangePicker();
+                configureDateBuilder(builder, p, selection);
+                builder.setSelection(new androidx.core.util.Pair<>(
+                    isoDateMillis(p.optString("startDate", ""),
+                                  p.optLong("start", selection)),
+                    isoDateMillis(p.optString("endDate", ""),
+                                  p.optLong("end", selection))));
+                com.google.android.material.datepicker.MaterialDatePicker<
+                    androidx.core.util.Pair<Long, Long>> typed = builder.build();
+                // A non-dismissible picker keeps only its confirm button.
+                typed.setCancelable(p.optBoolean("dismissible", true));
+                typed.addOnPositiveButtonClickListener(span -> {
+                    host.markSettled();
+                    if (events == null || span == null) return;
+                    JSONObject data = new JSONObject();
+                    try {
+                        long start = span.first == null ? 0L : span.first;
+                        long end = span.second == null ? start : span.second;
+                        data.put("start", start);
+                        data.put("end", end);
+                        data.put("startDate", isoDate(start));
+                        data.put("endDate", isoDate(end));
+                        data.put("value", start);
+                        data.put("days", start != end);
+                        data.put("confirmed", true);
+                    } catch (Exception ignored) {}
+                    events.dispatch("change", key, data);
+                });
+                wireDateDismiss(typed, key, host);
+                picker = typed;
+            } else {
+                com.google.android.material.datepicker.MaterialDatePicker.Builder<Long>
+                    builder = com.google.android.material.datepicker.MaterialDatePicker.Builder
+                        .datePicker();
+                configureDateBuilder(builder, p, selection);
+                builder.setSelection(selection);
+                com.google.android.material.datepicker.MaterialDatePicker<Long> typed =
+                    builder.build();
+                typed.setCancelable(p.optBoolean("dismissible", true));
+                typed.addOnPositiveButtonClickListener(value -> {
+                    host.markSettled();
+                    if (events == null || value == null) return;
+                    JSONObject data = new JSONObject();
+                    try {
+                        data.put("value", value);
+                        data.put("date", isoDate(value));
+                        data.put("confirmed", true);
+                    } catch (Exception ignored) {}
+                    events.dispatch("change", key, data);
+                });
+                wireDateDismiss(typed, key, host);
+                picker = typed;
+            }
+
+            ShownPicker shown = materialFragment(picker, "pydrud_date_" + key);
+            if (shown != null) return shown;
+            Log.w(TAG, "No FragmentActivity host; using the system date picker");
+        } catch (Throwable t) {
+            // Never take the app down: fall back to a plain system dialog.
+            Log.e(TAG, "MaterialDatePicker unavailable, using fallback", t);
+        }
+        return new ShownPicker(buildFallbackDateDialog(key, p, host));
+    }
+
+    private ShownPicker buildMaterialTimePicker(
+            final String key, JSONObject p, final PickerHost host) {
+        try {
+            // ``is24hour`` is the Python widget's flag; ``use24h`` and
+            // ``format`` remain for hand-built payloads.
+            boolean twentyFour = p.optBoolean("is24hour",
+                p.optBoolean("use24h", "24h".equals(p.optString("format", "24h"))));
             com.google.android.material.timepicker.MaterialTimePicker.Builder builder =
                 new com.google.android.material.timepicker.MaterialTimePicker.Builder()
-                    .setTimeFormat(p.optString("format", "24h").equals("12h")
-                        ? android.text.format.DateFormat.is24HourFormat(activity)
-                            ? com.google.android.material.timepicker.TimeFormat.CLOCK_24H
-                            : com.google.android.material.timepicker.TimeFormat.CLOCK_12H
-                        : com.google.android.material.timepicker.TimeFormat.CLOCK_24H);
+                    .setTimeFormat(twentyFour
+                        ? com.google.android.material.timepicker.TimeFormat.CLOCK_24H
+                        : com.google.android.material.timepicker.TimeFormat.CLOCK_12H);
             builder.setHour(p.optInt("hour", 0));
             builder.setMinute(p.optInt("minute", 0));
             String title = p.optString("title", "");
@@ -1526,47 +1685,91 @@ public class MaterialViews {
             // M3's two time-picker modes: the clock dial, or the keyboard.
             if ("input".equals(p.optString("mode", "dial"))) {
                 builder.setInputMode(
-                    com.google.android.material.timepicker.MaterialTimePicker.INPUT_MODE_KEYBOARD);
-            }
-            if (!p.optBoolean("dismissible", true)) {
-                builder.setCancelable(false);
-            } else {
-                builder.setCancelable(true);
+                    com.google.android.material.timepicker.MaterialTimePicker
+                        .INPUT_MODE_KEYBOARD);
             }
 
             final com.google.android.material.timepicker.MaterialTimePicker picker =
                 builder.build();
+            picker.setCancelable(p.optBoolean("dismissible", true));
             picker.addOnPositiveButtonClickListener(v -> {
+                host.markSettled();
                 if (events == null) return;
                 JSONObject data = new JSONObject();
                 try {
                     data.put("hour", picker.getHour());
                     data.put("minute", picker.getMinute());
+                    data.put("time", isoTime(picker.getHour(), picker.getMinute()));
                     data.put("confirmed", true);
                 } catch (Exception ignored) {}
                 events.dispatch("change", key, data);
             });
             picker.addOnNegativeButtonClickListener(v -> {
+                host.markSettled();
                 if (events != null) events.dispatch("cancel", key, null);
             });
-            return picker;
+            picker.addOnCancelListener(d -> {
+                host.markSettled();
+                if (events != null) events.dispatch("cancel", key, null);
+            });
+
+            ShownPicker shown = materialFragment(picker, "pydrud_time_" + key);
+            if (shown != null) return shown;
+            Log.w(TAG, "No FragmentActivity host; using the system time picker");
         } catch (Throwable t) {
             Log.e(TAG, "MaterialTimePicker unavailable, using fallback", t);
-            return buildFallbackTimeDialog(key, p);
+        }
+        return new ShownPicker(buildFallbackTimeDialog(key, p, host));
+    }
+
+    /** Parse an ISO ``yyyy-MM-dd`` date; *fallback* when it is unusable. */
+    private static long isoDateMillis(String value, long fallback) {
+        String text = value == null ? "" : value.trim();
+        if (text.length() != 10) return fallback;
+        try {
+            java.text.SimpleDateFormat fmt =
+                new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US);
+            fmt.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+            fmt.setLenient(false);
+            java.util.Date parsed = fmt.parse(text);
+            return parsed == null ? fallback : parsed.getTime();
+        } catch (Exception ignored) {
+            return fallback;
         }
     }
 
+    /** Format epoch millis as an ISO ``yyyy-MM-dd`` date in UTC. */
+    private static String isoDate(long millis) {
+        java.text.SimpleDateFormat fmt =
+            new java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US);
+        fmt.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+        return fmt.format(new java.util.Date(millis));
+    }
+
+    /** Format a 24-hour clock time as ``HH:mm``. */
+    private static String isoTime(int hour, int minute) {
+        return String.format(java.util.Locale.US, "%02d:%02d", hour, minute);
+    }
+
     /** Last-resort date entry so the component still works without Material. */
-    private android.app.Dialog buildFallbackDateDialog(final String key, JSONObject p) {
+    private android.app.Dialog buildFallbackDateDialog(
+            final String key, JSONObject p, final PickerHost host) {
         java.util.Calendar cal = java.util.Calendar.getInstance();
+        long selection = isoDateMillis(
+            p.optString("selected", p.optString("initial", "")),
+            p.optLong("selection", 0L));
+        if (selection > 0L) cal.setTimeInMillis(selection);
         android.app.DatePickerDialog dialog = new android.app.DatePickerDialog(
             activity, (view, year, month, day) -> {
+                host.markSettled();
                 if (events == null) return;
                 JSONObject data = new JSONObject();
                 try {
                     java.util.Calendar chosen = java.util.Calendar.getInstance();
                     chosen.set(year, month, day);
-                    data.put("value", chosen.getTimeInMillis());
+                    long value = chosen.getTimeInMillis();
+                    data.put("value", value);
+                    data.put("date", isoDate(value));
                     data.put("year", year);
                     data.put("month", month + 1);
                     data.put("day", day);
@@ -1575,27 +1778,37 @@ public class MaterialViews {
                 events.dispatch("change", key, data);
             }, cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH),
             cal.get(java.util.Calendar.DAY_OF_MONTH));
+        long firstDate = isoDateMillis(p.optString("firstDate", ""), 0L);
+        long lastDate = isoDateMillis(p.optString("lastDate", ""), 0L);
+        if (firstDate > 0L) dialog.getDatePicker().setMinDate(firstDate);
+        if (lastDate > 0L) dialog.getDatePicker().setMaxDate(lastDate);
         dialog.setOnCancelListener(d -> {
+            host.markSettled();
             if (events != null) events.dispatch("cancel", key, null);
         });
         return dialog;
     }
 
     /** Last-resort time entry. */
-    private android.app.Dialog buildFallbackTimeDialog(final String key, JSONObject p) {
+    private android.app.Dialog buildFallbackTimeDialog(
+            final String key, JSONObject p, final PickerHost host) {
+        boolean twentyFour = p.optBoolean("is24hour",
+            p.optBoolean("use24h", "24h".equals(p.optString("format", "24h"))));
         android.app.TimePickerDialog dialog = new android.app.TimePickerDialog(
             activity, (view, hour, minute) -> {
+                host.markSettled();
                 if (events == null) return;
                 JSONObject data = new JSONObject();
                 try {
                     data.put("hour", hour);
                     data.put("minute", minute);
+                    data.put("time", isoTime(hour, minute));
                     data.put("confirmed", true);
                 } catch (Exception ignored) {}
                 events.dispatch("change", key, data);
-            }, p.optInt("hour", 0), p.optInt("minute", 0),
-            android.text.format.DateFormat.is24HourFormat(activity));
+            }, p.optInt("hour", 0), p.optInt("minute", 0), twentyFour);
         dialog.setOnCancelListener(d -> {
+            host.markSettled();
             if (events != null) events.dispatch("cancel", key, null);
         });
         return dialog;

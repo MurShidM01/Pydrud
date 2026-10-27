@@ -6,6 +6,7 @@ All notable changes to Pydrud are documented here.
 
 | Version | Theme | Highlights |
 |---------|-------|------------|
+| [2.1.6](#216--2026-10-27) | **Lifecycle & picker fixes** | Relaunching after BACK no longer shows a blank window; one app per process and a rebindable bridge port; real Material date/time pickers restored; host-only packages stay off the device; Java template compile fixes |
 | [2.1.5](#215--2026-10-13) | **Material 3 Complete** | HCT colour system, 36 M3 colour roles, 12 new M3 components, RTL support, per-corner radius, exact M3 typography, tonal elevation, uncapped font scale; Android-only renderers, platform-neutral UI layer |
 | [2.1.4](#214--2026-10-09) | Per-ABI via flavors | Rebuilds `abi_splits` with a product flavor dimension (Chaquopy rejects `splits.abi`); `pydrud build` collects the flavor APKs |
 | [2.1.3](#213--2026-10-09) | Split-build fix | `pydrud build` discovers per-ABI APKs, prints them all and returns the universal one; `--output` copies every split |
@@ -25,6 +26,87 @@ All notable changes to Pydrud are documented here.
 | [1.2.0](#120--the-full-android-toolkit) | Full Android toolkit | Material components, camera, push, background work |
 | [1.1.0](#110) / [1.0.1](#101) | Foundation | Stack/Positioned, ListView, GridView, Card, system UI |
 | [1.0.0](#100) | First release | Declarative Python → native Android over a TCP bridge |
+
+---
+
+## [2.1.6] — 2026-10-27
+
+**Android lifecycle hardening, real Material pickers, and packaging fixes.**
+
+A bug-fix release. No API changes: every 2.1.5 project builds and runs
+unchanged.
+
+### Android lifecycle — the blank screen after BACK
+
+Pressing BACK finished the Activity but not the process. Relaunching then
+started a *second* app against a bridge port the previous one still held, so
+the new renderer never connected and the window stayed blank. Fixed at every
+layer:
+
+- **The bridge rebinds reliably.** `SO_REUSEADDR` is now set *before*
+  `bind()` (setting it afterwards does nothing), and a busy port is retried for
+  ~1.5 s instead of failing once. `BridgeService.stop()` also releases the
+  latch and clears the static `instance`, so a restarted service can listen
+  again.
+- **One app per process.** `App` reuses its process-wide instance
+  (`App.current()`), and `start_app()` in the generated `android_main.py`
+  calls `App.run()` on that instance instead of constructing a second app.
+  `App.run()` unwinds the previous renderer loop first, so state survives and
+  only one bridge client exists.
+- **Late disconnects cannot kill a fresh connection.** A reader thread from
+  the old Activity only reaps the transport it owns, and an old event loop
+  only clears connection state it owns. Previously a late sentinel could stop
+  the new loop immediately after it started.
+- **No socket leak in `DevServer.start()`.** A failed bind now closes its
+  candidate socket before trying the next port.
+- **The Chaquopy asset cache is only cleared when the interpreter is not
+  running.** An Activity restart no longer deletes sources out from under a
+  live interpreter.
+- **Configuration changes keep the runtime alive.** `onDestroy()` only
+  releases the runtime when the Activity is not being recreated.
+
+### Material date and time pickers
+
+`DatePicker`, `DateRangePicker` and `TimePicker` again open the real
+`MaterialDatePicker` and `MaterialTimePicker` (both are `DialogFragment`s, so
+the host uses a small adapter that can show, dismiss and report them):
+
+- `first_date` / `last_date` become real `CalendarConstraints`; `selected`
+  (single) and `start_date` / `end_date` (range) seed the selection.
+- `mode="input"` surfaces the keyboard entry mode; `is_24hour` selects the
+  12/24-hour clock; non-dismissible pickers keep only their confirm button.
+- Confirm and cancel report exactly once, and detaching the host view no longer
+  emits a spurious cancel after a confirm.
+- Payloads now include ISO `date`, `startDate`, `endDate` and `time` alongside
+  the epoch values.
+- The platform `DatePickerDialog` / `TimePickerDialog` remain the fallback when
+  Material Components is unavailable — now honouring the date bounds and the
+  user's 24-hour preference.
+
+### Packaging and toolchain
+
+- **Host-only packages stay on the host.** `imageio-ffmpeg` is registered as
+  `host_only`, and `Requirements.requirement_strings(device=True)` (now used by
+  `sync` and `sync_gradle`) filters it out of the Chaquopy `pip` block. It
+  remains declared in `pydrud.toml` for the desktop preview.
+- **The Chaquopy pip block is generated again.** A Jinja whitespace-control
+  typo (`{%- for %}` / `{%- endfor %}`) swallowed the `install(...)` lines, so
+  declared dependencies could silently disappear from the APK.
+- **`PydrudShapes` is part of the generated source set.** New projects now get
+  `PydrudShapes.java`; previously the class was referenced by the renderer but
+  not written.
+- **Java compile fixes** in `PydrudTheme` (an `ImageView` cast and the
+  `LayoutTransition` interpolator signature) and in `ViewStyler`, which
+  previously failed to compile on some AGP/JDK combinations.
+
+### Developer experience
+
+- `KNOWN_KEYS` in the renderer now includes the picker props, so no spurious
+  "unhandled style key" warnings are logged.
+- `tools/check_java.py` uses POSIX template paths, fixing the Windows
+  `TemplateNotFound` crash.
+- Renderer tests read Java templates as UTF-8, fixing a `cp1252` decode crash
+  on Windows.
 
 ---
 

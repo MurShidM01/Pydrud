@@ -226,10 +226,16 @@ class BridgeMixin:
         except (ConnectionResetError, BrokenPipeError, OSError):
             pass
         finally:
-            self._event_queue.put(None)  # Sentinel: stop the event loop.
+            # Sentinel: stop the event loop. Only the reader that owns the
+            # *current* transport may stop it — after an Activity restart the
+            # previous reader can finish late, and its sentinel must not tear
+            # down the renderer that just connected.
+            if self._transport is sock:
+                self._event_queue.put(None)
 
     def _event_loop(self):
         """Process incoming events on the single Python UI actor."""
+        transport = self._transport
         self._ui_thread_id = threading.get_ident()
         try:
             while self._running:
@@ -244,17 +250,22 @@ class BridgeMixin:
                 finally:
                     self._events_handled += 1
         finally:
-            self._ui_thread_id = None
-            self._connected = False
-            self._cancel_pending()
-            self._inflight.clear()
-            self._inflight_trees.clear()
-            self._outbox.clear()
-            self._outbox_final_tree = None
-            self._render_pending = False
-            if self._transport:
-                try:
-                    self._transport.close()
-                except Exception:
-                    pass
-            self._transport = None
+            # A second renderer may already have taken over (Activity
+            # recreated without the interpreter dying). Only the loop that
+            # still owns the transport may reset the shared connection state.
+            owned = transport is None or self._transport is transport
+            if owned:
+                self._ui_thread_id = None
+                self._connected = False
+                self._cancel_pending()
+                self._inflight.clear()
+                self._inflight_trees.clear()
+                self._outbox.clear()
+                self._outbox_final_tree = None
+                self._render_pending = False
+                if self._transport:
+                    try:
+                        self._transport.close()
+                    except Exception:
+                        pass
+                self._transport = None

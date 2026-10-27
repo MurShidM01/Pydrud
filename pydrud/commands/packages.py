@@ -109,6 +109,7 @@ REGISTRY: dict[str, tuple[str, str, str, tuple[str, ...], str]] = {
     "opencv-python": ("", "media", "device_native", ("cv2",), "Computer vision (large: ~40 MB)"),
     "pillow": ("", "media", "device_native", ("PIL",), "Image processing (Chaquopy wheel)"),
     "imageio": ("", "media", "native_equivalent", ("imageio",), "Read/write image formats"),
+    "imageio-ffmpeg": ("", "media", "host_only", ("imageio_ffmpeg",), "Bundled ffmpeg binary for desktop previews only"),
     "qiskit": ("", "science", "device_native", ("qiskit",), "Quantum computing SDK (large)"),
 
     # ── AI / ML clients ─────────────────────────────────────────────────
@@ -420,10 +421,27 @@ class Requirements:
         self.save(packages)
         return True
 
-    def requirement_strings(self) -> list[str]:
-        """Exactly what goes into Chaquopy's ``install(...)`` calls."""
-        return [f"{name}{spec}" if spec else name
-                for name, spec in sorted(self.load().items())]
+    def requirement_strings(self, *, device: bool = False) -> list[str]:
+        """Exactly what goes into Chaquopy's ``install(...)`` calls.
+
+        ``device=True`` drops host-only packages (desktop binaries such as
+        ``imageio-ffmpeg``) that cannot run inside an APK. They stay declared
+        in ``pydrud.toml`` so the Pydash preview keeps using them on the
+        developer machine.
+        """
+        requirements = []
+        for name, spec in sorted(self.load().items()):
+            if device:
+                try:
+                    entry = info(name)
+                except PackageError:
+                    entry = None
+                if entry and entry["support_category"] == "host_only":
+                    continue
+            if spec in ("*", "latest"):
+                spec = ""
+            requirements.append(f"{name}{spec}" if spec else name)
+        return requirements
 
     def __contains__(self, name: str) -> bool:
         return normalise(name) in self.load()
@@ -680,7 +698,7 @@ def sync_gradle(project_dir: str = ".",
             "Pydrud project (or run 'pydrud build' once to generate it).")
 
     if requirements is None:
-        requirements = Requirements(project_dir).requirement_strings()
+        requirements = Requirements(project_dir).requirement_strings(device=True)
     requirements = list(requirements)
 
     with open(gradle_path, encoding="utf-8") as handle:
