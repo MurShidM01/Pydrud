@@ -18,6 +18,8 @@ import socket
 import threading
 from typing import Any, Callable, Optional
 
+from pydrud.core.ports import DEFAULT_PREVIEW_PORT
+
 StatusCallback = Callable[[str, dict[str, Any]], None]
 
 
@@ -34,7 +36,7 @@ class BridgeServer:
         app,
         *,
         host: str = "127.0.0.1",
-        port: int = 8597,
+        port: int = DEFAULT_PREVIEW_PORT,
         on_status: Optional[StatusCallback] = None,
     ):
         self.app = app

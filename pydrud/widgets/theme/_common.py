@@ -115,26 +115,3 @@ def _mix(color_a: str, color_b: str, t: float) -> str:
         vb = int(b[index:index + 2], 16)
         out.append("%02X" % max(0, min(255, int(round(va + (vb - va) * k)))))
     return "#" + "".join(out)
-
-
-def _rotate_hue(color: str, degrees: float, *, saturation: float = 1.0) -> str:
-    """Rotate a colour around the hue wheel, keeping its lightness."""
-    import colorsys
-
-    r, g, b = (c / 255.0 for c in _rgb(color))
-    h, l, s = colorsys.rgb_to_hls(r, g, b)
-    h = (h + degrees / 360.0) % 1.0
-    s = max(0.0, min(1.0, s * saturation))
-    nr, ng, nb = colorsys.hls_to_rgb(h, l, s)
-    return _argb("%02X%02X%02X" % (round(nr * 255), round(ng * 255), round(nb * 255)))
-
-
-def _lighten_hsl(color: str, amount: float) -> str:
-    """Raise a colour's lightness without washing out its hue."""
-    import colorsys
-
-    r, g, b = (c / 255.0 for c in _rgb(color))
-    h, l, s = colorsys.rgb_to_hls(r, g, b)
-    l = max(0.0, min(1.0, l + amount))
-    nr, ng, nb = colorsys.hls_to_rgb(h, l, s)
-    return _argb("%02X%02X%02X" % (round(nr * 255), round(ng * 255), round(nb * 255)))

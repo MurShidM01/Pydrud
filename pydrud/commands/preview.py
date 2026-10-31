@@ -13,6 +13,7 @@ from typing import Optional
 import click
 
 from pydrud.commands.project_config import load_project_config
+from pydrud.core.preview import DEFAULT_PREVIEW_HOST, DEFAULT_PREVIEW_PORT
 from pydrud.core.preview import (
     PreviewSession,
     build_preview_uri,
@@ -31,8 +32,8 @@ class PreviewRunner:
         self,
         project_dir: str,
         *,
-        host: str = "0.0.0.0",
-        port: int = 8597,
+        host: str = DEFAULT_PREVIEW_HOST,
+        port: int = DEFAULT_PREVIEW_PORT,
         connect_host: Optional[str] = None,
         show_qr: bool = True,
     ):

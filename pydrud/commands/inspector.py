@@ -16,6 +16,7 @@ import sys
 import time
 from typing import Optional
 
+from pydrud.core.ports import DEFAULT_BRIDGE_PORT
 from pydrud.utils import tui
 
 BOX = {"tl": "┌", "tr": "┐", "bl": "└", "br": "┘", "h": "─", "v": "│",
@@ -88,7 +89,7 @@ def render_tree(tree: dict) -> str:
     return "\n".join(_flatten(tree))
 
 
-def run_inspector(*, port: int = 8595, dump_tree: bool = False,
+def run_inspector(*, port: int = DEFAULT_BRIDGE_PORT, dump_tree: bool = False,
                   follow: bool = False, host: str = "127.0.0.1",
                   timeout: float = 5.0) -> int:
     """Attach to a running app. Returns a process exit code."""

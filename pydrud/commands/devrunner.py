@@ -23,6 +23,7 @@ import time
 from typing import Callable, Optional
 
 from pydrud.commands.builder import Builder
+from pydrud.core.ports import DEFAULT_BRIDGE_PORT, DEFAULT_DEV_PORT
 from pydrud.core.watcher import FileWatcher
 from pydrud.utils import tui
 
@@ -36,8 +37,8 @@ class DevRunner:
         device: Optional[str] = None,
         release: bool = False,
         interactive: bool = True,
-        dev_port: int = 8596,
-        bridge_port: int = 8595,
+        dev_port: int = DEFAULT_DEV_PORT,
+        bridge_port: int = DEFAULT_BRIDGE_PORT,
     ):
         self.root = os.path.abspath(project_root)
         self.device = device
@@ -172,7 +173,7 @@ class DevRunner:
         return None
 
     def _setup_port_forward(self) -> None:
-        """Forward DevServer (8596) and Bridge (8595) ports over ADB."""
+        """Forward the DevServer and Bridge ports over ADB."""
         device_arg = ["-s", self.device] if self.device else []
         try:
             subprocess.run(

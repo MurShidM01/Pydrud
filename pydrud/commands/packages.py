@@ -29,6 +29,8 @@ from enum import Enum
 from typing import Iterable, Optional
 from dataclasses import dataclass
 
+from pydrud.utils.toml import unquote
+
 
 class SupportCategory(Enum):
     """What category of dependency this package is."""
@@ -348,7 +350,9 @@ class Requirements:
             if not in_section or not stripped or stripped.startswith("#"):
                 continue
             name, _, spec = stripped.partition("=")
-            packages[normalise(name)] = spec.strip().strip('"').strip("'")
+            # A trailing comment is not part of the requirement: keeping it
+            # produced install("requests>=2.31"  # ...) in Gradle.
+            packages[normalise(name)] = unquote(spec)
         return packages
 
     def save(self, packages: dict[str, str]) -> None:

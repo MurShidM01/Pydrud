@@ -18,6 +18,7 @@ from typing import Optional
 import click
 
 from pydrud.commands.project_config import load_project_config
+from pydrud.core.ports import DEFAULT_PREVIEW_PORT
 from pydrud.core.bridge_server import BridgeServer
 
 
@@ -29,7 +30,7 @@ class BridgeRunner:
         project_dir: str,
         *,
         host: str = "127.0.0.1",
-        port: int = 8597,
+        port: int = DEFAULT_PREVIEW_PORT,
         device: Optional[str] = None,
         reverse: bool = True,
     ):

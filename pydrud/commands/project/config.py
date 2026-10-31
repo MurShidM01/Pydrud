@@ -8,6 +8,7 @@ import os
 import re
 
 from pydrud.commands.project.paths import _JAVA_KEYWORDS
+from pydrud.utils.toml import unquote
 
 def _toml_section(project_dir: str, wanted: str) -> dict[str, str]:
     """Read a small scalar section from ``pydrud.toml``.
@@ -32,7 +33,7 @@ def _toml_section(project_dir: str, wanted: str) -> dict[str, str]:
                     continue
                 if section and "=" in stripped:
                     key, value = stripped.split("=", 1)
-                    values[key.strip()] = value.split(" #", 1)[0].strip().strip('"\'')
+                    values[key.strip()] = unquote(value)
     except OSError:
         return {}
     return values
@@ -91,23 +92,6 @@ def _config_list(config: dict, key: str, default=()) -> list[str]:
 
 #: Valid runtime values and their defaults.
 _VALID_RUNTIMES = ("pydash", "chaquopy", "host", "none")
-
-
-def _config_runtime(config: dict, key: str = "runtime", default: str = "pydash") -> str:
-    """Read and validate the ``runtime`` key from project config.
-
-    Missing key defaults to the toolchain-free ``"pydash"`` runtime; unknown
-    values raise :class:`ProjectConfigError`.
-    """
-    value = config.get(key)
-    if value is None or str(value).strip() == "":
-        return default
-    text = str(value).strip().lower()
-    if text not in _VALID_RUNTIMES:
-        valid = ", ".join(_VALID_RUNTIMES)
-        raise ProjectConfigError(
-            f"'{key}' must be one of {valid}, got {value!r}")
-    return text
 
 
 def _validate_package(package: str) -> str:
