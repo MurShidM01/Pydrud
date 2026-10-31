@@ -41,6 +41,11 @@ android {
             abiFilters += listOf({{ abi_filters | default('"arm64-v8a", "armeabi-v7a", "x86_64"') }})
         }
 {% endif %}
+
+        // Cleartext HTTP is a development convenience: debug builds allow
+        // it, release builds are HTTPS-only unless the project opts in
+        // (see the release block below).
+        manifestPlaceholders["pydrudCleartext"] = "{{ 'true' if (cleartext_traffic | default(true)) else 'false' }}"
     }
 
     signingConfigs {
@@ -64,6 +69,8 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // A shipped app talks HTTPS unless the project says otherwise.
+            manifestPlaceholders["pydrudCleartext"] = "{{ 'true' if (cleartext_traffic_release | default(false)) else 'false' }}"
             signingConfig = if (hasKeystore) {
                 signingConfigs.getByName("release")
             } else {
@@ -146,7 +153,10 @@ chaquopy {
 }
 {% endif %}
 
+// pydrud sync rewrites only the block between these two markers:
+// add your own libraries below it and they are never touched.
 dependencies {
+    // pydrud:deps:begin
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.core:core:1.13.1")
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
@@ -171,10 +181,12 @@ dependencies {
     // SVG assets and remote SVGs for Image(src="illustration.svg").
     implementation("com.caverock:androidsvg:1.4")
     implementation("com.google.android.material:material:1.12.0")
-{%- if firebase %}
+{% if firebase %}
     implementation(platform("com.google.firebase:firebase-bom:33.1.2"))
     implementation("com.google.firebase:firebase-messaging")
-{%- endif %}
+{% endif %}
+    // pydrud:deps:end
+    // Add your own dependencies below this line.
 }
 
 // Redirect Android assets to the project-level directory from pydrud.yaml.

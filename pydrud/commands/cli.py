@@ -183,8 +183,11 @@ def init(platform, backend):
 def sync(no_runtime):
     """Apply pydrud.yaml and upgrade the generated Android project.
 
-    Rewrites managed Java, manifest, Gradle, theme and generated metadata,
-    plus the bundled runtime. Your app code in ``src/app/`` is left alone.
+    Refreshes the managed Java layer, manifest, Gradle scripts, theme and
+    generated metadata, plus the bundled runtime. Files you have edited are
+    kept - the new version is written beside them as `<name>.pydrud-new` -
+    managed blocks in the manifest and build script are merged in place, and
+    your app code in `src/app/` is never touched.
     """
     from pydrud.commands.project import sync_project
 

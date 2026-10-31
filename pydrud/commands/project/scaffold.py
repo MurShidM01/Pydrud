@@ -22,7 +22,9 @@ from pydrud.commands.project.paths import (
     _sanitize_package, _slugify, _version, _write_template,
 )
 from pydrud.commands.project.python_runtime import _detect_build_python
-from pydrud.commands.project.templates import _render_app_package, _render_native_layer
+from pydrud.commands.project.templates import (
+    _render_app_package, _render_managed_android,
+)
 
 #: The brand colour the generated starter app is designed around — the
 #: coral heart in the Heartbeat screen. Override with ``pydrud create
@@ -90,7 +92,11 @@ def create_project(
     # The starter app is designed around this coral red; passing ``accent``
     # re-brands it. The value is recorded as ``[theme] seed`` in pydrud.toml,
     # so ``pydrud sync`` regenerates the native theme resources to match.
-    seed_color = _normalise_color(accent) or STARTER_ACCENT
+    try:
+        seed_color = _normalise_color(accent) or STARTER_ACCENT
+    except ValueError as exc:
+        print(fail(str(exc)))
+        sys.exit(1)
     # The Heartbeat starter uses no Android service APIs, so it needs no
     # runtime capabilities or permissions out of the box. Apps can opt in
     # later with the capabilities/permissions commands when they need them.
@@ -146,6 +152,7 @@ def create_project(
         "scheme": pydrud_app_name.replace("_", ""),
         "app_links_host": "",
         "cleartext_traffic": True,
+        "cleartext_traffic_release": False,
         "assets_dir": "assets",
         # CameraX + ML Kit ship ~10 MB of native libraries into every APK.
         # New projects start without them; opt in with `camera: true` in
@@ -183,43 +190,17 @@ def create_project(
 
     # ── 2.  Android / Gradle ─────────────────────────────────────────────
     if is_chaquopy:
-        _render_native_layer(project_dir, java_package_path, ctx)
+        # One code path for create and sync: every Android file is written by
+        # the ownership-aware renderer, so a freshly created project is
+        # already stamped and a later `pydrud sync` writes only what changed.
+        _render_managed_android(project_dir, ctx)
 
-        # AndroidManifest.xml
-        _ensure_dir(f"{project_dir}/android/app/src/main")
-        _write_template("android/AndroidManifest.xml.j2",
-                        f"{project_dir}/android/app/src/main/AndroidManifest.xml", ctx)
-
-        # Build files
-        _write_template("android/build.gradle.kts.j2",
-                        f"{project_dir}/android/build.gradle.kts", ctx)
-        _write_template("android/app/build.gradle.kts.j2",
-                        f"{project_dir}/android/app/build.gradle.kts", ctx)
-        _write_template("android/proguard-rules.pro.j2",
-                        f"{project_dir}/android/app/proguard-rules.pro", ctx)
-        _write_template("android/settings.gradle.kts.j2",
-                        f"{project_dir}/android/settings.gradle.kts", ctx)
-        _write_template("android/gradle.properties.j2",
-                        f"{project_dir}/android/gradle.properties", ctx)
+        # Machine-specific SDK path. gitignored, so a plain write is right.
         _write_template("android/local.properties.j2",
                         f"{project_dir}/android/local.properties", ctx)
 
-        # Launcher icons — copy from the pydrud package res/ directory.
+        # Launcher icons - copy from the pydrud package res/ directory.
         _copy_icon_resources(project_dir)
-
-        # Gradle wrapper
-        _ensure_dir(f"{project_dir}/android/gradle/wrapper")
-        _ensure_dir(f"{project_dir}/android/gradle")
-        _write_template("android/gradlew.j2",
-                        f"{project_dir}/android/gradlew", ctx)
-        _write_template("android/gradlew.bat.j2",
-                        f"{project_dir}/android/gradlew.bat", ctx)
-        _write_template("android/gradle/wrapper/gradle-wrapper.properties.j2",
-                        f"{project_dir}/android/gradle/wrapper/gradle-wrapper.properties", ctx)
-
-        # Make gradlew executable
-        gradlew_path = os.path.join(project_dir, "android", "gradlew")
-        os.chmod(gradlew_path, 0o755)
 
     # ── 3.  Assets directory ──────────────────────────────────────────────
     _ensure_dir(f"{project_dir}/assets")

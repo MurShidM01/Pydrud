@@ -56,7 +56,6 @@ def test_default_scaffold_is_pydash_and_never_probes_android_toolchain(tmp_path,
     entry = (project / "src" / "app" / "main.py").read_text(encoding="utf-8")
     portable_config = (project / "src" / "pydrud_config.py").read_text(encoding="utf-8")
 
-    assert 'runtime = "pydash"' in toml
     assert "scheme =" not in toml
     assert 'runtime: "pydash"' in yaml
     for android_only in ("min_sdk:", "target_sdk:", "compile_sdk:", "ndk:",
@@ -97,7 +96,10 @@ def test_pydash_cli_guards_and_sync_do_not_touch_android(tmp_path, monkeypatch):
     sync_result = runner.invoke(cli, ["sync"], catch_exceptions=False)
     assert sync_result.exit_code == 0, sync_result.output
     assert "no Android project" in sync_result.output
-    assert 'runtime = "pydash"' in (project / "pydrud.toml").read_text()
+    # pydrud.yaml is the manifest sync maintains, so that is where the
+    # runtime is recorded - and a deleted legacy TOML is not resurrected.
+    assert 'runtime: "pydash"' in (project / "pydrud.yaml").read_text()
+    assert not (project / "pydrud.toml").exists()
     assert not (project / "android").exists()
     assert sync_project(str(project))
 
@@ -106,17 +108,40 @@ def test_legacy_android_project_sync_persists_inferred_runtime(tmp_path, monkeyp
     monkeypatch.chdir(tmp_path)
     create_project("legacy_app", runtime="chaquopy")
     project = tmp_path / "legacy_app"
+    # A project generated before the runtime field existed records it in
+    # neither manifest; only the Gradle target betrays the choice.
+    yaml_path = project / "pydrud.yaml"
+    yaml_path.write_text(
+        "\n".join(line for line in yaml_path.read_text(encoding="utf-8").splitlines()
+                   if not line.strip().startswith("runtime:")) + "\n",
+        encoding="utf-8",
+    )
     toml_path = project / "pydrud.toml"
-    toml = toml_path.read_text(encoding="utf-8")
     toml_path.write_text(
-        "\n".join(line for line in toml.splitlines()
+        "\n".join(line for line in toml_path.read_text(encoding="utf-8").splitlines()
                    if not line.strip().startswith("runtime =")) + "\n",
         encoding="utf-8",
     )
 
     assert resolve_runtime(str(project)).runtime is Runtime.CHAQUOPY
     assert sync_project(str(project), update_runtime=False)
-    assert 'runtime = "chaquopy"' in toml_path.read_text(encoding="utf-8")
+    assert 'runtime: "chaquopy"' in yaml_path.read_text(encoding="utf-8")
+
+
+def test_yaml_runtime_wins_over_the_legacy_toml(tmp_path, monkeypatch):
+    """The two manifests can disagree; the YAML one decides."""
+    monkeypatch.chdir(tmp_path)
+    create_project("split_brain", runtime="chaquopy")
+    project = tmp_path / "split_brain"
+    yaml_path = project / "pydrud.yaml"
+    yaml_path.write_text(
+        yaml_path.read_text(encoding="utf-8").replace(
+            'runtime: "chaquopy"', 'runtime: "pydash"'),
+        encoding="utf-8",
+    )
+    assert 'runtime = "chaquopy"' in (
+        project / "pydrud.toml").read_text(encoding="utf-8")
+    assert resolve_runtime(str(project)).runtime is Runtime.PYDASH
 
 
 def test_generated_test_suites_run_for_both_runtimes(tmp_path, monkeypatch):

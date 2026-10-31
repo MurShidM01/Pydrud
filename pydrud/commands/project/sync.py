@@ -9,6 +9,7 @@ import re
 import sys
 
 from pydrud.compatibility import COMPATIBILITY, HOST_COMPATIBILITY
+from pydrud.core.ports import DEFAULT_PREVIEW_PORT
 from pydrud.commands.project_config import load_project_config, set_scalar
 from pydrud.runtime.runtime import Runtime, persist_runtime, resolve_runtime
 from pydrud.utils import tui
@@ -21,7 +22,10 @@ from pydrud.commands.project.config import (
 )
 from pydrud.commands.project.paths import (
     _camel, _JAVA_TEMPLATES, _RUNTIME_BACKENDS, _normalise_color, _slugify,
-    _version, _write_template,
+    _version, _write_managed, _write_template,
+)
+from pydrud.commands.project.managed import (
+    CONFLICT_SUFFIX, ChangeLog, is_user_modified,
 )
 from pydrud.commands.project.templates import _render_managed_android
 
@@ -222,8 +226,12 @@ def _sync_context(project_dir: str, found: dict) -> dict:
         "preview_host": _config_string(
             config, "preview_host", "127.0.0.1") or "127.0.0.1",
         "preview_port": _config_int(
-            config, "preview_port", 8597, minimum=1),
+            config, "preview_port", DEFAULT_PREVIEW_PORT, minimum=1),
         "cleartext_traffic": _config_bool(config, "cleartext_traffic", True),
+        # Release builds are HTTPS-only unless the project opts in: cleartext
+        # is a development convenience, not a shipping default.
+        "cleartext_traffic_release": _config_bool(
+            config, "cleartext_traffic_release", False),
         "abi_filters_list": abi_filters_list,
         "abi_filters": ", ".join(f'"{abi}"' for abi in abi_filters_list),
         "abi_splits": abi_splits,
@@ -245,11 +253,12 @@ def _sync_context(project_dir: str, found: dict) -> dict:
 
 
 # ── Upgrading an existing project ────────────────────────────────────────────
-def _remove_generated_java(project_dir: str, found: dict) -> None:
+def _remove_generated_java(project_dir: str, found: dict) -> list[str]:
     """Remove stale generated classes before a package/name migration.
 
-    Only files owned by Pydrud are removed. Any hand-written Java class in the
-    old package is retained, and now-empty package directories are pruned.
+    Only files owned by Pydrud are removed. A class whose provenance hash no
+    longer matches was edited by hand and is kept, as is any hand-written Java
+    class in the old package; now-empty package directories are pruned.
     """
     java_root = os.path.join(project_dir, "android", "app", "src", "main", "java")
     old_dir = os.path.join(java_root, *found["package_path"].split("/"))
@@ -259,9 +268,16 @@ def _remove_generated_java(project_dir: str, found: dict) -> None:
     # Remove every concrete backend, not just the active one, so switching
     # backends cannot leave a stale (and now unreferenced) implementation.
     generated.update(f"{name}.java" for name in _RUNTIME_BACKENDS.values())
+    kept: list[str] = []
     for filename in generated:
+        path = os.path.join(old_dir, filename)
+        if is_user_modified(path):
+            # A generated class the developer edited: deleting it would throw
+            # their work away, so keep it and report it.
+            kept.append(filename)
+            continue
         try:
-            os.remove(os.path.join(old_dir, filename))
+            os.remove(path)
         except FileNotFoundError:
             pass
     current = old_dir
@@ -271,20 +287,50 @@ def _remove_generated_java(project_dir: str, found: dict) -> None:
         except OSError:
             break
         current = os.path.dirname(current)
+    return kept
 
 
-def _sync_generated_metadata(project_dir: str, ctx: dict) -> None:
+def _prune_stale_java(project_dir: str, ctx: dict) -> list[str]:
+    """Delete generated classes the current configuration no longer needs.
+
+    Switching runtime backend used to leave the previous implementation
+    behind, and turning Firebase off left its messaging service in place.
+    Both are files Pydrud wrote, so removing them is safe - unless the
+    developer edited one, in which case it stays and is reported.
+    """
+    java_root = os.path.join(project_dir, "android", "app", "src", "main", "java")
+    java_dir = os.path.join(java_root, *ctx["package_path"].split("/"))
+    active = _RUNTIME_BACKENDS.get(ctx.get("runtime_backend", "chaquopy"))
+    stale = {f"{name}.java" for name in _RUNTIME_BACKENDS.values() if name != active}
+    if not ctx.get("firebase"):
+        stale.add("PydrudMessagingService.java")
+    removed: list[str] = []
+    for filename in stale:
+        path = os.path.join(java_dir, filename)
+        if not os.path.isfile(path) or is_user_modified(path):
+            continue
+        try:
+            os.remove(path)
+            removed.append(filename)
+        except OSError:
+            pass
+    return removed
+
+
+def _sync_generated_metadata(project_dir: str, ctx: dict,
+                             log: ChangeLog | None = None) -> None:
     """Refresh generated non-app metadata without touching ``src/app``.
 
     ``setup.py`` is Chaquopy's pip install step, so it only exists for the
     embedded-interpreter backend; host/none targets ship no Python source.
     """
-    _write_template("python/pydrud_config.py.j2",
-                    os.path.join(project_dir, "src", "pydrud_config.py"),
-                    {**ctx, "runtime": "chaquopy"})
+    _write_managed("python/pydrud_config.py.j2",
+                   os.path.join(project_dir, "src", "pydrud_config.py"),
+                   {**ctx, "runtime": "chaquopy"}, "hash", log=log)
     if ctx.get("runtime_backend", "chaquopy") == "chaquopy":
-        _write_template("python/setup.py.j2",
-                        os.path.join(project_dir, "setup.py"), ctx)
+        _write_managed("python/setup.py.j2",
+                       os.path.join(project_dir, "setup.py"), ctx, "hash",
+                       log=log)
 
 
 def _sync_toml_identity(project_dir: str, ctx: dict) -> None:
@@ -437,19 +483,23 @@ def sync_project(project_dir: str, *, update_runtime: bool = True) -> bool:
 
     identity_changed = (found["package"] != ctx["package"]
                         or found["app_name"] != ctx["app_name"])
-    _remove_generated_java(project_dir, found)
-    _render_managed_android(project_dir, ctx)
-    _sync_generated_metadata(project_dir, ctx)
+    # A package/name migration has to clear the old tree first; otherwise the
+    # files stay where they are and are simply rewritten when they differ.
+    kept = _remove_generated_java(project_dir, found) if identity_changed else []
+    log = ChangeLog()
+    _render_managed_android(project_dir, ctx, log)
+    _prune_stale_java(project_dir, ctx)
+    _sync_generated_metadata(project_dir, ctx, log)
     _sync_toml_identity(project_dir, ctx)
     # Managed standalone entry point (init-android projects only) and the
     # background-jobs adapter, created when missing. Hand-written app code is
     # never overwritten: jobs.py is only seeded, while android_main.py is
     # regenerated because it is a managed file.
     if ctx["python_entry"] == "app.android_main":
-        _write_template(
+        _write_managed(
             "python/app/android_main.py.j2",
             os.path.join(project_dir, "src", "app", "android_main.py"),
-            ctx)
+            ctx, "hash", log=log)
     jobs_path = os.path.join(project_dir, "src", "app", "jobs.py")
     if not os.path.isfile(jobs_path):
         _write_template("python/app/jobs.py.j2", jobs_path, ctx)
@@ -457,13 +507,23 @@ def sync_project(project_dir: str, *, update_runtime: bool = True) -> bool:
     # overwriting icons the user generated or replaced themselves).
     _copy_icon_resources(project_dir, overwrite=False)
 
-    # Every _JAVA_TEMPLATES class, plus the app-named Activity and the one
-    # concrete runtime backend written for this project.
-    count = len(_JAVA_TEMPLATES) + 2 + (1 if ctx["firebase"] else 0)
-    detail = "all Android configuration"
+    # Report what actually changed: a sync on an untouched project writes
+    # nothing, because every managed file is compared before it is replaced.
+    detail = log.summary()
     if identity_changed:
         detail += " + package migration"
-    print(info(f"Rewrote {count} Java classes + {detail}"))
+    print(info(f"Android layer: {detail}"))
+    if log.conflicts:
+        print(tui.warn_badge(
+            f"{log.conflicts} generated file(s) had local edits and were left "
+            f"untouched; the new version is next to each as *{CONFLICT_SUFFIX}"
+        ))
+    if kept:
+        print(tui.warn_badge(
+            f"Kept {len(kept)} edited Java class(es) from the old package: "
+            + ", ".join(sorted(kept)[:3])
+            + (" ..." if len(kept) > 3 else "")
+        ))
 
     if update_runtime and descriptor.backend == "chaquopy":
         # Only an embedded interpreter imports the framework on device.
@@ -481,7 +541,8 @@ def sync_project(project_dir: str, *, update_runtime: bool = True) -> bool:
     _stamp_version(project_dir)
     print(tui.render_summary(
         "Project synchronized",
-        (("Java classes", count), ("Package", ctx["package"]),
+        (("Files written", log.written), ("Unchanged", log.counts["unchanged"]),
+         ("Package", ctx["package"]),
          ("Runtime", "updated" if update_runtime else "kept"),
          ("Camera", "bundled" if ctx.get("camera") else "not bundled")),
     ))

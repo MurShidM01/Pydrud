@@ -86,14 +86,22 @@ def _render_manifest(**ctx):
     return tpl.render(**base)
 
 
-def test_manifest_allows_cleartext_by_default():
+def test_manifest_defers_cleartext_to_the_build_type():
+    # Cleartext is decided per build type in Gradle: debug keeps the
+    # development default, release is HTTPS-only unless the project opts in.
     out = _render_manifest()
-    assert 'android:usesCleartextTraffic="true"' in out
+    assert 'android:usesCleartextTraffic="${pydrudCleartext}"' in out
 
 
-def test_manifest_cleartext_opt_out():
-    out = _render_manifest(cleartext_traffic=False)
-    assert 'android:usesCleartextTraffic="false"' in out
+def test_manifest_backup_is_opt_in():
+    assert 'android:allowBackup="false"' in _render_manifest()
+    assert 'android:allowBackup="true"' in _render_manifest(allow_backup=True)
+
+
+def test_gradle_sets_cleartext_per_build_type():
+    text = (TEMPLATES / "app" / "build.gradle.kts.j2").read_text(encoding="utf-8")
+    assert 'manifestPlaceholders["pydrudCleartext"]' in text
+    assert "cleartext_traffic_release" in text
 
 
 def test_main_activity_has_no_deprecated_back_override():

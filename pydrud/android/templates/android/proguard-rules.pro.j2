@@ -4,8 +4,11 @@
 #     pydrud build --release --shrink
 # Typical savings are 30-40% of the Java/Kotlin portion of the APK. The
 # Python runtime and your .py sources are assets, so they are untouched —
-# use `pydrud build --release --abi arm64-v8a` to halve *that* half.
-
+# use "pydrud build --release --abi arm64-v8a" to halve *that* half.
+#
+# pydrud sync rewrites only the block between the two pydrud:rules markers.
+# Anything you add below it is yours and is never touched.
+# pydrud:rules:begin
 {% if (runtime_backend | default('chaquopy')) == 'chaquopy' %}
 # ── Chaquopy / Python runtime ────────────────────────────────────────────
 -keep class com.chaquo.python.** { *; }
@@ -69,3 +72,7 @@
 -dontwarn com.google.firebase.**
 -keep class com.google.firebase.** { *; }
 -dontwarn org.osmdroid.**
+# pydrud:rules:end
+
+# ── Your rules ───────────────────────────────────────────────────────────
+# Add application-specific keep rules below this line.

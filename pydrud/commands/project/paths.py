@@ -16,6 +16,9 @@ import unicodedata
 from jinja2 import Environment, PackageLoader, select_autoescape
 
 from pydrud.compatibility import COMPATIBILITY
+from pydrud.commands.project.managed import (
+    ChangeLog, Outcome, write_generated, write_patched,
+)
 
 # Jinja2 environment — templates live under ``android/templates/``.
 _env = Environment(
@@ -30,15 +33,53 @@ def _ensure_dir(path: str):
     os.makedirs(path, exist_ok=True)
 
 
-def _write_template(template_name: str, dest: str, ctx: dict):
-    """Render a Jinja2 template and write it to *dest*."""
-    template = _env.get_template(template_name)
-    content = template.render(**ctx)
+def _render_template(template_name: str, ctx: dict) -> str:
+    """Render a Jinja2 template to text (with a trailing newline)."""
+    content = _env.get_template(template_name).render(**ctx)
     if content and not content.endswith("\n"):
         content += "\n"
+    return content
+
+
+def _write_template(template_name: str, dest: str, ctx: dict):
+    """Render a Jinja2 template and write it to *dest*, unconditionally.
+
+    Only for files the developer owns outright (``pydrud.yaml``,
+    ``README.md``, a freshly seeded ``jobs.py``). Everything Pydrud
+    regenerates goes through :func:`_write_managed` instead.
+    """
+    content = _render_template(template_name, ctx)
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     with open(dest, "w", encoding="utf-8") as f:
         f.write(content)
+
+
+def _write_managed(template_name: str, dest: str, ctx: dict, style: str,
+                   *, patch=None, log: "ChangeLog | None" = None) -> Outcome:
+    """Render and write a file Pydrud owns, preserving local edits.
+
+    *style* picks the comment syntax for the provenance header (``java``,
+    ``kotlin``, ``xml``, ``hash``, ``bat``). *patch* turns the whole-file
+    rewrite into a merge, for files with a managed region.
+    """
+    outcome = write_generated(dest, _render_template(template_name, ctx),
+                              style, patch=patch)
+    if log is not None:
+        log.add(outcome)
+    return outcome
+
+
+def _write_managed_merged(template_name: str, dest: str, ctx: dict, patch,
+                          *, log: "ChangeLog | None" = None) -> Outcome:
+    """Write a merged file without a provenance header.
+
+    The manifest and ``gradle.properties`` are edited by hand by design, so
+    stamping them with a hash would claim an ownership we do not have.
+    """
+    outcome = write_patched(dest, _render_template(template_name, ctx), patch)
+    if log is not None:
+        log.add(outcome)
+    return outcome
 
 
 # Everything that only ever runs on the developer's machine. None of it is

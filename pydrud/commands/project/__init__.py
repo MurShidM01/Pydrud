@@ -20,10 +20,15 @@ from pydrud.commands.project.config import (
     _gradle_value, _manifest_permissions, _project_seed, _toml_section,
     _validate_package,
 )
+from pydrud.commands.project.managed import (
+    ChangeLog, Outcome, is_user_modified, merge_gradle, merge_manifest,
+    merge_properties, merge_proguard, write_generated, write_patched,
+)
 from pydrud.commands.project.paths import (
     _camel, _detect_ndk, _detect_sdk, _ensure_dir, _JAVA_KEYWORDS, _JAVA_TEMPLATES,
-    _normalise_color, _sanitize_package, _slugify, _theme_colors, _version,
-    _version_key, _write_template, BUNDLE_EXCLUDES, _APP_MODULES,
+    _normalise_color, _render_template, _sanitize_package, _slugify, _theme_colors,
+    _version, _version_key, _write_managed, _write_managed_merged,
+    _write_template, BUNDLE_EXCLUDES, _APP_MODULES,
 )
 from pydrud.commands.project.python_runtime import (
     APP_PYTHON_VERSION, BUILD_PYTHON_VERSIONS, _build_python_candidates,
@@ -35,9 +40,9 @@ from pydrud.commands.project.platforms import (
 )
 from pydrud.commands.project.scaffold import create_project
 from pydrud.commands.project.sync import (
-    _camera_already_bundled, _discover_project, _remove_generated_java,
-    _stamp_version, _sync_context, _sync_generated_metadata,
-    _sync_toml_identity, sync_project,
+    _camera_already_bundled, _discover_project, _prune_stale_java,
+    _remove_generated_java, _stamp_version, _sync_context,
+    _sync_generated_metadata, _sync_toml_identity, sync_project,
 )
 from pydrud.commands.project.templates import (
     _render_app_package, _render_managed_android, _render_native_layer,
@@ -62,4 +67,9 @@ __all__ = [
     "_copy_icon_resources",
     "_sync_context", "_remove_generated_java", "_sync_generated_metadata",
     "_sync_toml_identity", "_discover_project", "_stamp_version",
+    "_prune_stale_java", "_render_template", "_write_managed",
+    "_write_managed_merged",
+    "ChangeLog", "Outcome", "is_user_modified", "merge_gradle",
+    "merge_manifest", "merge_properties", "merge_proguard", "write_generated",
+    "write_patched",
 ]

@@ -8,7 +8,7 @@ the project directory::
     cd my_app
     pydrud init android   # standalone APK with embedded Python
 
-``android`` is the only platform in 2.1.6. It embeds CPython with Chaquopy
+``android`` is currently the only platform. It embeds CPython with Chaquopy
 so the APK runs the app fully offline; ``pydrud dev`` remains the desktop
 development loop. iOS, Linux, Windows, web and macOS are reserved names for
 future platforms.
@@ -29,7 +29,8 @@ from pydrud.commands.project.config import (
     ProjectConfigError, _toml_section, _validate_package,
 )
 from pydrud.commands.project.paths import (
-    _camel, _detect_sdk, _ensure_dir, _slugify, _version, _write_template,
+    _camel, _detect_sdk, _ensure_dir, _slugify, _version, _write_managed,
+    _write_template,
 )
 from pydrud.commands.project.python_runtime import _detect_build_python
 from pydrud.commands.project.sync import (
@@ -207,9 +208,10 @@ def _init_android(project_dir: str, backend: str = "chaquopy") -> bool:
     jobs_path = os.path.join(project_dir, "src", "app", "jobs.py")
     if not os.path.isfile(jobs_path):
         _write_template("python/app/jobs.py.j2", jobs_path, ctx)
-    _write_template(
+    _write_managed(
         "python/app/android_main.py.j2",
-        os.path.join(project_dir, "src", "app", "android_main.py"), ctx)
+        os.path.join(project_dir, "src", "app", "android_main.py"),
+        ctx, "hash")
     if backend == "chaquopy":
         # Only an embedded interpreter imports the framework on device; a
         # host/none build ships no Python source at all.

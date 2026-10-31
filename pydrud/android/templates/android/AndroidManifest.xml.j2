@@ -1,53 +1,57 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- pydrud:permissions:begin -->
+    <!-- Generated from pydrud.yaml. Add your own entries outside this block:
+         pydrud sync replaces only what is between the two markers. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- Optional permissions are generated from capability bundles and the
-         explicit `permissions:` list in pydrud.yaml. -->
-{%- for permission in capability_permissions | default([]) %}
+{% for permission in capability_permissions | default([]) %}
     <uses-permission android:name="android.permission.{{ permission }}" />
-{%- endfor %}
-{%- for permission in permissions | default([]) %}
+{% endfor %}
+{% for permission in permissions | default([]) %}
     <uses-permission android:name="android.permission.{{ permission }}" />
-{%- endfor %}
+{% endfor %}
 
-    <!--
-      Dangerous permissions are intentionally NOT declared by default: Play
-      rejects apps that request what they do not use. Add the ones your app
-      needs with `pydrud permissions add camera` (or `permissions:` in
-      pydrud.yaml), then run `pydrud sync` and request them at runtime with
-      page.permissions.request("camera"). This generated manifest is never
-      the source of truth, so do not uncomment entries here.
-
-      <uses-permission android:name="android.permission.CAMERA" />
-      <uses-permission android:name="android.permission.RECORD_AUDIO" />
-      <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-      <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-      <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
-      <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-      <uses-permission android:name="android.permission.NFC" />
-      <uses-permission android:name="android.permission.USE_BIOMETRIC" />
-    -->
-
+    <!-- Declared as optional so Play does not filter devices that lack the
+         hardware; the app degrades gracefully when it is absent. -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.nfc" android:required="false" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <!-- pydrud:permissions:end -->
 
     <!--
-      Cleartext HTTP is allowed by default so local development servers,
-      LAN devices and plain-http intranet APIs work out of the box
-      (Android 9+ blocks them otherwise). Shipping an app that only talks
-      HTTPS? Set ``cleartext_traffic: false`` in pydrud.yaml and re-sync.
+      Dangerous permissions are not declared by default: Play rejects apps
+      that request what they do not use. Declare the ones your app needs with
+      "pydrud permissions add camera" (or a "permissions:" list in
+      pydrud.yaml), then request them at runtime with
+      page.permissions.request("camera").
+
+      Hand-written entries anywhere outside the managed block above survive
+      every "pydrud sync", so this file is a safe place to declare a
+      permission the CLI does not know about.
+    -->
+
+    <!--
+      Cleartext HTTP is allowed in debug builds so local development
+      servers, LAN devices and plain-http intranet APIs work out of the box
+      (Android 9+ blocks them otherwise). Release builds are HTTPS-only
+      unless the project opts in with "cleartext_traffic_release: true" in
+      pydrud.yaml. Backup is opt-in: a shipped app should not hand its
+      private data to the cloud by default.
     -->
     <application
-        android:allowBackup="true"
-        android:usesCleartextTraffic="{{ 'true' if (cleartext_traffic | default(true)) else 'false' }}"
+        android:allowBackup="{{ 'true' if (allow_backup | default(false)) else 'false' }}"
+        android:usesCleartextTraffic="${pydrudCleartext}"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:label="{{ project_name }}"
         android:supportsRtl="true"
         android:theme="@style/Theme.{{ app_name }}">
+        <!-- pydrud:activity:begin -->
+        <!-- The launcher activity and its deep links, generated from
+             pydrud.yaml (app_name, scheme, app_links_host). Add your own
+             activities and intent filters outside this block. -->
         <activity
             android:name=".{{ app_name }}Activity"
             android:exported="true"
@@ -73,15 +77,18 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="{{ app_links_host }}" />
             </intent-filter>
-{%- endif %}
+{% endif %}
         </activity>
+        <!-- pydrud:activity:end -->
 
+        <!-- pydrud:services:begin -->
+        <!-- Services Pydrud needs. Add your own outside this block. -->
         <!-- Foreground service for long-running Python work. -->
         <service
             android:name=".PydrudForegroundService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
-{%- if firebase %}
+{% if firebase %}
 
         <service
             android:name=".PydrudMessagingService"
@@ -90,7 +97,8 @@
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
-{%- endif %}
+{% endif %}
+        <!-- pydrud:services:end -->
     </application>
 
 </manifest>
