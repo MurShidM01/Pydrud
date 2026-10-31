@@ -71,6 +71,13 @@ def _detect_build_python(target: str = APP_PYTHON_VERSION) -> str:
     version, and the user is told what happened instead of being left to
     decode Chaquopy's warning.
     """
+    # A correctly configured environment already runs the app's version:
+    # prefer the interpreter Pydrud itself is running under over whatever
+    # PATH happens to resolve first. Without this, a 3.11 venv on a machine
+    # whose PATH has 3.12 silently selected 3.12 and warned (BUG-04).
+    if target and _python_version_of(sys.executable) == target:
+        return sys.executable.replace("\\", "/")
+
     preferred = [target] if target else []
     supported = preferred + [v for v in BUILD_PYTHON_VERSIONS
                              if v not in preferred]
