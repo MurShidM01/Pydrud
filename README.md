@@ -286,6 +286,14 @@ Applies once a project has the Android platform. `pydrud.yaml` is the
 source of truth for generated Android files — change it and run
 `pydrud sync`.
 
+Sync only rewrites what `pydrud.yaml` controls. Permissions, the launcher
+activity and services live in managed blocks of `AndroidManifest.xml`; the
+dependency list and ProGuard rules have managed blocks of their own. Anything
+you add outside those blocks — an extra permission, your own activity, a
+library — survives every sync. Generated Java and resource files carry a
+provenance hash: if you edited one, sync keeps your version and writes the new
+one next to it as `<name>.pydrud-new`.
+
 ```yaml
 app_name: "Taskflow"
 package: "com.example.taskflow"
