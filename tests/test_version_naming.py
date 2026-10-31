@@ -32,12 +32,26 @@ ALLOWED = (
 BANNED = re.compile(r"\bv3\.0(?:\.0)?\b|\bV3\.0(?:\.0)?\b|\bv3\.x\b", re.IGNORECASE)
 
 
+def _venv_roots() -> tuple[pathlib.Path, ...]:
+    """Directories that are virtualenvs, at any depth.
+
+    A virtualenv created inside the checkout (python -m venv venv311) is not
+    project source: its site-packages carry third-party text that this guard
+    would otherwise fail on. pyvenv.cfg is the marker, so any directory name
+    works, not just "venv".
+    """
+    return tuple(cfg.parent for cfg in ROOT.rglob("pyvenv.cfg"))
+
+
 def _scanned_files():
+    roots = _venv_roots()
     for path in sorted(ROOT.rglob("*")):
         if not path.is_file() or path.suffix not in SCANNED_SUFFIXES:
             continue
         parts = set(path.parts)
         if {".git", "__pycache__", "node_modules", "build", "dist"} & parts:
+            continue
+        if any(root in path.parents for root in roots):
             continue
         yield path
 

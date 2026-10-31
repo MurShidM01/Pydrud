@@ -1,8 +1,12 @@
+from pydrud import __version__
 from pydrud.compatibility import COMPATIBILITY, HOST_COMPATIBILITY
 
 
 def test_host_compatibility_is_cross_platform():
-    assert HOST_COMPATIBILITY.framework_version == "2.1.6"
+    # The version lives in pydrud/_version.py only; this asserts the
+    # compatibility matrix follows it instead of drifting.
+    assert HOST_COMPATIBILITY.framework_version == __version__
+    assert COMPATIBILITY.android_runtime_version == __version__
     assert HOST_COMPATIBILITY.protocol_version == 2
     assert HOST_COMPATIBILITY.python_version == "3.11"
 

@@ -6,7 +6,8 @@ and renderer protocol. Pydash is the toolchain-free host-preview default;
 Chaquopy is the opt-in Android APK target that renders native Views.
 """
 
-__version__ = "2.1.6"
+from pydrud._version import __version__
+
 __app_name__ = "Pydrud"
 
 from pydrud.runtime.app import App
@@ -212,6 +213,7 @@ from pydrud import icons  # noqa: E402
 from pydrud import components  # noqa: E402
 
 __all__ = [
+    "__version__",
     "App",
     "icons",
     "components",

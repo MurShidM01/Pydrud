@@ -38,7 +38,9 @@ class TestLayout(unittest.TestCase):
     def test_no_stray_modules_at_the_top_level(self):
         """Only the public surface and the deprecation shims live at the root."""
         allowed = {"__init__", "compatibility", "testing", "icons",
-                   "main", "navigation", "packages"}
+                   "main", "navigation", "packages",
+                   # single source of truth for the version string
+                   "_version"}
         found = {name for _, name, ispkg
                  in pkgutil.iter_modules([PACKAGE]) if not ispkg}
         self.assertEqual(found - allowed, set())
