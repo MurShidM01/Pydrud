@@ -6,6 +6,7 @@ All notable changes to Pydrud are documented here.
 
 | Version | Theme | Highlights |
 |---------|-------|------------|
+| [2.1.7](#217--2026-11-01) | **Sync that respects your edits** | `pydrud sync` rewrites only what `pydrud.yaml` owns: manifest permissions, Gradle dependencies and ProGuard rules you added survive; generated files carry a provenance hash; a release APK no longer opens the dev server, ships HTTPS-only and is not backed up |
 | [2.1.6](#216--2026-10-27) | **Lifecycle & picker fixes** | Relaunching after BACK no longer shows a blank window; one app per process and a rebindable bridge port; real Material date/time pickers restored; host-only packages stay off the device; Java template compile fixes |
 | [2.1.5](#215--2026-10-13) | **Material 3 Complete** | HCT colour system, 36 M3 colour roles, 12 new M3 components, RTL support, per-corner radius, exact M3 typography, tonal elevation, uncapped font scale; Android-only renderers, platform-neutral UI layer |
 | [2.1.4](#214--2026-10-09) | Per-ABI via flavors | Rebuilds `abi_splits` with a product flavor dimension (Chaquopy rejects `splits.abi`); `pydrud build` collects the flavor APKs |
@@ -26,6 +27,90 @@ All notable changes to Pydrud are documented here.
 | [1.2.0](#120--the-full-android-toolkit) | Full Android toolkit | Material components, camera, push, background work |
 | [1.1.0](#110) / [1.0.1](#101) | Foundation | Stack/Positioned, ListView, GridView, Card, system UI |
 | [1.0.0](#100) | First release | Declarative Python → native Android over a TCP bridge |
+
+---
+
+## [2.1.7] — 2026-11-01
+
+**Sync that respects your edits, plus the fixes from an independent audit.**
+
+`pydrud sync` now owns only what `pydrud.yaml` owns.
+
+Regenerating the whole `android/` tree was the biggest source of lost work: a
+permission added to `AndroidManifest.xml`, a dependency added to
+`app/build.gradle.kts` or a keep rule in `proguard-rules.pro` disappeared on the
+next sync. Sync now applies the manifest without discarding local edits, with
+three strategies chosen per file:
+
+- **Managed regions.** The manifest (permissions, launcher activity, services),
+  the Gradle dependency block and the ProGuard rules are flat lists Pydrud
+  owns. Only the text between `pydrud:<name>:begin` and `pydrud:<name>:end` is
+  rewritten; every other line in those files is yours. Changing
+  `permissions:` in `pydrud.yaml` still adds and removes entries, because that
+  is what the region is for.
+- **Provenance stamps.** Files Pydrud owns end to end (Java classes, theme
+  resources, Gradle scripts, the wrapper) start with a header recording a hash
+  of their body. Sync rewrites them while the hash matches and otherwise keeps
+  the file, writing the new version beside it as `<name>.pydrud-new`.
+- **Ensure-only `gradle.properties`.** Missing keys are appended; a key you
+  already set (heap size, AndroidX flags) is never overwritten.
+
+Sync also stopped rewriting files that did not change: a second run on an
+untouched project writes nothing, and `pydrud create` goes through the same
+renderer as `pydrud sync`, so a new project is stamped from the start.
+
+- Scalars in `app/build.gradle.kts` (`minSdk`, `versionName`, `abiFilters`,
+  ...) follow `pydrud.yaml` even in a build script you have extended. A change
+  the line patcher cannot make - a new plugin, a product flavor - is reported
+  instead of applied silently.
+- `pydrud.yaml` is now the only source of the runtime backend; `pydrud.toml`
+  is read only for projects generated before the YAML manifest existed.
+- A class in the old package that you edited survives a package migration, and
+  switching runtime backend or turning Firebase off removes the now-unused
+  generated class instead of leaving it behind.
+
+**Security hardening and correctness fixes from an independent audit.**
+
+Several defaults were unsafe for shipped apps. Behaviour changes are listed
+explicitly because a re-sync picks them up:
+
+- **The on-device DevServer is now opt-in and debug-only.** `App` defaults to
+  `dev_server=False`, and generated entry points pass
+  `dev_server=dev_server_allowed()`, which is true only when the APK is
+  debuggable. A release APK no longer opens port 8596, so it no longer exposes
+  an unauthenticated `eval`/hot-reload endpoint to other apps on the device.
+- **Hot reload cannot write outside the sync directory.** Host-supplied paths
+  are validated; absolute paths, drive letters and any `..` component are
+  rejected with an `InvalidPath` error.
+- **The preview server binds `127.0.0.1` by default.** Pass `--host 0.0.0.0`
+  to expose it on the LAN as before.
+- **Release builds are HTTPS-only** unless `cleartext_traffic_release: true`
+  is set in `pydrud.yaml`; debug builds keep the development default.
+  `android:allowBackup` is now `false` unless `allow_backup: true`.
+- **Keystore passwords stay out of argv** (`keytool -storepass:env`), can be
+  supplied with `PYDRUD_KEYSTORE_PASSWORD`, and `keystore.properties` is
+  owner-only on Windows too.
+- **The DevServer line buffer is capped** at 2 MB, matching the render frame
+  cap.
+
+Fixes:
+
+- A TOML inline comment after a requirement no longer reaches Gradle
+  (`install("requests>=2.31"  # ...)` was a Kotlin syntax error).
+- `pydrud create --accent notacolor` prints a message instead of a traceback.
+- `Timer(0)` clamps to 240 Hz instead of busy-spinning a core (~60 kHz).
+- `buildPython` prefers the interpreter Pydrud runs under when its version
+  matches, instead of a different one from `PATH`.
+- The version is declared once, in `pyproject.toml`. `pydrud/_version.py`
+  resolves it (generated build info → pyproject → installed metadata) and the
+  compatibility matrix follows, so no Python module carries a copy. `pydrud
+  sync` stamps the resolved version into the APK bundle, where neither
+  pyproject nor distribution metadata is available.
+- Well-known ports live in `pydrud/core/ports.py` and the wire protocol
+  version in `pydrud/core/protocol.py`; the runtime, CLI and compatibility
+  matrix import them instead of repeating the numbers.
+- The `test_version_naming` guard ignores virtualenvs created inside the
+  checkout.
 
 ---
 

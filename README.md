@@ -437,6 +437,7 @@ portability claim above cannot regress unnoticed.
 
 | Version | Focus |
 |---------|-------|
+| **v2.1.7** | `pydrud sync` only regenerates what `pydrud.yaml` owns — manifest permissions, Gradle dependencies and ProGuard rules you added survive; debug-only dev server, HTTPS-only release builds, opt-in backup |
 | **v2.1.6** | Lifecycle fixes: relaunch after BACK no longer shows a blank window, one app per process, a rebindable bridge port; real Material date/time pickers; host-only packages filtered out of the APK |
 | **v2.1.5** | Material 3 Complete: HCT colour, 36 roles, the M3 component catalogue, M3 typography/shape/motion — Android renderers, platform-neutral UI layer |
 | **v2.1.4** | Per-ABI APKs rebuilt with a product flavor dimension (Chaquopy rejects `splits.abi`); `pydrud build` collects the flavor APKs |

@@ -4,7 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pydrud"
-version = "2.1.6"
+# The one place the release version is declared. pydrud/_version.py reads
+# this at runtime; nothing else may carry a copy.
+version = "2.1.7"
 description = "Build native Android apps in Python — a declarative, Material Design 3 UI framework (Flutter-inspired) that renders a Python widget tree as native Android Views, with a toolchain-free host preview."
 readme = "README.md"
 requires-python = ">=3.10"
