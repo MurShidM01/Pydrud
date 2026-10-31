@@ -2,7 +2,7 @@
 DevServer — lightweight on-device development server for Hot Reload & Hot Restart.
 
 Runs inside the Python application runtime (Chaquopy on Android, or local host)
-and accepts commands over TCP (default port 8596):
+and accepts commands over TCP on the default dev port:
   • hot_reload: sync modified Python files, reload modules, preserve state, re-render
   • hot_restart: reset state, reload all user modules, re-render from initial route
   • dump_tree: return serialised widget tree
@@ -21,13 +21,36 @@ import time
 import traceback
 from typing import Optional, TYPE_CHECKING
 
+from pydrud.core.ports import DEFAULT_DEV_PORT
+from pydrud.core.protocol import MAX_FRAME_BYTES
+
 if TYPE_CHECKING:
     from pydrud.runtime.app import App
 
-DEFAULT_DEV_PORT = 8596
 DEV_PROTOCOL_VERSION = 2
 
 logger = logging.getLogger("pydrud.devserver")
+
+
+def dev_server_allowed() -> bool:
+    """Whether this build may open the on-device DevServer.
+
+    The server can execute Python (hot reload, eval), so it is a
+    development-only facility: MainActivity sets the "pydrud.dev_server"
+    system property from FLAG_DEBUGGABLE, which means a release APK never
+    listens. On a host interpreter set PYDRUD_DEV_SERVER=1 to opt in
+    (tests, desktop tooling).
+    """
+    try:
+        from java.lang import System as _JavaSystem  # type: ignore[import-not-found]
+    except Exception:
+        _JavaSystem = None
+    if _JavaSystem is not None:
+        try:
+            return str(_JavaSystem.getProperty("pydrud.dev_server", "0")).strip() == "1"
+        except Exception:  # pragma: no cover - JVM bridge failure
+            return False
+    return os.environ.get("PYDRUD_DEV_SERVER", "").strip().lower() in ("1", "true", "yes")
 
 
 class DevServer:
@@ -155,6 +178,14 @@ class DevServer:
                 if not data:
                     break
                 buffer += data.decode("utf-8", errors="replace")
+                if len(buffer) > MAX_FRAME_BYTES:
+                    # Refuse to buffer an unbounded frame: the rest of the
+                    # protocol is capped, and this path must be too.
+                    client.sendall((json.dumps({
+                        "status": "error",
+                        "error": f"Frame exceeds {MAX_FRAME_BYTES} bytes",
+                    }) + "\n").encode("utf-8"))
+                    break
                 while "\n" in buffer:
                     line, buffer = buffer.split("\n", 1)
                     line = line.strip()

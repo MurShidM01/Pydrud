@@ -36,6 +36,7 @@ Flutter-style hot reload (press ``r`` for hot reload, ``R`` for hot restart).
 import os
 
 from pydrud import App
+from pydrud.platforms.android.devserver import dev_server_allowed
 
 from app import theme
 from app.config import APP_NAME
@@ -63,6 +64,9 @@ def start_app():
         target=router.build_root(),
         title=APP_NAME,
         stylesheet=os.path.join(os.path.dirname(__file__), "theme.pss"),
+        # Hot reload is a debug-only facility: a release APK never opens
+        # the dev-server port. See dev_server_allowed().
+        dev_server=dev_server_allowed(),
     ))
     app.attach_router(router)
     # A 60 fps loop has no business running behind the home screen, so the

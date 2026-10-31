@@ -7,6 +7,7 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
+from pydrud.core.ports import DEFAULT_PREVIEW_PORT
 from pydrud.core.preview import (
     PreviewProtocolError,
     PreviewSession,
@@ -37,8 +38,8 @@ class PreviewServer:
         app,
         session: PreviewSession,
         *,
-        host: str = "0.0.0.0",
-        port: int = 8597,
+        host: str = "127.0.0.1",
+        port: int = DEFAULT_PREVIEW_PORT,
         handshake_timeout: float = 10.0,
         on_status: Optional[StatusCallback] = None,
     ):

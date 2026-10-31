@@ -38,9 +38,10 @@ preview channel is not an APK build/install channel.
 
 ## Transport and framing
 
-The host listens on TCP. The default is `0.0.0.0:8597`; `--host`, `--port` and
-`--connect-host` configure the bind and advertised addresses. Clients use the
-advertised address from the QR payload.
+The host listens on TCP. The default is `127.0.0.1:8597`, so a preview is not
+reachable from the network unless asked for; pass `--host 0.0.0.0` to expose it
+on the LAN. `--host`, `--port` and `--connect-host` configure the bind and
+advertised addresses. Clients use the advertised address from the QR payload.
 
 Every frame is one UTF-8 JSON object followed by `\n` (NDJSON). A frame,
 including the newline, is limited to 2 MiB. Non-object JSON, invalid UTF-8,

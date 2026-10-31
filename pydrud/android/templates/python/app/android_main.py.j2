@@ -9,6 +9,7 @@ remains the `pydrud dev` desktop preview entry point).
 import os
 
 from pydrud import App
+from pydrud.platforms.android.devserver import dev_server_allowed
 
 import app.main as _preview_entry  # noqa: F401 (applies the theme + routes)
 from app.config import APP_NAME
@@ -37,6 +38,8 @@ def start_app():
             target=router.build_root(),
             title=APP_NAME,
             stylesheet=os.path.join(os.path.dirname(__file__), "theme.pss"),
+            # Debug builds only: release APKs never open the dev-server port.
+            dev_server=dev_server_allowed(),
         ))
         app.attach_router(router)
         # Deep links ({{ scheme }}://details), launcher shortcuts and push

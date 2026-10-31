@@ -13,7 +13,7 @@ import sys
 import threading
 import time
 import traceback
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 from pydrud.runtime._modules import (
     _find_user_modules,
@@ -34,6 +34,37 @@ def _unlink_synced_file(sync_dir: str, relative_path: str) -> None:
             os.remove(candidate)
     except (OSError, ValueError):
         pass
+
+
+def _safe_synced_path(sync_dir: str, relative_path: str) -> Optional[str]:
+    """Absolute destination for *relative_path*, or None if it escapes.
+
+    Hot reload writes files supplied by the host, so the path is untrusted:
+    absolute paths, drive letters and any '..' component are rejected rather
+    than normalised away, and the result must stay under *sync_dir*.
+    """
+    if not sync_dir or not relative_path or "\x00" in relative_path:
+        return None
+    relative = str(relative_path).replace("\\", "/")
+    # Check the raw components: normpath would collapse "src/../x" to "x"
+    # and hide the traversal instead of rejecting it.
+    if any(part == ".." for part in relative.split("/")):
+        return None
+    normalised = os.path.normpath(relative).replace(os.sep, "/")
+    if normalised in ("", "."):
+        return None
+    if os.path.isabs(normalised):
+        return None
+    if os.name == "nt" and ":" in normalised.split("/", 1)[0]:
+        return None
+    root = os.path.abspath(sync_dir)
+    candidate = os.path.abspath(os.path.join(root, normalised))
+    try:
+        if os.path.commonpath((root, candidate)) != root:
+            return None
+    except ValueError:
+        return None
+    return candidate
 
 
 class HotReloadMixin:
@@ -187,11 +218,24 @@ class HotReloadMixin:
                 deleted_stylesheets.add(clean_path)
 
         for file in files:
-            rel_path = file.get("path", "")
+            rel_path = str(file.get("path", ""))
             content = file.get("content", "")
             clean_path = rel_path.replace("\\", "/")
             if clean_path.startswith("src/"):
                 clean_path = clean_path[4:]
+
+            # The host chooses these paths; never let one escape the sync
+            # directory (SEC-02). Validating here means the write loop below
+            # only ever sees contained paths.
+            if sync_dir and _safe_synced_path(sync_dir, clean_path) is None:
+                return {
+                    "status": "error",
+                    "error_type": "InvalidPath",
+                    "message": (
+                        "Refusing to write outside the sync directory: "
+                        f"{rel_path!r}"
+                    ),
+                }
 
             if clean_path.lower().endswith(".pss"):
                 sheet = parse_pss(content, filename=clean_path)
@@ -265,12 +309,16 @@ class HotReloadMixin:
         updated_stylesheets = []
         for kind, clean_path, content, code_obj in compiled_files:
             if sync_dir:
-                full_dest = os.path.join(sync_dir, clean_path)
+                full_dest = _safe_synced_path(sync_dir, clean_path)
+                if full_dest is None:
+                    # Already rejected during validation; keep the guard so a
+                    # future caller cannot bypass it.
+                    continue
                 try:
                     os.makedirs(os.path.dirname(full_dest), exist_ok=True)
                     with open(full_dest, "w", encoding="utf-8") as fp:
                         fp.write(content)
-                except Exception:
+                except OSError:
                     pass
 
             if kind == "stylesheet":

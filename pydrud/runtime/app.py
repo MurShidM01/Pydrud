@@ -7,6 +7,7 @@ It provides the familiar ``App(target=main).run()`` developer experience.
 
 from __future__ import annotations
 import json
+import logging
 import os
 import queue
 import socket
@@ -18,6 +19,7 @@ from pydrud.core.results import Result
 from pydrud.core.tasks import TaskRunner
 from pydrud.core.events import EventDispatcher
 from pydrud.core.bridge import BridgeProtocol
+from pydrud.core.ports import DEFAULT_BRIDGE_PORT, DEFAULT_DEV_PORT
 from pydrud.core.protocol import MAX_FRAME_BYTES, RenderTransaction
 from pydrud.core.elements import ElementTree
 from pydrud.core.styles import (
@@ -43,11 +45,14 @@ from pydrud.runtime._lifecycle import LifecycleMixin
 # without importing this one. Re-exported here for backwards compatibility
 # (``pydrud.main`` does ``from pydrud.runtime.app import _module_name_for``).
 from pydrud.runtime.page import _Page
+
 from pydrud.runtime._modules import (  # noqa: F401
     _find_user_modules,
     _module_name_for,
     _module_name_from_path,
 )
+
+logger = logging.getLogger("pydrud.app")
 
 
 class App(RenderMixin, BridgeMixin, LifecycleMixin, HotReloadMixin):
@@ -77,7 +82,7 @@ class App(RenderMixin, BridgeMixin, LifecycleMixin, HotReloadMixin):
         target: Optional[Callable] = None,
         title: str = "Pydrud App",
         host: str = "127.0.0.1",
-        port: int = 8595,
+        port: int = DEFAULT_BRIDGE_PORT,
         assets_dir: str = "assets",
         hot_reload: bool = False,
         stylesheet: str | os.PathLike[str] | StyleSheet | None = None,
@@ -188,8 +193,11 @@ class App(RenderMixin, BridgeMixin, LifecycleMixin, HotReloadMixin):
         # ── UI-thread marshalling ──────────────────────────────────
         self._ui_queue: queue.Queue = queue.Queue(maxsize=1024)
         # ── DevServer (Hot reload & diagnostics) ───────────────────
-        self._dev_port = kwargs.get("dev_port", 8596)
-        self._dev_server_enabled = kwargs.get("dev_server", True)
+        self._dev_port = kwargs.get("dev_port", DEFAULT_DEV_PORT)
+        # The DevServer can execute Python, so it is opt-in. Generated apps
+        # pass dev_server=dev_server_allowed(), which is true only for
+        # debuggable builds - a release APK never opens the port.
+        self._dev_server_enabled = kwargs.get("dev_server", False)
         self._dev_server: Optional[Any] = None
 
     # ── public API ────────────────────────────────────────────────────────
@@ -312,10 +320,20 @@ class App(RenderMixin, BridgeMixin, LifecycleMixin, HotReloadMixin):
         """Start on-device DevServer for hot reload."""
         try:
             from pydrud.platforms.android.devserver import DevServer
-            self._dev_server = DevServer(self, host=self.host, port=self._dev_port)
-            self._dev_server.start()
-        except Exception:
-            pass
+        except Exception as exc:  # pragma: no cover - platform specific
+            logger.debug("DevServer unavailable: %s", exc)
+            return
+        try:
+            server = DevServer(self, host=self.host, port=self._dev_port)
+            if not server.start():
+                logger.warning(
+                    "DevServer could not bind %s:%s - hot reload is disabled",
+                    self.host, self._dev_port,
+                )
+                return
+            self._dev_server = server
+        except Exception as exc:
+            logger.warning("DevServer failed to start: %s", exc)
 
     def build(self) -> Widget:
         """Run the target and return the widget tree without connecting.

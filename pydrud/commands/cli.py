@@ -10,6 +10,7 @@ import sys
 import click
 
 from pydrud import __version__
+from pydrud.core.ports import DEFAULT_BRIDGE_PORT, DEFAULT_PREVIEW_PORT
 from pydrud.runtime.runtime import Runtime
 from pydrud.utils import tui
 
@@ -293,11 +294,11 @@ def clean(device):
 @main.command()
 @click.argument("project_dir", default=".", type=click.Path(exists=True, file_okay=False))
 @click.option(
-    "--host", default="0.0.0.0", show_default=True,
-    help="Interface to bind. The default exposes preview on the local network.",
+    "--host", default="127.0.0.1", show_default=True,
+    help="Interface to bind. Pass 0.0.0.0 to expose the preview on the LAN.",
 )
 @click.option(
-    "--port", default=8597, show_default=True,
+    "--port", default=DEFAULT_PREVIEW_PORT, show_default=True,
     type=click.IntRange(1, 65535), help="Preview server TCP port.",
 )
 @click.option(
@@ -714,7 +715,9 @@ def pip_sync():
 
 @main.command()
 @click.option("--alias", default="release", help="Key alias inside the keystore.")
-@click.option("--password", default=None, help="Keystore password (prompted if omitted).")
+@click.option("--password", default=None,
+              help="Keystore password. Prefer PYDRUD_KEYSTORE_PASSWORD; "
+                   "prompted if neither is set.")
 @click.option("--validity", default=10000, help="Validity in days.")
 @click.option("--dname", default=None, help="X.500 distinguished name.")
 def keygen(alias, password, validity, dname):
@@ -727,8 +730,10 @@ def keygen(alias, password, validity, dname):
                  "Generating release-signing credentials for Google Play",
                  details=(("Alias", alias), ("Validity", f"{validity} days")))
     if password is None:
-        password = click.prompt("Keystore password", hide_input=True,
-                                confirmation_prompt=True)
+        # Prefer the environment so the secret stays out of shell history;
+        # --password still works but is the least private option.
+        password = os.environ.get("PYDRUD_KEYSTORE_PASSWORD") or click.prompt(
+            "Keystore password", hide_input=True, confirmation_prompt=True)
     ok_ = create_keystore(root, alias=alias, password=password,
                           validity=validity, dname=dname)
     sys.exit(0 if ok_ else 1)
@@ -950,7 +955,8 @@ def docs(output, serve):
 
 
 @main.command()
-@click.option("--port", default=8595, help="Bridge port the app is using.")
+@click.option("--port", default=DEFAULT_BRIDGE_PORT,
+              help="Bridge port the app is using.")
 @click.option("--tree", is_flag=True, default=False, help="Dump the widget tree and exit.")
 @click.option("--watch", "follow", is_flag=True, default=False,
               help="Stream bridge traffic live.")

@@ -18,12 +18,15 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from pydrud.core.ports import DEFAULT_PREVIEW_PORT as _DEFAULT_PREVIEW_PORT
 from pydrud.core.protocol import MAX_FRAME_BYTES, PROTOCOL_VERSION
 
 PREVIEW_PROTOCOL = "pydrud.preview"
 PREVIEW_PROTOCOL_VERSION = 1
-DEFAULT_PREVIEW_PORT = 8597
-DEFAULT_PREVIEW_HOST = "0.0.0.0"
+
+# Re-exported from the single ports module so the number is defined once.
+DEFAULT_PREVIEW_PORT = _DEFAULT_PREVIEW_PORT
+DEFAULT_PREVIEW_HOST = "127.0.0.1"
 PREVIEW_SCHEME = "pydrud"
 PREVIEW_AUTHORITY = "preview"
 PREVIEW_PATH = "/connect"

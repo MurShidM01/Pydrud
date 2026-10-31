@@ -270,6 +270,30 @@ def resolve_capability(name: str) -> str:
 # ──────────────────────────────────────────────────────────────────────────
 
 
+def _restrict_to_owner(path: str) -> None:
+    """Best-effort: make a secrets file readable by its owner only.
+
+    POSIX honours chmod. Windows ignores it, so the file would keep
+    inheriting the directory ACL; tighten it explicitly with icacls.
+    """
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    if os.name != "nt":
+        return
+    user = os.environ.get("USERNAME", "")
+    if not user:
+        return
+    try:
+        subprocess.run(
+            ["icacls", path, "/inheritance:r", "/grant:r", f"{user}:F"],
+            capture_output=True, text=True,
+        )
+    except OSError:
+        pass
+
+
 def create_keystore(project_dir: str, *, alias: str = "release",
                     password: str = "", validity: int = 10000,
                     dname: Optional[str] = None,
@@ -297,16 +321,21 @@ def create_keystore(project_dir: str, *, alias: str = "release",
 
     name = dname or (f"CN={os.path.basename(os.path.abspath(project_dir))}, "
                      f"OU=Pydrud, O=Pydrud, C=US")
+    # Never put the password in argv: it is world-readable through ps/WMI.
+    # keytool reads it from the environment instead (JDK 9+ password
+    # modifiers).
     command = [
         keytool, "-genkeypair", "-v",
         "-keystore", keystore_path,
         "-alias", alias,
         "-keyalg", "RSA", "-keysize", "2048",
         "-validity", str(int(validity)),
-        "-storepass", password, "-keypass", password,
+        "-storepass:env", "PYDRUD_STORE_PASS",
+        "-keypass:env", "PYDRUD_STORE_PASS",
         "-dname", name,
     ]
-    result = subprocess.run(command, capture_output=True, text=True)
+    env = dict(os.environ, PYDRUD_STORE_PASS=password)
+    result = subprocess.run(command, capture_output=True, text=True, env=env)
     if result.returncode != 0:
         print(tui.error_badge("keytool failed:"))
         print(tui.neutral_badge((result.stderr.strip().splitlines() or ["unknown"])[-1]))
@@ -320,10 +349,10 @@ def create_keystore(project_dir: str, *, alias: str = "release",
             f"storePassword={password}\n"
             f"keyAlias={alias}\n"
             f"keyPassword={password}\n")
-    os.chmod(properties, 0o600)
+    _restrict_to_owner(properties)
 
     print(tui.ok_badge(f"Keystore     android/{filename}"))
-    print(tui.ok_badge("Properties   android/keystore.properties (chmod 600)"))
+    print(tui.ok_badge("Properties   android/keystore.properties (owner-only)"))
     print(tui.warn_badge(
         "Back up both files safely — losing them prevents future Play updates."))
     print(tui.render_next_steps((

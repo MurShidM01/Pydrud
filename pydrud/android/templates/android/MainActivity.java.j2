@@ -121,6 +121,15 @@ public class {{ app_name }}Activity extends AppCompatActivity {
         bridge = new BridgeService(this, rootView, viewFactory, eventDispatcher);
         eventDispatcher.setBridge(bridge);
 
+        // Hot reload needs the on-device DevServer, which can execute
+        // Python. It is therefore a debug-build facility: a release APK
+        // must never open that port. Python reads this property from
+        // dev_server_allowed() and leaves the server off when it is unset.
+        if ((getApplicationInfo().flags
+                & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+            System.setProperty("pydrud.dev_server", "1");
+        }
+
         // The Python backend is chosen at build time (see PydrudRuntimeFactory);
         // the activity itself never mentions Chaquopy or any other runtime.
         runtime = PydrudRuntimeFactory.create();
