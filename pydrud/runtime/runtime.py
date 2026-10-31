@@ -108,12 +108,18 @@ class RuntimeDescriptor:
 
 
 def resolve_runtime(project_dir: str = ".") -> RuntimeDescriptor:
-    """Read the runtime from *project_dir*/pydrud.toml and return it."""
-    toml_path = os.path.join(os.path.abspath(project_dir), "pydrud.toml")
-    raw: object | None = None
-    if os.path.isfile(toml_path):
-        raw = _read_toml_runtime(toml_path)
-    if raw is None and _has_legacy_android_target(os.path.abspath(project_dir)):
+    """Resolve the runtime for *project_dir*.
+
+    ``pydrud.yaml`` is authoritative: it is the manifest ``pydrud init
+    android`` and ``pydrud sync`` maintain. ``pydrud.toml`` is consulted only
+    for projects generated before that manifest existed, so the two files can
+    no longer disagree about which backend a project builds.
+    """
+    root = os.path.abspath(project_dir)
+    raw: object | None = _read_scalar(os.path.join(root, "pydrud.yaml"), "runtime")
+    if raw is None:
+        raw = _read_scalar(os.path.join(root, "pydrud.toml"), "runtime")
+    if raw is None and _has_legacy_android_target(root):
         # Preserve existing generated APK projects that predate the runtime
         # field. New projects without an explicit runtime still choose Pydash.
         runtime = Runtime.CHAQUOPY
@@ -132,62 +138,75 @@ def _has_legacy_android_target(project_dir: str) -> bool:
     ))
 
 
-def _read_toml_runtime(path: str) -> object | None:
-    """Parse just the ``runtime`` key from a TOML file.
+def _read_scalar(path: str, key: str) -> object | None:
+    """Read one top-level ``key: value`` scalar from YAML or TOML.
 
-    Uses a tiny hand-rolled scanner so we do not add a TOML parser
-    dependency to the core path. Falls back to ``None`` (chaquopy) on
-    any error.
+    Deliberately tiny and dependency-free: this module ships inside the APK,
+    so it must not pull the command-line config reader into the bundle.
     """
     try:
-        with open(path, encoding="utf-8") as fh:
-            for line in fh:
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
                 stripped = line.strip()
-                if stripped.startswith("runtime") and "=" in stripped:
-                    _, _, value = stripped.partition("=")
-                    value = value.strip().strip('"').strip("'")
-                    return value if value else None
+                if not stripped or line[:1].isspace() or stripped[0] in "#[":
+                    continue
+                name, separator, value = line.partition("=")
+                if not separator:
+                    name, separator, value = line.partition(":")
+                if not separator or name.strip() != key:
+                    continue
+                for marker in (" #", "\t#"):
+                    if marker in value:
+                        value = value.split(marker, 1)[0]
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                    value = value[1:-1]
+                return value or None
     except OSError:
         pass
     return None
 
 
 def persist_runtime(project_dir: str, runtime: Runtime) -> None:
-    """Write (or update) the ``runtime`` key in pydrud.toml.
+    """Record *runtime* in ``pydrud.yaml``, falling back to ``pydrud.toml``.
 
-    If the key already exists its value is overwritten; otherwise it is
-    appended below the ``[app]`` section header. Comments and unknown
-    sections are preserved verbatim.
+    The YAML manifest wins when both exist, so that is where the value is
+    kept; the TOML file stays readable but is no longer the source of truth.
     """
-    path = os.path.join(os.path.abspath(project_dir), "pydrud.toml")
-    if not os.path.isfile(path):
-        # New project: write a minimal TOML.
-        with open(path, "w", encoding="utf-8") as fh:
-            fh.write(f'runtime = "{runtime.value}"\n')
+    root = os.path.abspath(project_dir)
+    for filename in ("pydrud.yaml", "pydrud.toml"):
+        path = os.path.join(root, filename)
+        if os.path.isfile(path):
+            _set_scalar(path, "runtime", runtime.value)
+            return
+    with open(os.path.join(root, "pydrud.toml"), "w", encoding="utf-8") as handle:
+        handle.write(f'runtime = "{runtime.value}"\n')
+
+
+def _set_scalar(path: str, key: str, value: str) -> None:
+    """Set a top-level scalar, preserving comments and the file's syntax."""
+    separator = "=" if path.endswith(".toml") else ":"
+    rendered = (f'{key} = "{value}"' if separator == "="
+                else f'{key}: "{value}"')
+    try:
+        with open(path, encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
         return
 
-    with open(path, encoding="utf-8") as fh:
-        lines = fh.readlines()
-
-    # Find the existing runtime= line (if any).
-    for idx, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith("runtime") and "=" in stripped:
-            lines[idx] = f'runtime = "{runtime.value}"\n'
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.writelines(lines)
-            return
-
-    # No existing line — insert after the [app] section header.
-    inserted = False
-    for idx, line in enumerate(lines):
-        if line.strip() == "[app]":
-            lines.insert(idx + 1, f'runtime = "{runtime.value}"\n')
-            inserted = True
+    for index, line in enumerate(lines):
+        if line[:1].isspace():
+            continue
+        name = line.split("=", 1)[0].split(":", 1)[0].strip()
+        if name == key:
+            if line.strip() == rendered:
+                return
+            lines[index] = rendered
             break
-    if not inserted:
-        # Fallback: prepend at top.
-        lines.insert(0, f'runtime = "{runtime.value}"\n')
+    else:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.append(rendered)
 
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.writelines(lines)
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write("\n".join(lines) + "\n")
