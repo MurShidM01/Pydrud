@@ -55,7 +55,10 @@ def _safe_synced_path(sync_dir: str, relative_path: str) -> Optional[str]:
         return None
     if os.path.isabs(normalised):
         return None
-    if os.name == "nt" and ":" in normalised.split("/", 1)[0]:
+    # "C:/app/x.py" is absolute on Windows but just an odd name on POSIX. The
+    # host that supplies the path may be either, so reject the shape on both
+    # instead of letting it land inside the sync directory on Linux.
+    if ":" in normalised.split("/", 1)[0]:
         return None
     root = os.path.abspath(sync_dir)
     candidate = os.path.abspath(os.path.join(root, normalised))
