@@ -24,6 +24,11 @@ import traceback
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, Callable, Optional
 
+#: Smallest interval a Timer waits between ticks (240 Hz). A zero interval
+#: used to busy-spin a core, starving the UI thread; no renderer can use a
+#: higher rate anyway.
+MIN_TIMER_INTERVAL = 1.0 / 240.0
+
 
 class PydrudFuture:
     """Future facade that preserves failures while supporting legacy result semantics."""
@@ -181,7 +186,9 @@ class Timer:
                  kwargs: Optional[dict] = None, *, repeat: bool = False,
                  runner: Optional[TaskRunner] = None,
                  max_errors: Optional[int] = None):
-        self.interval = max(0.0, float(interval))
+        # A zero interval used to busy-spin a core (12k ticks in 0.2s),
+        # starving the UI thread. Clamp to a rate no renderer can use.
+        self.interval = max(MIN_TIMER_INTERVAL, float(interval))
         self.repeat = bool(repeat)
         self._fn = fn
         self._args = args
